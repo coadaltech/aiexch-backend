@@ -9,7 +9,6 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
   .ws("/ws", {
     open(ws) {
       const clientId = `client-${++clientIdCounter}-${Date.now()}`;
-      // Store clientId in both ws.data and WeakMap for reliability
       (ws as any).data = { clientId };
       clientIdMap.set(ws, clientId);
 
@@ -18,9 +17,10 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
           ws.send(data);
         } catch (error) {
           console.error(
-            "[WebSocket Route] Error sending WebSocket message:",
+            `[WebSocket Route] Send failed for ${clientId}:`,
             error
           );
+          throw error;
         }
       });
       console.log(`[WebSocket Route] Client connected: ${clientId}`);
@@ -161,6 +161,8 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
         sportsWebSocketManager.removeClient(clientId);
         clientIdMap.delete(ws);
         console.log(`[WebSocket Route] Client disconnected: ${clientId}`);
+      } else {
+        console.warn('[WebSocket Route] Client closed without clientId');
       }
     },
   })
@@ -169,13 +171,16 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
     open(ws) {
       const clientId = `client-${++clientIdCounter}-${Date.now()}`;
       (ws as any).data = { clientId };
+      clientIdMap.set(ws, clientId);
       sportsWebSocketManager.addClient(clientId, (data) => {
         try {
           ws.send(data);
         } catch (error) {
-          console.error("Error sending WebSocket message:", error);
+          console.error(`[WebSocket Route] Legacy send failed for ${clientId}:`, error);
+          throw error;
         }
       });
+      console.log(`[WebSocket Route] Legacy client connected: ${clientId}`);
     },
     message(ws, message) {
       try {
@@ -208,7 +213,11 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
     close(ws) {
       const clientId = (ws as any).data?.clientId;
       if (clientId) {
+        console.log(`[WebSocket Route] Legacy client disconnecting: ${clientId}`);
         sportsWebSocketManager.removeClient(clientId);
+        console.log(`[WebSocket Route] Legacy client disconnected: ${clientId}`);
+      } else {
+        console.warn('[WebSocket Route] Legacy client closed without clientId');
       }
     },
   });

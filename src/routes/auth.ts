@@ -269,7 +269,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
   )
 
-  .post("/refresh", async ({ cookie, set, db, request, whitelabel }) => {
+  .post("/refresh", async ({ cookie, set, db }) => {
     const refreshToken = cookie.refreshToken?.value as string;
 
     if (!refreshToken) {
@@ -326,8 +326,20 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
   })
   .post("/logout", async ({ cookie, set }) => {
-    cookie.accessToken.remove();
-    cookie.refreshToken.remove();
+    // cookie.accessToken.remove();
+    // cookie.refreshToken.remove();
+
+    cookie.refreshToken.set({
+      value: "",
+      ...cookieConfig.refreshToken,
+      maxAge: 0,
+    });
+
+    cookie.accessToken.set({
+      value: "",
+      ...cookieConfig.accessToken,
+      maxAge: 0,
+    });
     set.status = 200;
     return { success: true, message: "Logged out successfully" };
   })

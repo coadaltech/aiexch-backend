@@ -61,30 +61,38 @@ class SportsWebSocketManager {
 
   removeClient(clientId: string): void {
     const client = this.clients.get(clientId);
-    if (client) {
-      console.log(
-        `[WebSocket Manager] Removing client: ${clientId} with ${client.subscriptions.size} subscriptions`
-      );
-      // Remove client from all subscriptions
-      client.subscriptions.forEach((subKey) => {
-        const subscribers = this.subscriptionMap.get(subKey);
-        if (subscribers) {
-          subscribers.delete(clientId);
-          if (subscribers.size === 0) {
-            // No more subscribers, stop polling
-            const interval = this.intervals.get(subKey);
-            if (interval) {
-              clearInterval(interval);
-              this.intervals.delete(subKey);
-              console.log(
-                `[WebSocket Manager] Stopped polling for subscription: ${subKey}`
-              );
-            }
-            this.subscriptionMap.delete(subKey);
-          }
-        }
-      });
+    if (!client) {
+      console.warn(`[WebSocket Manager] Client ${clientId} not found for removal`);
+      return;
     }
+
+    console.log(
+      `[WebSocket Manager] Removing client: ${clientId} with ${client.subscriptions.size} subscriptions`
+    );
+    
+    // Remove client from all subscriptions
+    client.subscriptions.forEach((subKey) => {
+      const subscribers = this.subscriptionMap.get(subKey);
+      if (subscribers) {
+        subscribers.delete(clientId);
+        console.log(
+          `[WebSocket Manager] Removed ${clientId} from ${subKey}. Remaining: ${subscribers.size}`
+        );
+        if (subscribers.size === 0) {
+          // No more subscribers, stop polling
+          const interval = this.intervals.get(subKey);
+          if (interval) {
+            clearInterval(interval);
+            this.intervals.delete(subKey);
+            console.log(
+              `[WebSocket Manager] Stopped polling for subscription: ${subKey}`
+            );
+          }
+          this.subscriptionMap.delete(subKey);
+        }
+      }
+    });
+    
     this.clients.delete(clientId);
     console.log(
       `[WebSocket Manager] Client removed: ${clientId}. Total clients: ${this.clients.size}`
@@ -437,6 +445,8 @@ class SportsWebSocketManager {
 
           let successCount = 0;
           let errorCount = 0;
+          const deadClients: string[] = [];
+          
           subscribers.forEach((clientId) => {
             const client = this.clients.get(clientId);
             if (client) {
@@ -449,16 +459,19 @@ class SportsWebSocketManager {
                   error
                 );
                 errorCount++;
-                // Remove client if send fails
-                this.removeClient(clientId);
+                deadClients.push(clientId);
               }
             } else {
               console.warn(
                 `[WebSocket Manager] ⚠️ Client ${clientId} not found in clients map`
               );
               errorCount++;
+              deadClients.push(clientId);
             }
           });
+          
+          // Remove dead clients after iteration
+          deadClients.forEach(clientId => this.removeClient(clientId));
           console.log(
             `[WebSocket Manager] ✅ Broadcast complete: ${successCount} sent, ${errorCount} failed`
           );
