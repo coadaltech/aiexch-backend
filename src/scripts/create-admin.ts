@@ -22,7 +22,7 @@ async function createAdminUser() {
     const existingUser = await db
       .select()
       .from(users)
-      .where(eq(users.email, "admin@gmail.com"))
+      .where(eq(users.email, "erfan@gmail.com"))
       .limit(1);
 
     console.log("----1111111");
@@ -43,7 +43,7 @@ async function createAdminUser() {
       .insert(users)
       .values({
         username: "admin",
-        email: "admin@gmail.com",
+        email: "erfan@gmail.com",
         password: hashedPassword,
         role: "admin",
         membership: "platinum",
