@@ -105,6 +105,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     async ({ body, headers, request, set, cookie, db }) => {
       const { email, password } = body;
 
+      console.log('--------------')
+      console.log(body)
+
       const [user] = await db
         .select()
         .from(users)
