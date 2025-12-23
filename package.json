@@ -10,7 +10,8 @@
     "db:down": "docker compose down",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts",
-    "db:migrate:prod": "bun run dist/db/migrate.js"
+    "db:migrate:prod": "bun run dist/db/migrate.js",
+    "create:admin": "bun run src/scripts/create-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",

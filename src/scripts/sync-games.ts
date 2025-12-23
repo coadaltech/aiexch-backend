@@ -214,10 +214,7 @@ async function syncAllGames() {
       const data = await fetchGames(page);
       totalPages = data._meta.pageCount;
       const games = data.items;
-
-      console.log(
-        `Found ${games.length} games. Processing in ${BATCH_SIZE} parallel jobs...`
-      );
+;
 
       await processInBatches(games, BATCH_SIZE, async (game) => {
         totalProcessed++;
