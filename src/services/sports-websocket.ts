@@ -54,57 +54,37 @@ class SportsWebSocketManager {
       subscriptions: new Set(),
       send,
     });
-    console.log(
-      `[WebSocket Manager] Client added: ${clientId}. Total clients: ${this.clients.size}`
-    );
   }
 
   removeClient(clientId: string): void {
     const client = this.clients.get(clientId);
     if (!client) {
-      console.warn(`[WebSocket Manager] Client ${clientId} not found for removal`);
       return;
     }
 
-    console.log(
-      `[WebSocket Manager] Removing client: ${clientId} with ${client.subscriptions.size} subscriptions`
-    );
-    
     // Remove client from all subscriptions
     client.subscriptions.forEach((subKey) => {
       const subscribers = this.subscriptionMap.get(subKey);
       if (subscribers) {
         subscribers.delete(clientId);
-        console.log(
-          `[WebSocket Manager] Removed ${clientId} from ${subKey}. Remaining: ${subscribers.size}`
-        );
         if (subscribers.size === 0) {
           // No more subscribers, stop polling
           const interval = this.intervals.get(subKey);
           if (interval) {
             clearInterval(interval);
             this.intervals.delete(subKey);
-            console.log(
-              `[WebSocket Manager] Stopped polling for subscription: ${subKey}`
-            );
           }
           this.subscriptionMap.delete(subKey);
         }
       }
     });
-    
+
     this.clients.delete(clientId);
-    console.log(
-      `[WebSocket Manager] Client removed: ${clientId}. Total clients: ${this.clients.size}`
-    );
   }
 
   subscribe(clientId: string, subscription: Subscription): void {
     const client = this.clients.get(clientId);
     if (!client) {
-      console.warn(
-        `[WebSocket Manager] Cannot subscribe: client ${clientId} not found`
-      );
       return;
     }
 
@@ -117,29 +97,12 @@ class SportsWebSocketManager {
     }
     this.subscriptionMap.get(subKey)!.add(clientId);
 
-    console.log(
-      `[WebSocket Manager] Client ${clientId} subscribed to ${subKey}. Total subscribers: ${
-        this.subscriptionMap.get(subKey)!.size
-      }`
-    );
-
     // Start polling if not already started
     if (!this.intervals.has(subKey)) {
-      console.log(
-        `[WebSocket Manager] Starting polling for subscription: ${subKey}`
-      );
       // Start polling (don't await, but handle errors)
-      this.startPolling(subKey, subscription).catch((error) => {
-        console.error(
-          `[WebSocket Manager] Failed to start polling for ${subKey}:`,
-          error
-        );
-      });
+      this.startPolling(subKey, subscription).catch((error) => {});
     } else {
       // If polling already exists, immediately send cached data to new subscriber
-      console.log(
-        `[WebSocket Manager] Polling already active for ${subKey}, sending cached data to new subscriber (clientId: ${clientId})`
-      );
       // Use setImmediate to ensure client is fully registered before fetching
       setImmediate(() => {
         this.fetchAndBroadcast(subKey, subscription).catch((error) => {
@@ -155,9 +118,6 @@ class SportsWebSocketManager {
   unsubscribe(clientId: string, subscription: Subscription): void {
     const client = this.clients.get(clientId);
     if (!client) {
-      console.warn(
-        `[WebSocket Manager] Cannot unsubscribe: client ${clientId} not found`
-      );
       return;
     }
 
@@ -167,18 +127,13 @@ class SportsWebSocketManager {
     const subscribers = this.subscriptionMap.get(subKey);
     if (subscribers) {
       subscribers.delete(clientId);
-      console.log(
-        `[WebSocket Manager] Client ${clientId} unsubscribed from ${subKey}. Remaining subscribers: ${subscribers.size}`
-      );
+
       if (subscribers.size === 0) {
         // No more subscribers, stop polling
         const interval = this.intervals.get(subKey);
         if (interval) {
           clearInterval(interval);
           this.intervals.delete(subKey);
-          console.log(
-            `[WebSocket Manager] Stopped polling for subscription: ${subKey} (no subscribers)`
-          );
         }
         this.subscriptionMap.delete(subKey);
       }
@@ -189,9 +144,6 @@ class SportsWebSocketManager {
     subKey: string,
     subscription: Subscription
   ): Promise<void> {
-    console.log(
-      `[WebSocket Manager] Starting polling for ${subKey} (type: ${subscription.type})`
-    );
     // Initial fetch
     await this.fetchAndBroadcast(subKey, subscription);
 
@@ -214,9 +166,6 @@ class SportsWebSocketManager {
     }, pollingInterval);
 
     this.intervals.set(subKey, interval);
-    console.log(
-      `[WebSocket Manager] Polling interval set for ${subKey}: ${pollingInterval}ms (${subscription.type}). Total active subscriptions: ${this.intervals.size}`
-    );
   }
 
   private async fetchAndBroadcast(
@@ -232,18 +181,9 @@ class SportsWebSocketManager {
       const cached = await CacheService.get(cacheKey);
       if (cached && subscription.type !== "series") {
         data = cached;
-        console.log(
-          `[WebSocket Manager] Using cached data for ${subKey} (cached data available)`
-        );
       } else {
         if (subscription.type === "series") {
-          console.log(
-            `[WebSocket Manager] Fetching fresh series data with odds for ${subKey} (always fetch fresh odds)`
-          );
         } else {
-          console.log(
-            `[WebSocket Manager] Fetching fresh data for ${subKey} (type: ${subscription.type})`
-          );
         }
         // Fetch fresh data
         switch (subscription.type) {
@@ -256,9 +196,6 @@ class SportsWebSocketManager {
               // Cache for 2 seconds (matches polling interval)
               await CacheService.set(cacheKey, data, 2);
             } else {
-              console.warn(
-                `[WebSocket Manager] No marketIds provided for odds subscription: ${subKey}`
-              );
               data = []; // Return empty array as fallback
             }
             break;
@@ -271,9 +208,6 @@ class SportsWebSocketManager {
               });
               await CacheService.set(cacheKey, data, 1);
             } else {
-              console.warn(
-                `[WebSocket Manager] No marketIds provided for bookmakers subscription: ${subKey}`
-              );
               data = []; // Return empty array as fallback
             }
             break;
@@ -320,19 +254,12 @@ class SportsWebSocketManager {
             break;
 
           case "series":
-            console.log(
-              `[WebSocket Manager] Fetching series data for eventType ${subscription.eventTypeId}...`
-            );
-
             // Check if series structure (without odds) is cached
             const seriesStructureKey = `series:structure:${subscription.eventTypeId}`;
             let seriesStructure = await CacheService.get(seriesStructureKey);
 
             if (!seriesStructure) {
               // Fetch series structure (series + matches, without odds) and cache it
-              console.log(
-                `[WebSocket Manager] Series structure not cached, fetching...`
-              );
               const seriesList = await SportsService.getSeriesList({
                 eventTypeId: subscription.eventTypeId,
               });
@@ -361,19 +288,10 @@ class SportsWebSocketManager {
                 seriesStructure,
                 4.5 * 60 * 60
               );
-              console.log(
-                `[WebSocket Manager] Cached series structure for eventType ${subscription.eventTypeId} (4.5 hours)`
-              );
             } else {
-              console.log(
-                `[WebSocket Manager] Using cached series structure for eventType ${subscription.eventTypeId}`
-              );
             }
 
             // Always fetch fresh odds for all matches
-            console.log(
-              `[WebSocket Manager] Fetching fresh odds for all matches...`
-            );
             data = await Promise.all(
               (seriesStructure as any[]).map(async (series: any) => {
                 const matchesWithOdds = await Promise.all(
@@ -398,15 +316,7 @@ class SportsWebSocketManager {
             );
 
             const seriesCount = Array.isArray(data) ? data.length : 0;
-            console.log(
-              `[WebSocket Manager] ✅ Fetched series data with fresh odds for eventType ${
-                subscription.eventTypeId
-              }, items: ${seriesCount}, data type: ${typeof data}`
-            );
             if (seriesCount === 0) {
-              console.warn(
-                `[WebSocket Manager] ⚠️ No series data returned for eventType ${subscription.eventTypeId}`
-              );
             }
 
             // Cache the complete data (with fresh odds) for 1 second (matches polling interval)
@@ -433,20 +343,11 @@ class SportsWebSocketManager {
           const dataSize = JSON.stringify(message).length;
           const duration = Date.now() - startTime;
           const dataLength = Array.isArray(data) ? data.length : data ? 1 : 0;
-          console.log(
-            `[WebSocket Manager] 📤 Broadcasting ${
-              subscription.type
-            } update for ${subKey} to ${
-              subscribers.size
-            } client(s), data items: ${dataLength}, size: ${(
-              dataSize / 1024
-            ).toFixed(2)}KB, duration: ${duration}ms`
-          );
 
           let successCount = 0;
           let errorCount = 0;
           const deadClients: string[] = [];
-          
+
           subscribers.forEach((clientId) => {
             const client = this.clients.get(clientId);
             if (client) {
@@ -469,15 +370,14 @@ class SportsWebSocketManager {
               deadClients.push(clientId);
             }
           });
-          
+
           // Remove dead clients after iteration
-          deadClients.forEach(clientId => this.removeClient(clientId));
-          console.log(
-            `[WebSocket Manager] ✅ Broadcast complete: ${successCount} sent, ${errorCount} failed`
-          );
+          deadClients.forEach((clientId) => this.removeClient(clientId));
         } else {
           console.warn(
-            `[WebSocket Manager] ⚠️ No subscribers for ${subKey}, skipping broadcast. Subscription map has key: ${this.subscriptionMap.has(subKey)}, subscribers: ${subscribers ? subscribers.size : 'null'}`
+            `[WebSocket Manager] ⚠️ No subscribers for ${subKey}, skipping broadcast. Subscription map has key: ${this.subscriptionMap.has(
+              subKey
+            )}, subscribers: ${subscribers ? subscribers.size : "null"}`
           );
         }
       } else {

@@ -220,7 +220,6 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       set.status = 200;
       return { success: true, data: userBets };
     } catch (error) {
-      console.error("Bet history error:", error);
       set.status = 200;
       return { success: true, data: [] }; // Return empty array if table doesn't exist
     }

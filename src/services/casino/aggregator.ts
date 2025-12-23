@@ -96,9 +96,9 @@ export const CasinoService = {
     email?: string;
     lobby_data?: string;
   }) {
-    try {
+    try { 
       const encoded = new URLSearchParams(params).toString();
-      console.log("params", params);
+
       const res = await api.post("/games/init", encoded, {
         headers: generateHeaders(params),
       });

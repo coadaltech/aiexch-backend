@@ -74,7 +74,7 @@ export const deleteFile = async (url: string) => {
   });
 
   const result = await s3Client.send(command);
-  console.log("delete result", result);
+
   return { deleted: true };
 };
 

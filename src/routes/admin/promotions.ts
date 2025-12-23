@@ -80,7 +80,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
           .from(promotions)
           .where(eq(promotions.id, parseInt(params.id)));
 
-        console.log("body0", body);
+
 
         if (!current) {
           set.status = 404;
@@ -101,11 +101,11 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
 
         // Upload new image if provided (File object)
         if (body.imageUrl && typeof body.imageUrl !== "string") {
-          console.log("url coming");
+
           const newImageUrl = await uploadFile(body.imageUrl);
           if (current.imageUrl) {
             try {
-              console.log("deleted old file", current.imageUrl);
+
               await deleteFile(current.imageUrl);
             } catch (err) {
               console.warn("Failed to delete old image:", err);

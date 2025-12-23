@@ -121,7 +121,6 @@ async function processGame(game: Game): Promise<string | null> {
     });
 
     if (existing && existing.image) {
-      console.log(`⏩ Skipped (already exists): ${game.name}`);
       return existing.image;
     }
 
@@ -129,8 +128,6 @@ async function processGame(game: Game): Promise<string | null> {
     const url = new URL(game.image);
     const filename = path.basename(url.pathname);
     const provider = sanitize(game.provider);
-
-    console.log(`Processing: ${game.name} (${provider}/${filename})`);
 
     const buffer = await downloadImage(game.image);
     const s3Url = await uploadToS3(buffer, provider, filename);
@@ -164,7 +161,6 @@ async function processGame(game: Game): Promise<string | null> {
         },
       });
 
-    console.log(`✓ Uploaded: ${s3Url}`);
     return s3Url;
   } catch (err) {
     console.error(
@@ -219,7 +215,6 @@ async function syncAllGames() {
       totalPages = data._meta.pageCount;
       const games = data.items;
 
-      console.log(`\nFetching page ${page}/${totalPages}`);
       console.log(
         `Found ${games.length} games. Processing in ${BATCH_SIZE} parallel jobs...`
       );
@@ -234,15 +229,9 @@ async function syncAllGames() {
       page++;
     } while (page <= totalPages);
 
-    console.log("\n=== SYNC COMPLETE ===");
-    console.log(`Total Games Processed: ${totalProcessed}`);
-    console.log(`Success: ${totalSuccess}`);
-    console.log(`Failed: ${totalFailed}`);
-
     // Invalidate all casino games caches after sync
-    console.log("\nClearing cache...");
+
     await CacheService.invalidatePattern("casino:games:*");
-    console.log("✓ Cache cleared");
   } catch (error) {
     console.error(
       "Fatal Error:",

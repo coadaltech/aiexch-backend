@@ -51,7 +51,6 @@ export const publicRoutes = new Elysia({ prefix: "/public" })
         set.status = 200;
         return { success: true, data };
       } catch (err) {
-        console.error(err);
         set.status = 500;
         return { success: false, error: "Failed to fetch banners" };
       }

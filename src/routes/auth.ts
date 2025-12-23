@@ -174,7 +174,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     "/send-otp",
     async ({ body, db, set }) => {
       const { email, type = "password_reset" } = body;
-      console.log(email, type);
+
 
       // For password reset, check if user exists
       if (type === "password_reset") {

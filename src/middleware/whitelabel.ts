@@ -14,7 +14,6 @@ export const whitelabel_middleware = async (request: Request) => {
   });
 
   if (!whitelabel || !whitelabel.config) {
-    // console.error("No whitelabel found for host:", host);
     return { db, whitelabel: undefined };
   }
 

@@ -119,7 +119,7 @@ export const casinoAggregatorRoutes = new Elysia({ prefix: "/casino" })
             currency: "EUR",
           });
 
-          console.log("Lobby data", lobbyData);
+
 
           if (lobbyData.lobby) {
             if (lobbyData.lobby) {

@@ -16,10 +16,6 @@ const getBettingQueue = (): Bull.Queue | null => {
         redis: { port: 6379, host: "127.0.0.1" },
       });
     } catch (error) {
-      console.warn(
-        "Bull queue initialization failed (may not be compatible with Bun):",
-        error
-      );
       return null;
     }
   }
@@ -33,10 +29,6 @@ const getResultQueue = (): Bull.Queue | null => {
         redis: { port: 6379, host: "127.0.0.1" },
       });
     } catch (error) {
-      console.warn(
-        "Bull queue initialization failed (may not be compatible with Bun):",
-        error
-      );
       return null;
     }
   }
@@ -177,7 +169,6 @@ export const addBetToQueue = (betData: BetQueueData) => {
   initializeBettingProcessor();
   const queue = getBettingQueue();
   if (!queue) {
-    console.warn("Queue system not available, processing synchronously");
     // Could add fallback synchronous processing here if needed
     throw new Error("Queue system not available");
   }

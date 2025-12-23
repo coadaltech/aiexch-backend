@@ -181,7 +181,6 @@ export const SportsService = {
           return (a.RunnerName || "").localeCompare(b.RunnerName || "");
         });
 
-      console.log("session data", parsedData);
 
       return parsedData;
     } catch (error) {
@@ -393,7 +392,6 @@ export const SportsService = {
       const data = validateArray<MarketItem>(response.data);
 
       await CacheService.set(cacheKey, data, 4 * 60 * 60); // 4 hours
-      console.log("event ", eventTypeId, eventId);
       return data;
     } catch (error) {
       console.error("getMarkets error:", error);
@@ -611,8 +609,6 @@ export const SportsService = {
         bookmakers,
         sessions,
       ]);
-
-      console.log("sessions", sessionsData);
 
       const data = {
         matchOdds: marketOddsData ?? null,

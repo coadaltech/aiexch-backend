@@ -3,9 +3,7 @@ import { db } from "./index";
 
 async function main() {
   try {
-    console.log("Running migrations...");
     await migrate(db, { migrationsFolder: "./drizzle" });
-    console.log("Migrations completed!");
     process.exit(0);
   } catch (err) {
     console.error("Migration failed:", err);

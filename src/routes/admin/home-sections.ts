@@ -12,12 +12,12 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
   })
   .get("/", async ({ set, db, request }) => {
     try {
-      console.log("[ADMIN-SECTIONS] Host:", request.headers.get("x-whitelabel-domain"));
+
       const sections = await db
         .select()
         .from(homeSections)
         .orderBy(asc(homeSections.order));
-      console.log("[ADMIN-SECTIONS] Found:", sections.length, "sections");
+
       set.status = 200;
       return { success: true, data: sections };
     } catch (error) {
@@ -32,13 +32,13 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
     async ({ params, set, db, request }) => {
       try {
         const { id } = params;
-        console.log("[ADMIN-SECTION-GAMES] Host:", request.headers.get("x-whitelabel-domain"), "Section ID:", id);
+
         const games = await db
           .select()
           .from(homeSectionGames)
           .where(eq(homeSectionGames.sectionId, parseInt(id)))
           .orderBy(asc(homeSectionGames.order));
-        console.log("[ADMIN-SECTION-GAMES] Found:", games.length, "games");
+
         set.status = 200;
         return { success: true, data: games };
       } catch (error) {
@@ -59,7 +59,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
     async ({ body, set, db, request }) => {
       try {
         const { title, subtitle, type, order, status } = body;
-        console.log("[ADMIN-CREATE-SECTION] Host:", request.headers.get("x-whitelabel-domain"), "Title:", title);
+
 
         const [section] = await db
           .insert(homeSections)
@@ -72,7 +72,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
           })
           .returning();
 
-        console.log("[ADMIN-CREATE-SECTION] Created section ID:", section.id);
+
         set.status = 201;
         return { success: true, data: section };
       } catch (error) {
@@ -198,8 +198,8 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
       try {
         const { gameId } = params;
 
-        console.log("PUT /games/:gameId - Received body:", body);
-        console.log("Body keys:", Object.keys(body || {}));
+
+
 
         const [current] = await db
           .select()
@@ -240,7 +240,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
           updateData.image = newImageUrl;
         }
 
-        console.log("Update data:", updateData);
+
 
         const [game] = await db
           .update(homeSectionGames)

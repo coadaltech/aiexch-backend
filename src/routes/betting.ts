@@ -22,7 +22,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   // Place a bet
   .post("/place", async ({ body, store, set }) => {
     try {
-      console.log("Placing bet:", { body, userId: store.id });
+
 
       const {
         matchId,
@@ -44,27 +44,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         type: "back" | "lay";
       };
 
-      console.log("Extracted fields:", {
-        matchId,
-        marketId,
-        selectionId,
-        marketName,
-        runnerName,
-        odds,
-        stake,
-        type,
-      });
-
       // Validate input
       if (!matchId || !marketId || !selectionId || !odds || !stake || !type) {
-        console.log("Validation failed:", {
-          matchId: !!matchId,
-          marketId: !!marketId,
-          selectionId: !!selectionId,
-          odds: !!odds,
-          stake: !!stake,
-          type: !!type,
-        });
         set.status = 400;
         return { success: false, error: "Missing required fields" };
       }
@@ -119,15 +100,10 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return [newBet];
       });
 
-      console.log("Bet created and balance deducted:", bet);
+
       set.status = 201;
       return { success: true, betId: bet.id };
     } catch (error) {
-      console.error("Bet placement failed:", {
-        userId: store.id,
-        error: error instanceof Error ? error.message : "Unknown error",
-        timestamp: new Date().toISOString(),
-      });
       set.status = 500;
       return {
         success: false,
@@ -140,7 +116,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   .get("/my-bets", async ({ store, query, set }) => {
     try {
       const status = (query?.status as string) || "all";
-      console.log("Fetching bets for user:", store.id, "status:", status);
+
 
       let whereClause = eq(bets.userId, store.id);
       if (status !== "all") {
@@ -160,7 +136,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         .limit(limit)
         .offset(offset);
 
-      console.log("Found bets:", userBets.length);
+
       set.status = 200;
       return { success: true, data: userBets };
     } catch (error) {
@@ -222,7 +198,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         results: Record<string, "winner" | "loser">;
       };
 
-      console.log("Declaring results:", { matchId, results });
+
 
       // Add to result processing queue
       await addResultToQueue({ matchId, results });

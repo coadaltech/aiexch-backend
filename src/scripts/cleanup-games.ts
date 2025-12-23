@@ -41,7 +41,6 @@ async function deleteS3Folder(prefix: string) {
 
       await s3Client.send(deleteCommand);
       deleted += objects.length;
-      console.log(`Deleted ${objects.length} objects (Total: ${deleted})`);
     }
 
     continuationToken = listResponse.NextContinuationToken;
@@ -52,18 +51,10 @@ async function deleteS3Folder(prefix: string) {
 
 async function cleanup() {
   try {
-    console.log("Starting cleanup...\n");
-
-    console.log("1. Deleting casino_games table records...");
     // return;
     const result = await db.delete(casino_games);
-    console.log(`✓ Deleted all records from casino_games table\n`);
 
-    console.log("2. Deleting S3 casino-assets/games folder...");
     const deletedCount = await deleteS3Folder("casino-assets/games/");
-    console.log(`✓ Deleted ${deletedCount} files from S3\n`);
-
-    console.log("=== CLEANUP COMPLETE ===");
   } catch (error) {
     console.error(
       "Cleanup failed:",

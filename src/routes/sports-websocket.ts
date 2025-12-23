@@ -16,14 +16,10 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
         try {
           ws.send(data);
         } catch (error) {
-          console.error(
-            `[WebSocket Route] Send failed for ${clientId}:`,
-            error
-          );
           throw error;
         }
       });
-      console.log(`[WebSocket Route] Client connected: ${clientId}`);
+
     },
     message(ws, message) {
       try {
@@ -35,9 +31,6 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
 
         // If clientId is missing, initialize it now
         if (!finalClientId) {
-          console.warn(
-            `[WebSocket Route] Message received but client not initialized. Initializing now...`
-          );
           finalClientId = `client-${++clientIdCounter}-${Date.now()}`;
           (ws as any).data = { clientId: finalClientId };
           clientIdMap.set(ws, finalClientId);
@@ -51,27 +44,10 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
               );
             }
           });
-          console.log(
-            `[WebSocket Route] Client initialized late: ${finalClientId}`
-          );
         }
-
-        console.log(
-          `[WebSocket Route] Received message from ${finalClientId}:`,
-          {
-            action,
-            type,
-            eventTypeId,
-            marketIds: marketIds?.length || 0,
-            matchId,
-          }
-        );
 
         if (action === "subscribe") {
           if (!type || !eventTypeId) {
-            console.warn(
-              `[WebSocket Route] Invalid subscribe request from ${finalClientId}: missing type or eventTypeId`
-            );
             ws.send(
               JSON.stringify({
                 type: "error",
@@ -88,10 +64,6 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
             matchId: matchId || undefined,
           } as any;
 
-          console.log(
-            `[WebSocket Route] Subscribing client ${finalClientId} to:`,
-            subscription
-          );
           sportsWebSocketManager.subscribe(finalClientId, subscription);
           ws.send(
             JSON.stringify({
@@ -117,10 +89,6 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
             matchId: matchId || undefined,
           } as any;
 
-          console.log(
-            `[WebSocket Route] Unsubscribing client ${finalClientId} from:`,
-            subscription
-          );
           sportsWebSocketManager.unsubscribe(finalClientId, subscription);
           ws.send(
             JSON.stringify({
@@ -129,9 +97,6 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
             })
           );
         } else {
-          console.warn(
-            `[WebSocket Route] Unknown action from ${finalClientId}: ${action}`
-          );
           ws.send(
             JSON.stringify({
               type: "error",
@@ -157,12 +122,11 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
     close(ws) {
       const clientId = (ws as any).data?.clientId || clientIdMap.get(ws);
       if (clientId) {
-        console.log(`[WebSocket Route] Client disconnecting: ${clientId}`);
+
         sportsWebSocketManager.removeClient(clientId);
         clientIdMap.delete(ws);
-        console.log(`[WebSocket Route] Client disconnected: ${clientId}`);
+
       } else {
-        console.warn('[WebSocket Route] Client closed without clientId');
       }
     },
   })
@@ -180,7 +144,7 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
           throw error;
         }
       });
-      console.log(`[WebSocket Route] Legacy client connected: ${clientId}`);
+
     },
     message(ws, message) {
       try {
@@ -213,11 +177,10 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
     close(ws) {
       const clientId = (ws as any).data?.clientId;
       if (clientId) {
-        console.log(`[WebSocket Route] Legacy client disconnecting: ${clientId}`);
+
         sportsWebSocketManager.removeClient(clientId);
-        console.log(`[WebSocket Route] Legacy client disconnected: ${clientId}`);
+
       } else {
-        console.warn('[WebSocket Route] Legacy client closed without clientId');
       }
     },
   });
