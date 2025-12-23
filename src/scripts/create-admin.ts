@@ -42,7 +42,7 @@ async function createAdminUser() {
     const result = await db
       .insert(users)
       .values({
-        username: "admin",
+        username: "erfan",
         email: "erfan@gmail.com",
         password: hashedPassword,
         role: "admin",
