@@ -1,28 +1,31 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import * as schema from "../db/schema";
-import { generateHashPassword } from "../utils/password";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
+// Load .env from the root directory FIRST
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, "../../.env") });
 
-const connectionString = process.env.DATABASE_URL!;
-const client = postgres(connectionString, {
-  max: 1,
-  idle_timeout: 20,
-  connect_timeout: 10,
-});
-
-const db = drizzle(client, { schema });
+// Now import after env is loaded
+import { db } from "../db";
+import { users } from "../db/schema";
+import { eq } from "drizzle-orm";
+import { generateHashPassword } from "../utils/password";
 
 async function createAdminUser() {
   try {
     console.log("Creating admin user...");
+    console.log("Creating admin user...ewrwer");
 
     // Check if admin user already exists
-    const existingUser = await client`
-      SELECT id FROM users WHERE email = 'admin@gmail.com'
-    `;
+    const existingUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, "admin@gmail.com"))
+      .limit(1);
+
+    console.log("----1111111");
 
     if (existingUser.length > 0) {
       console.log("Admin user already exists with email admin@gmail.com");
@@ -30,15 +33,32 @@ async function createAdminUser() {
       return;
     }
 
+    console.log("---22222222");
+
     // Hash the password
     const hashedPassword = await generateHashPassword("Admin@123");
 
     // Insert the admin user
-    const result = await client`
-      INSERT INTO users (username, email, password, role, membership, status, balance, email_verified)
-      VALUES ('admin', 'admin@gmail.com', ${hashedPassword}, 'admin', 'platinum', 'active', '0', true)
-      RETURNING id, username, email, role
-    `;
+    const result = await db
+      .insert(users)
+      .values({
+        username: "admin",
+        email: "admin@gmail.com",
+        password: hashedPassword,
+        role: "admin",
+        membership: "platinum",
+        status: "active",
+        balance: "0",
+        emailVerified: true,
+      })
+      .returning({
+        id: users.id,
+        username: users.username,
+        email: users.email,
+        role: users.role,
+      });
+
+    console.log("---33333");
 
     console.log("Admin user created successfully!");
     console.log("User ID:", result[0].id);
@@ -47,8 +67,6 @@ async function createAdminUser() {
     console.log("Role:", result[0].role);
   } catch (error) {
     console.error("Error creating admin user:", error);
-  } finally {
-    await client.end();
   }
 }
 
