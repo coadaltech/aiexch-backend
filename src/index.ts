@@ -23,59 +23,17 @@ initializeServices();
 const port = Number(process.env.PORT || 3001);
 
 const app = new Elysia()
-  .onRequest(({ request, set }) => {
-    const url = request.url;
-    const method = request.method;
-    console.log(`GLOBAL REQUEST: ${method} ${url}`);
-
-    // Track route patterns
-    if (url.includes("/admin")) {
-      console.log(`GLOBAL REQUEST: Admin route detected - ${method} ${url}`);
-      console.log(
-        `GLOBAL REQUEST: Headers:`,
-        Object.fromEntries(request.headers.entries())
-      );
-    } else if (url.includes("/auth")) {
-      console.log(`GLOBAL REQUEST: Auth route - ${method} ${url}`);
-    } else if (url.includes("/profile")) {
-      console.log(`GLOBAL REQUEST: Profile route - ${method} ${url}`);
-    } else if (url.includes("/public")) {
-      console.log(`GLOBAL REQUEST: Public route - ${method} ${url}`);
-    } else if (url.includes("/casino")) {
-      console.log(`GLOBAL REQUEST: Casino route - ${method} ${url}`);
-    } else if (url.includes("/sports")) {
-      console.log(`GLOBAL REQUEST: Sports route - ${method} ${url}`);
-    } else {
-      console.log(`GLOBAL REQUEST: Other route - ${method} ${url}`);
-    }
-  })
   .use(
     cors({
-      origin: (request) => {
-        const origin = request.headers.get("origin");
-        console.log(`CORS: Origin check - ${origin}`);
-        const allowedOrigins = [
-          "http://localhost:3000",
-          "https://aiexch-two.vercel.app",
-          "https://aiexch.com",
-          "https://www.aiexch.com",
-        ];
-
-        if (!origin || allowedOrigins.includes(origin)) {
-          console.log(`CORS: Origin allowed - ${origin}`);
-          return true;
-        }
-
-        console.log(`CORS: Origin BLOCKED - ${origin}`);
-        return false;
-      },
+      origin: [
+        "http://localhost:3000",
+        "https://aiexch-two.vercel.app",
+        "https://aiexch.com",
+        "https://www.aiexch.com",
+      ],
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain"],
       credentials: true,
-      preFlight: (req: any) => {
-        console.log(`CORS: Pre-flight request - ${req.method} ${req.url}`);
-        return true;
-      },
     })
   )
   .use(cookie())

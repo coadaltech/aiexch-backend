@@ -23,43 +23,16 @@ export const adminRoutes = (app: Elysia) =>
       .state({ id: 0, role: "" })
       .guard({
         beforeHandle({ cookie, set, store }) {
-          console.log(`ADMIN ROUTE ACCESS: Attempting to access admin routes`);
-          console.log(
-            `ADMIN ROUTE ACCESS: Checking authentication and authorization...`
-          );
-
           const state_result = app_middleware({
             cookie,
             allowed: ["admin"],
           });
-
-          console.log(
-            `ADMIN ROUTE ACCESS: Middleware result - Success: ${state_result.success}, Code: ${state_result.code}`
-          );
-
-          if (!state_result.success) {
-            console.log(`ADMIN ROUTE ACCESS DENIED: ${state_result.message}`);
-            console.log(
-              `ADMIN ROUTE ACCESS DENIED: User cannot access admin routes`
-            );
-          } else {
-            console.log(
-              `ADMIN ROUTE ACCESS GRANTED: Admin user authenticated successfully`
-            );
-            console.log(
-              `ADMIN ROUTE ACCESS: User ID: ${state_result.data?.id}, Role: ${state_result.data?.role}`
-            );
-          }
 
           set.status = state_result.code;
           if (!state_result.data) return state_result;
 
           store.id = state_result.data.id;
           store.role = state_result.data.role;
-
-          console.log(
-            `ADMIN ROUTE ACCESS: User ${store.id} (role: ${store.role}) can now access admin endpoints`
-          );
         },
       })
       .use(promotionsRoutes)
@@ -78,18 +51,4 @@ export const adminRoutes = (app: Elysia) =>
       .use(withdrawalMethodsRoutes)
       .use(domainsRoutes)
       .use(casinoGamesAdminRoutes)
-      .get("/test", ({ store }) => {
-        console.log(
-          `ADMIN TEST ENDPOINT: Accessed by user ${store.id} (role: ${store.role})`
-        );
-        return {
-          success: true,
-          message: "Admin routes are working!",
-          user: {
-            id: store.id,
-            role: store.role,
-            timestamp: new Date().toISOString(),
-          },
-        };
-      })
   );
