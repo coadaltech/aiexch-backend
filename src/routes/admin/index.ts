@@ -78,4 +78,18 @@ export const adminRoutes = (app: Elysia) =>
       .use(withdrawalMethodsRoutes)
       .use(domainsRoutes)
       .use(casinoGamesAdminRoutes)
+      .get("/test", ({ store }) => {
+        console.log(
+          `ADMIN TEST ENDPOINT: Accessed by user ${store.id} (role: ${store.role})`
+        );
+        return {
+          success: true,
+          message: "Admin routes are working!",
+          user: {
+            id: store.id,
+            role: store.role,
+            timestamp: new Date().toISOString(),
+          },
+        };
+      })
   );

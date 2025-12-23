@@ -28,13 +28,25 @@ const app = new Elysia()
     const method = request.method;
     console.log(`GLOBAL REQUEST: ${method} ${url}`);
 
-    // Check if this is an admin route
+    // Track route patterns
     if (url.includes("/admin")) {
       console.log(`GLOBAL REQUEST: Admin route detected - ${method} ${url}`);
       console.log(
         `GLOBAL REQUEST: Headers:`,
         Object.fromEntries(request.headers.entries())
       );
+    } else if (url.includes("/auth")) {
+      console.log(`GLOBAL REQUEST: Auth route - ${method} ${url}`);
+    } else if (url.includes("/profile")) {
+      console.log(`GLOBAL REQUEST: Profile route - ${method} ${url}`);
+    } else if (url.includes("/public")) {
+      console.log(`GLOBAL REQUEST: Public route - ${method} ${url}`);
+    } else if (url.includes("/casino")) {
+      console.log(`GLOBAL REQUEST: Casino route - ${method} ${url}`);
+    } else if (url.includes("/sports")) {
+      console.log(`GLOBAL REQUEST: Sports route - ${method} ${url}`);
+    } else {
+      console.log(`GLOBAL REQUEST: Other route - ${method} ${url}`);
     }
   })
   .use(
