@@ -50,6 +50,7 @@ export const CasinoService = {
       if (page) params.page = page;
       if (per_page) params.per_page = per_page;
 
+      console.log(`Making API request for page ${page}...`);
       const res = await api.get("/games", {
         params,
         headers: generateHeaders(params),
@@ -58,7 +59,11 @@ export const CasinoService = {
       await CacheService.set(cacheKey, res.data, 60 * 60);
       return res.data;
     } catch (err: any) {
-      console.error("getGames error:");
+      console.error("getGames error:", err?.message || err);
+      if (err?.response) {
+        console.error("Response status:", err.response.status);
+        console.error("Response data:", err.response.data);
+      }
       return { success: false, error: "GET_GAMES_FAILED" };
     }
   },
@@ -96,7 +101,7 @@ export const CasinoService = {
     email?: string;
     lobby_data?: string;
   }) {
-    try { 
+    try {
       const encoded = new URLSearchParams(params).toString();
 
       const res = await api.post("/games/init", encoded, {
@@ -141,9 +146,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error(  
-        "getFreespinBets error:"
-      );
+      console.error("getFreespinBets error:");
       return { success: false, error: "GET_FREESPIN_BETS_FAILED" };
     }
   },
@@ -208,9 +211,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error(
-          "getFreespinLimits error:"
-      );
+      console.error("getFreespinLimits error:");
       return { success: false, error: "GET_FREESPIN_LIMITS_FAILED" };
     }
   },

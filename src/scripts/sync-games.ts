@@ -122,7 +122,7 @@ async function processGame(game: Game): Promise<string | null> {
     });
 
     if (existing && existing.image) {
-      console.log('skipping data already exist')
+      console.log("skipping data already exist");
       return existing.image;
     }
 
@@ -165,9 +165,7 @@ async function processGame(game: Game): Promise<string | null> {
 
     return s3Url;
   } catch (err) {
-    console.error(
-      `✗ Failed for ${game.name}:`
-    );
+    console.error(`✗ Failed for ${game.name}:`);
     return null;
   }
 }
@@ -177,7 +175,15 @@ async function processGame(game: Game): Promise<string | null> {
 // ---------------------
 
 async function fetchGames(page: number, perPage = 50): Promise<ApiResponse> {
-  return await CasinoService.getGames("tags", page, perPage);
+  try {
+    console.log(`Fetching games for page ${page}...`);
+    const result = await CasinoService.getGames("tags", page, perPage);
+    console.log(`Page ${page} fetched successfully`);
+    return result;
+  } catch (error) {
+    console.error(`Failed to fetch page ${page}:`, error);
+    throw error;
+  }
 }
 
 // ---------------------
@@ -211,13 +217,24 @@ async function syncAllGames() {
 
   try {
     // 1. Fetch first page
-    let page = 300;
+    let page = 301;
     let totalPages = 1;
 
     do {
       const data = await fetchGames(page);
-      totalPages = data._meta.pageCount;
+
+      // Validate response structure
+      if (!data || !data.items || !Array.isArray(data.items)) {
+        console.error(`Invalid response for page ${page}:`, data);
+        console.error("Stopping sync due to invalid API response");
+        break;
+      }
+
+      totalPages = data._meta?.pageCount || totalPages;
       const games = data.items;
+
+      console.log(`Processing ${games.length} games from page ${page}`);
+
       await processInBatches(games, BATCH_SIZE, async (game) => {
         totalProcessed++;
         const s3Url = await processGame(game);
@@ -226,15 +243,14 @@ async function syncAllGames() {
       });
 
       page++;
-      console.log('page no.',page)
+      console.log("page no.", page);
     } while (page <= totalPages);
 
     // Invalidate all casino games caches after sync
 
     await CacheService.invalidatePattern("casino:games:*");
   } catch (error) {
-    console.error(
-      "Fatal Error:")
+    console.error("Fatal Error:");
     process.exit(1);
   }
 }
