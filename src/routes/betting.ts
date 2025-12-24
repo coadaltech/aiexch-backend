@@ -140,10 +140,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       set.status = 200;
       return { success: true, data: userBets };
     } catch (error) {
-      console.error("Failed to fetch bets:", {
-        userId: store.id,
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
+      console.error("Failed to fetch bets:");
       set.status = 500;
       return { success: false, error: "Failed to fetch bets" };
     }
@@ -180,11 +177,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       set.status = 200;
       return { success: true };
     } catch (error) {
-      console.error("Failed to cancel bet:", {
-        userId: store.id,
-        betId: params.betId,
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
+      console.error("Failed to cancel bet:");
       set.status = 500;
       return { success: false, error: "Failed to cancel bet" };
     }
@@ -206,10 +199,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       set.status = 200;
       return { success: true, message: "Results queued for processing" };
     } catch (error) {
-      console.error("Failed to declare results:", {
-        matchId: (body as any)?.matchId,
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
+      console.error("Failed to declare results:");
       set.status = 500;
       return { success: false, error: "Failed to declare results" };
     }
@@ -227,10 +217,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       set.status = 200;
       return { success: true, balance: userData[0]?.balance || 0 };
     } catch (error) {
-      console.error("Failed to fetch balance:", {
-        userId: store.id,
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
+      console.error("Failed to fetch balance:");
       set.status = 500;
       return { success: false, error: "Failed to fetch balance" };
     }

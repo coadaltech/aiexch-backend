@@ -57,8 +57,7 @@ async function cleanup() {
     const deletedCount = await deleteS3Folder("casino-assets/games/");
   } catch (error) {
     console.error(
-      "Cleanup failed:",
-      error instanceof Error ? error.message : error
+      "Cleanup failed:"
     );
     process.exit(1);
   }

@@ -43,7 +43,7 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
             try {
               await deleteFile(existing.logo);
             } catch (err) {
-              console.warn("Failed to delete old logo:", err);
+              console.warn("Failed to delete old logo:");
             }
           }
         }
@@ -56,7 +56,7 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
             try {
               await deleteFile(existing.favicon);
             } catch (err) {
-              console.warn("Failed to delete old favicon:", err);
+              console.warn("Failed to delete old favicon:");
             }
           }
         }
@@ -69,7 +69,7 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
             try {
               await deleteFile(existing.authImage);
             } catch (err) {
-              console.warn("Failed to delete old authImage:", err);
+              console.warn("Failed to delete old authImage:");
             }
           }
         }
@@ -91,7 +91,7 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
           return { success: true, data: created };
         }
       } catch (error) {
-        console.error("Settings update error:", error);
+        console.error("Settings update error:");
         set.status = 500;
         return { success: false, error: "Failed to update settings" };
       }

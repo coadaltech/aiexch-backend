@@ -40,7 +40,6 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
             } catch (error) {
               console.error(
                 "[WebSocket Route] Error sending WebSocket message:",
-                error
               );
             }
           });
@@ -108,8 +107,7 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
         console.error(
           `[WebSocket Route] Message parsing error from ${
             (ws as any).data?.clientId || "unknown"
-          }:`,
-          error
+          }:`
         );
         ws.send(
           JSON.stringify({
@@ -140,7 +138,7 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
         try {
           ws.send(data);
         } catch (error) {
-          console.error(`[WebSocket Route] Legacy send failed for ${clientId}:`, error);
+          console.error(`[WebSocket Route] Legacy send failed for ${clientId}:`);
           throw error;
         }
       });
@@ -171,7 +169,7 @@ export const sportsWebSocketRoutes = new Elysia({ prefix: "/sports" })
           sportsWebSocketManager.unsubscribe(clientId, subscription);
         }
       } catch (error) {
-        console.error("WebSocket message error:", error);
+        console.error("WebSocket message error:");
       }
     },
     close(ws) {

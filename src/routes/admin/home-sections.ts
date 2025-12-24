@@ -21,7 +21,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
       set.status = 200;
       return { success: true, data: sections };
     } catch (error) {
-      console.error("[ADMIN-SECTIONS] Error:", error);
+      console.error("[ADMIN-SECTIONS] Error:");
       set.status = 500;
       return { success: false, message: "Failed to fetch home sections" };
     }
@@ -42,7 +42,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         set.status = 200;
         return { success: true, data: games };
       } catch (error) {
-        console.error("[ADMIN-SECTION-GAMES] Error:", error);
+        console.error("[ADMIN-SECTION-GAMES] Error:");
         set.status = 500;
         return { success: false, message: "Failed to fetch section games" };
       }
@@ -76,7 +76,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         set.status = 201;
         return { success: true, data: section };
       } catch (error) {
-        console.error("[ADMIN-CREATE-SECTION] Error:", error);
+        console.error("[ADMIN-CREATE-SECTION] Error:");
         set.status = 500;
         return { success: false, message: "Failed to create home section" };
       }
@@ -234,7 +234,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
             try {
               await deleteFile(current.image);
             } catch (err) {
-              console.warn("Failed to delete old image:", err);
+              console.warn("Failed to delete old image:");
             }
           }
           updateData.image = newImageUrl;
@@ -251,7 +251,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         set.status = 200;
         return { success: true, data: game };
       } catch (error) {
-        console.error("PUT /games/:gameId error:", error);
+        console.error("PUT /games/:gameId error:");
         set.status = 500;
         return { success: false, message: "Failed to update game" };
       }
@@ -308,7 +308,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
           try {
             await deleteFile(current.image);
           } catch (err) {
-            console.warn("Failed to delete image:", err);
+            console.warn("Failed to delete image:");
           }
         }
 

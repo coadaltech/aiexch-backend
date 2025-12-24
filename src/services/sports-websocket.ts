@@ -108,7 +108,7 @@ class SportsWebSocketManager {
         this.fetchAndBroadcast(subKey, subscription).catch((error) => {
           console.error(
             `[WebSocket Manager] Failed to fetch cached data for ${subKey}:`,
-            error
+            
           );
         });
       });
@@ -357,7 +357,7 @@ class SportsWebSocketManager {
               } catch (error) {
                 console.error(
                   `[WebSocket Manager] ❌ Error sending to client ${clientId}:`,
-                  error
+                  
                 );
                 errorCount++;
                 deadClients.push(clientId);
@@ -388,7 +388,7 @@ class SportsWebSocketManager {
     } catch (error) {
       console.error(
         `[WebSocket Manager] Error fetching data for ${subKey}:`,
-        error
+        
       );
     }
   }

@@ -119,7 +119,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
             try {
               await deleteFile(existing.imageUrl);
             } catch (error) {
-              console.warn("Failed to delete old popup:", error);
+              console.warn("Failed to delete old popup:");
             }
           }
           updateData.imageUrl = newImageUrl;
@@ -163,7 +163,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
       try {
         await deleteFile(existing.imageUrl);
       } catch (error) {
-        console.warn("Failed to delete popup image:", error);
+        console.warn("Failed to delete popup image:");
       }
     }
 

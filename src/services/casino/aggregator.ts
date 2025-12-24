@@ -58,7 +58,7 @@ export const CasinoService = {
       await CacheService.set(cacheKey, res.data, 60 * 60);
       return res.data;
     } catch (err: any) {
-      console.error("getGames error:", err.response?.data || err.message);
+      console.error("getGames error:");
       return { success: false, error: "GET_GAMES_FAILED" };
     }
   },
@@ -80,7 +80,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("getLobby error:", err.response?.data || err.message);
+      console.error("getLobby error:");
       return { success: false, error: "GET_LOBBY_FAILED" };
     }
   },
@@ -104,7 +104,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("initGame error:", err.response?.data || err.message);
+      console.error("initGame error:");
       return { success: false, error: "INIT_GAME_FAILED" };
     }
   },
@@ -121,7 +121,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("initDemo error:", err.response?.data || err.message);
+      console.error("initDemo error:");
       return { success: false, error: "INIT_DEMO_FAILED" };
     }
   },
@@ -141,9 +141,8 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error(
-        "getFreespinBets error:",
-        err.response?.data || err.message
+      console.error(  
+        "getFreespinBets error:"
       );
       return { success: false, error: "GET_FREESPIN_BETS_FAILED" };
     }
@@ -157,7 +156,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("setFreespin error:", err.response?.data || err.message);
+      console.error("setFreespin error:");
       return { success: false, error: "SET_FREESPIN_FAILED" };
     }
   },
@@ -171,7 +170,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("getFreespin error:", err.response?.data || err.message);
+      console.error("getFreespin error:");
       return { success: false, error: "GET_FREESPIN_FAILED" };
     }
   },
@@ -185,7 +184,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("cancelFreespin error:", err.response?.data || err.message);
+      console.error("cancelFreespin error:");
       return { success: false, error: "CANCEL_FREESPIN_FAILED" };
     }
   },
@@ -197,7 +196,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("getLimits error:", err.response?.data || err.message);
+      console.error("getLimits error:");
       return { success: false, error: "GET_LIMITS_FAILED" };
     }
   },
@@ -210,8 +209,7 @@ export const CasinoService = {
       return res.data;
     } catch (err: any) {
       console.error(
-        "getFreespinLimits error:",
-        err.response?.data || err.message
+          "getFreespinLimits error:"
       );
       return { success: false, error: "GET_FREESPIN_LIMITS_FAILED" };
     }
@@ -224,7 +222,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("getJackpots error:", err.response?.data || err.message);
+      console.error("getJackpots error:");
       return { success: false, error: "GET_JACKPOTS_FAILED" };
     }
   },
@@ -241,7 +239,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("balanceNotify error:", err.response?.data || err.message);
+      console.error("balanceNotify error:");
       return { success: false, error: "BALANCE_NOTIFY_FAILED" };
     }
   },
@@ -253,7 +251,7 @@ export const CasinoService = {
       });
       return res.data;
     } catch (err: any) {
-      console.error("selfValidate error:", err.response?.data || err.message);
+      console.error("selfValidate error:");
       return { success: false, error: "SELF_VALIDATE_FAILED" };
     }
   },
@@ -276,7 +274,7 @@ export const CasinoService = {
       await CacheService.set(cacheKey, res.data, 60 * 60);
       return res.data;
     } catch (err: any) {
-      console.error("getGameTags error:", err.response?.data || err.message);
+      console.error("getGameTags error:");
       return { success: false, error: "GET_GAME_TAGS_FAILED" };
     }
   },

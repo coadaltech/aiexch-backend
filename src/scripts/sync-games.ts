@@ -164,8 +164,7 @@ async function processGame(game: Game): Promise<string | null> {
     return s3Url;
   } catch (err) {
     console.error(
-      `✗ Failed for ${game.name}:`,
-      err instanceof Error ? err.message : err
+      `✗ Failed for ${game.name}:`
     );
     return null;
   }
@@ -214,8 +213,6 @@ async function syncAllGames() {
       const data = await fetchGames(page);
       totalPages = data._meta.pageCount;
       const games = data.items;
-;
-
       await processInBatches(games, BATCH_SIZE, async (game) => {
         totalProcessed++;
         const s3Url = await processGame(game);
@@ -231,9 +228,7 @@ async function syncAllGames() {
     await CacheService.invalidatePattern("casino:games:*");
   } catch (error) {
     console.error(
-      "Fatal Error:",
-      error instanceof Error ? error.message : error
-    );
+      "Fatal Error:")
     process.exit(1);
   }
 }

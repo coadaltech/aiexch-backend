@@ -122,7 +122,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
           try {
             await deleteFile(existing.logo);
           } catch (err) {
-            console.warn("Failed to delete old logo:", err);
+            console.warn("Failed to delete old logo:");
           }
         }
       } else if (body.logoUrl) {
@@ -136,7 +136,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
           try {
             await deleteFile(existing.favicon);
           } catch (err) {
-            console.warn("Failed to delete old favicon:", err);
+            console.warn("Failed to delete old favicon:");
           }
         }
       } else if (body.faviconUrl) {
@@ -200,14 +200,14 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         try {
           await deleteFile(existing.logo);
         } catch (err) {
-          console.warn("Failed to delete logo:", err);
+          console.warn("Failed to delete logo:");
         }
       }
       if (existing.favicon) {
         try {
           await deleteFile(existing.favicon);
         } catch (err) {
-          console.warn("Failed to delete favicon:", err);
+          console.warn("Failed to delete favicon:");
         }
       }
     }

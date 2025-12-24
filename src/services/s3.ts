@@ -64,7 +64,7 @@ export const deleteFile = async (url: string) => {
   const key = url.split(".amazonaws.com/")[1];
 
   if (!key) {
-    console.warn("Could not extract S3 key from URL:", key);
+    // console.warn("Could not extract S3 key from URL:");
     return;
   }
 

@@ -83,7 +83,7 @@ const initializeBettingProcessor = () => {
               .where(eq(bets.id, parseInt(betId)));
           });
         } catch (refundError) {
-          console.error("Failed to cancel bet:", refundError);
+          console.error("Failed to cancel bet:");
         }
 
         throw error;
@@ -91,7 +91,7 @@ const initializeBettingProcessor = () => {
     });
     bettingProcessorInitialized = true;
   } catch (error) {
-    console.warn("Failed to initialize betting processor:", error);
+    console.warn("Failed to initialize betting processor:");
   }
 };
 
@@ -149,7 +149,7 @@ const initializeResultProcessor = () => {
     });
     resultProcessorInitialized = true;
   } catch (error) {
-    console.warn("Failed to initialize result processor:", error);
+    console.warn("Failed to initialize result processor:");
   }
 };
 
@@ -183,9 +183,9 @@ export const addResultToQueue = (resultData: ResultQueueData) => {
   const queue = getResultQueue();
   if (!queue) {
     console.warn("Queue system not available");
-    throw new Error("Queue system not available");
+    // throw new Error("Queue system not available");
   }
-  return queue.add("declare-result", resultData, {
+  return queue?.add("declare-result", resultData, {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },
   });

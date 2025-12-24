@@ -94,7 +94,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
           try {
             await deleteFile(current.imageUrl);
           } catch (err) {
-            console.warn("Failed to delete image:", err);
+            console.warn("Failed to delete image:");
           }
           updateData.imageUrl = null;
         }
@@ -108,7 +108,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
 
               await deleteFile(current.imageUrl);
             } catch (err) {
-              console.warn("Failed to delete old image:", err);
+              console.warn("Failed to delete old image:");
             }
           }
           updateData.imageUrl = newImageUrl;
@@ -170,7 +170,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
       try {
         await deleteFile(current.imageUrl);
       } catch (err) {
-        console.warn("Failed to delete image:", err);
+        console.warn("Failed to delete image:");
       }
     }
 

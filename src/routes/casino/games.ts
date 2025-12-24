@@ -89,7 +89,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
           },
         };
       } catch (error) {
-        console.error("Error fetching casino games:", error);
+        console.error("Error fetching casino games:");
         set.status = 500;
         return { success: false, error: "Failed to fetch casino games" };
       }
@@ -124,7 +124,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
       set.status = 200;
       return { success: true, data: game };
     } catch (error) {
-      console.error("Error fetching casino game:", error);
+      console.error("Error fetching casino game:");
       set.status = 500;
       return { success: false, error: "Failed to fetch casino game" };
     }
@@ -148,7 +148,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
         set.status = 200;
         return { success: true, data: game };
       } catch (error) {
-        console.error("Error fetching casino game:", error);
+        console.error("Error fetching casino game:");
         set.status = 500;
         return { success: false, error: "Failed to fetch casino game" };
       }
@@ -183,7 +183,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
         set.status = 201;
         return { success: true, data };
       } catch (error) {
-        console.error("Error creating casino game:", error);
+        console.error("Error creating casino game:");
         set.status = 500;
         return { success: false, error: "Failed to create casino game" };
       }
@@ -250,7 +250,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
         set.status = 200;
         return { success: true, data };
       } catch (error) {
-        console.error("Error updating casino game:", error);
+        console.error("Error updating casino game:");
         set.status = 500;
         return { success: false, error: "Failed to update casino game" };
       }
@@ -305,7 +305,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
       set.status = 200;
       return { success: true, data: providerList };
     } catch (error) {
-      console.error("Error fetching providers:", error);
+      console.error("Error fetching providers:");
       set.status = 500;
       return { success: false, error: "Failed to fetch providers" };
     }
@@ -362,7 +362,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
       set.status = 200;
       return { success: true, message: "Casino game deleted successfully" };
     } catch (error) {
-      console.error("Error deleting casino game:", error);
+      console.error("Error deleting casino game:");
       set.status = 500;
       return { success: false, error: "Failed to delete casino game" };
     }
@@ -413,7 +413,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
       set.status = 200;
       return { success: true, data };
     } catch (error) {
-      console.error("Error fetching providers and types:", error);
+      console.error("Error fetching providers and types:");
       set.status = 500;
       return { success: false, error: "Failed to fetch providers and types" };
     }

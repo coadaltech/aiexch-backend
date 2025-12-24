@@ -28,7 +28,7 @@ export const SportsService = {
       const data = validateArray<Sports>(response.data);
       return data;
     } catch (error: any) {
-      console.error("getSports error:", error.response?.status, error.message);
+      console.error("getSports error:");
       return [];
     }
   },
@@ -68,7 +68,7 @@ export const SportsService = {
       );
       return results.flat();
     } catch (error) {
-      console.error("getOdds error:", error);
+      console.error("getOdds error:");
       return [];
     }
   },
@@ -107,7 +107,7 @@ export const SportsService = {
       );
       return results.flat();
     } catch (error) {
-      console.error("getBookmarkOdds error:", error);
+      console.error("getBookmarkOdds error:");
       return [];
     }
   },
@@ -127,7 +127,7 @@ export const SportsService = {
       const data = validateArray<BookmakerItem>(response.data);
       return data;
     } catch (error) {
-      console.error("getBookmakers error:", error);
+      console.error("getBookmakers error:");
       return [];
     }
   },
@@ -235,7 +235,7 @@ export const SportsService = {
       );
       return validateArray<ScoreMatches>(response.data);
     } catch (error) {
-      console.error("getScoreMatchesList error:", error);
+      console.error("getScoreMatchesList error:");
       return [];
     }
   },
@@ -255,7 +255,7 @@ export const SportsService = {
       const data = validateArray<Odds>(response.data);
       return data;
     } catch (error) {
-      console.error("getOddsResults error:", error);
+      console.error("getOddsResults error:");
       return [];
     }
   },
@@ -275,7 +275,7 @@ export const SportsService = {
       const data = validateArray<MatchResult>(response.data);
       return data;
     } catch (error) {
-      console.error("getBookmakersResults error:", error);
+      console.error("getBookmakersResults error:");
       return [];
     }
   },
@@ -295,7 +295,7 @@ export const SportsService = {
       const data = validateArray<MatchResult>(response.data);
       return data;
     } catch (error) {
-      console.error("getSessionResults error:", error);
+      console.error("getSessionResults error:");
       return [];
     }
   },
@@ -315,7 +315,7 @@ export const SportsService = {
       const data = validateArray<MatchResult>(response.data);
       return data;
     } catch (error) {
-      console.error("getFancyResults error:", error);
+      console.error("getFancyResults error:");
       return [];
     }
   },
@@ -333,13 +333,7 @@ export const SportsService = {
       await CacheService.set(cacheKey, data, 3 * 60 * 60); // 3 hours
       return data;
     } catch (error: any) {
-      console.error("DEBUG - getSeriesList error:", {
-        baseURL: api.defaults.baseURL,
-        eventTypeId,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        message: error.message,
-      });
+      console.error("DEBUG - getSeriesList error:");
       return [];
     }
   },
@@ -365,9 +359,7 @@ export const SportsService = {
       return data;
     } catch (error: any) {
       console.error(
-        "getMatchList error:",
-        error.response?.status,
-        error.message
+        "getMatchList error:"
       );
       return [];
     }
@@ -394,7 +386,7 @@ export const SportsService = {
       await CacheService.set(cacheKey, data, 4 * 60 * 60); // 4 hours
       return data;
     } catch (error) {
-      console.error("getMarkets error:", error);
+      console.error("getMarkets error:");
       return [];
     }
   },
@@ -419,7 +411,7 @@ export const SportsService = {
       await CacheService.set(cacheKey, data, 4 * 60 * 60); // 4 hours
       return data;
     } catch (error) {
-      console.error("getBookmakersList error:", error);
+      console.error("getBookmakersList error:");
       return [];
     }
   },
@@ -465,7 +457,7 @@ export const SportsService = {
         return aSrNo - bSrNo;
       });
     } catch (error) {
-      console.error("WithOdds error:", error);
+      console.error("WithOdds error:");
       return [];
     }
   },
@@ -508,7 +500,7 @@ export const SportsService = {
 
       return marketsWithOdds;
     } catch (error) {
-      console.error("getBookmakersWithOdds error:", error);
+      console.error("getBookmakersWithOdds error:");
       return [];
     }
   },
@@ -557,7 +549,7 @@ export const SportsService = {
 
       return seriesWithMatchesAndOdds;
     } catch (error) {
-      console.log("Series With Matches fetch failed", error);
+      console.log("Series With Matches fetch failed");
       return [];
     }
   },

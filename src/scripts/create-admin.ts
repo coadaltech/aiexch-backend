@@ -66,7 +66,7 @@ async function createAdminUser() {
     console.log("Email:", result[0].email);
     console.log("Role:", result[0].role);
   } catch (error) {
-    console.error("Error creating admin user:", error);
+    console.error("Error creating admin user:");
   }
 }
 

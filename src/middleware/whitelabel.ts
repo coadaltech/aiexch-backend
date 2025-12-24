@@ -25,7 +25,7 @@ export const whitelabel_middleware = async (request: Request) => {
       whitelabel: { ...whitelabel, config: whitelabel.config ?? undefined },
     };
   } catch (err) {
-    console.error("Failed to parse whitelabel config:", err);
+    console.error("Failed to parse whitelabel config:");
     return { db, whitelabel: undefined };
   }
 };

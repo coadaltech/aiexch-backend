@@ -96,7 +96,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
             try {
               await deleteFile(existing.imageUrl);
             } catch (error) {
-              console.warn("Failed to delete old banner:", error);
+              console.warn("Failed to delete old banner:");
             }
           }
           updateData.imageUrl = newImageUrl;
@@ -145,7 +145,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
       try {
         await deleteFile(existing.imageUrl);
       } catch (error) {
-        console.warn("Failed to delete banner image:", error);
+        console.warn("Failed to delete banner image:");
       }
     }
 
