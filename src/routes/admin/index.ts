@@ -21,6 +21,10 @@ export const adminRoutes = (app: Elysia) =>
   app.group("/admin", (admin) =>
     admin
       .state({ id: 0, role: "" })
+      .get("/test", () => {
+        console.log("=== ADMIN TEST ENDPOINT CALLED ===");
+        return { message: "Admin test endpoint works!" };
+      })
       .guard({
         beforeHandle({ cookie, set, store }) {
           console.log("=== ADMIN GUARD DEBUG ===");
