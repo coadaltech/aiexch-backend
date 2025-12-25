@@ -1,21 +1,7 @@
 import { Elysia } from "elysia";
-import { promotionsRoutes } from "./promotions";
-import { promocodesRoutes } from "./promocodes";
-import { bannersRoutes } from "./banners";
-import { popupsRoutes } from "./popups";
-import { whitelabelsRoutes } from "./whitelabels";
-import { transactionsRoutes } from "./transactions";
-import { kycRoutes } from "./kyc";
-import { usersRoutes } from "./users";
-import { settingsRoutes } from "./settings";
-import { notificationsRoutes } from "./notifications";
-import { qrCodesRoutes } from "./qrcodes";
-import { sportsGamesRoutes } from "./sports-games";
-import { homeSectionsRoutes } from "./home-sections";
-import { withdrawalMethodsRoutes } from "./withdrawal-methods";
-import { domainsRoutes } from "./domains";
-import { casinoGamesAdminRoutes } from "./casino-games";
 import { app_middleware } from "../../middleware/auth";
+
+console.log("=== ADMIN ROUTES MODULE LOADING ===");
 
 export const adminRoutes = new Elysia({ prefix: "/admin" })
   .state({ id: 0, role: "" })
@@ -43,19 +29,7 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
     console.log("=== ADMIN TEST ENDPOINT CALLED ===");
     return { message: "Admin test endpoint works!" };
   })
-  .use(promotionsRoutes)
-  .use(promocodesRoutes)
-  .use(bannersRoutes)
-  .use(popupsRoutes)
-  .use(whitelabelsRoutes)
-  .use(transactionsRoutes)
-  .use(kycRoutes)
-  .use(usersRoutes)
-  .use(settingsRoutes)
-  .use(notificationsRoutes)
-  .use(qrCodesRoutes)
-  .use(sportsGamesRoutes)
-  .use(homeSectionsRoutes)
-  .use(withdrawalMethodsRoutes)
-  .use(domainsRoutes)
-  .use(casinoGamesAdminRoutes);
+  .get("/", () => {
+    console.log("=== ADMIN ROOT ENDPOINT CALLED ===");
+    return { message: "Admin root endpoint works!" };
+  });
