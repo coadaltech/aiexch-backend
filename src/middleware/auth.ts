@@ -28,6 +28,12 @@ export const authenticate_jwt = (access_token: string) => {
 };
 
 export const app_middleware = ({ cookie, allowed }: ElysiaMiddlewareType) => {
+  console.log("=== AUTH MIDDLEWARE DEBUG ===");
+  console.log("Raw cookie object:", cookie);
+  console.log("Raw allowed parameter:", allowed);
+  console.log("Typeof allowed:", typeof allowed);
+  console.log("Is allowed array?:", Array.isArray(allowed));
+
   let access_token = String(cookie.accessToken);
 
   console.log(

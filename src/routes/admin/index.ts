@@ -23,10 +23,16 @@ export const adminRoutes = (app: Elysia) =>
       .state({ id: 0, role: "" })
       .guard({
         beforeHandle({ cookie, set, store }) {
+          console.log("=== ADMIN GUARD DEBUG ===");
+          console.log("Guard cookie:", cookie ? "exists" : "missing");
+          console.log("About to call app_middleware with allowed: ['admin']");
+
           const state_result = app_middleware({
             cookie,
             allowed: ["admin"],
           });
+
+          console.log("Guard result:", state_result);
 
           set.status = state_result.code;
           if (!state_result.data) return state_result;
