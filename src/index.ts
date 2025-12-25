@@ -65,6 +65,13 @@ const app = new Elysia()
   .use(casinoGamesRoutes)
   .get("/", () => ({ message: "AIEXCH Backend API" }))
   .get("/health", () => ({ status: "OK" }))
+  .get("/debug-test", () => {
+    console.log("=== DEBUG TEST ENDPOINT CALLED ===");
+    return {
+      message: "Debug test works!",
+      timestamp: new Date().toISOString(),
+    };
+  })
   .all("/admin/*", ({ request, set }) => {
     console.log("=== ADMIN REQUEST CAUGHT BY WILDCARD ===");
     console.log("Method:", request.method);
