@@ -686,8 +686,8 @@ export const SportsService = {
               selectionId: runner.id,
               name: runner.name,
               status: oddsRunner?.status || null,
-              back: oddsRunner?.back?.[0] || null,  // First back price
-              lay: oddsRunner?.lay?.[0] || null     // First lay price
+              back: oddsRunner?.back || null,  // First back price
+              lay: oddsRunner?.lay || null     // First lay price
             };
           })
         };
