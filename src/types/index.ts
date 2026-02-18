@@ -52,6 +52,6 @@ export interface RegisterRequest {
 export const CALLBACK_ACTION = ["balance", "bet", "win", "refund"] as const;
 export type CallbackAction = (typeof CALLBACK_ACTION)[number];
 
-export type RoleType = "admin" | "user";
+export type RoleType = "owner" | "admin" | "super" | "master" | "agent" | "user";
 
 export type WhitelabelContext = Context;

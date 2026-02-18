@@ -7,7 +7,7 @@ export const cookieConfig = {
     secure: true,
     sameSite: "none" as const,
     // Don't set domain for cross-origin cookies - let browser handle it
-    // domain: 'localhost',
+    domain: '.aiexch.com',
     maxAge: 60 * 15, // 15 minutes
   },
   refreshToken: {
@@ -15,7 +15,7 @@ export const cookieConfig = {
     secure: true,
     sameSite: "none" as const,
     // Don't set domain for cross-origin cookies - let browser handle it
-    // domain: 'localhost',
+    domain: '.aiexch.com',
     maxAge: 60 * 60 * 24 * 7, // 7 days
   },
 };

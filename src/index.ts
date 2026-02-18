@@ -34,9 +34,9 @@ const port = Number(process.env.PORT || 3001);
 
 // Temporarily allow all origins for development
 // Set ALLOW_ALL_ORIGINS=true in .env to enable this (works in production too)
-const allowAllOrigins =
-  process.env.ALLOW_ALL_ORIGINS === "true" ||
-  process.env.NODE_ENV !== "production";
+const allowAllOrigins = false;
+// process.env.ALLOW_ALL_ORIGINS === "true" ||
+// process.env.NODE_ENV !== "production";
 
 const app = new Elysia()
   // Register WebSocket routes first — before CORS/cookie middleware
@@ -49,12 +49,15 @@ const app = new Elysia()
           "http://localhost:3002",
           "http://localhost:3000",
           "http://localhost:3001",
+          "http://10.42.0.1:3002",
+          "http://10.42.0.1:3000",
+          "http://10.42.0.1:3001",
           "https://aiexch-two.vercel.app",
           "https://aiexch.com",
           "https://www.aiexch.com",
         ],
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      // allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain"],
       credentials: true,
     }),
   )

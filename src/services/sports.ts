@@ -535,7 +535,7 @@ export const SportsService = {
         createdAt: comp.created_at,
         updatedAt: comp.updated_at,
         // Add any other fields your frontend expects
-        totalEvents: comp.metadata?.totalEvents || 0,
+        totalEvents: (comp.metadata as any)?.totalEvents || 0,
         // Include the database id if needed
         dbId: comp.id
       }));
@@ -650,8 +650,8 @@ export const SportsService = {
         return [];
       }
 
-      // STEP 2: Filter ONLY OPEN markets (critical optimization)
-      const openMarkets = allMarkets.filter(market => market.status === "OPEN");
+      // STEP 2: Filter ONLY OPEN markets (exclude CLOSED and INACTIVE)
+      const openMarkets = allMarkets.filter(market => market.status !== "CLOSED" && market.status !== "INACTIVE");
 
       // console.log(`Total markets: ${allMarkets.length}, Open markets: ${openMarkets.length}`);
 
@@ -676,6 +676,7 @@ export const SportsService = {
           inPlay: market.inPlay,
           bettingType: market.bettingType,
           marketCondition: market.marketCondition,
+          sportingEvent: marketOdds?.sportingEvent ?? market.sportingEvent,
           runners: market.runners.map(runner => {
             // Find matching odds for this runner
             const oddsRunner = marketOdds?.runners?.find(

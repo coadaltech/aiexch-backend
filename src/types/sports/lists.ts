@@ -38,6 +38,7 @@ export interface MarketItem {
   bettingType: string; // e.g., "ODDS", "LINE", "BOOKMAKER"
   marketName: string;
   provider: string; // e.g., "BETFAIR", "SKY", "BETHUBS"
+  sportingEvent: boolean;
   marketCondition: {
     marketId: string;
     betLock: boolean;
