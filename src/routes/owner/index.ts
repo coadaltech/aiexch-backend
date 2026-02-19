@@ -14,16 +14,16 @@ import { kycRoutes } from "./kyc";
 import { transactionsRoutes } from "./transactions";
 import { whitelabelsRoutes } from "./whitelabels";
 import { withdrawalMethodsRoutes } from "./withdrawal-methods";
-import { casinoGamesAdminRoutes } from "./casino-games";
+import { casinoGamesOwnerRoutes } from "./casino-games";
 import { domainsRoutes } from "./domains";
 
-export const adminRoutes = new Elysia({ prefix: "/admin" })
+export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .state({ id: 0, role: "" })
   .guard({
     beforeHandle({ cookie, set, store }) {
       const state_result = app_middleware({
         cookie,
-        allowed: ["admin"],
+        allowed: ["owner"],
       });
 
       set.status = state_result.code;
@@ -47,5 +47,5 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
   .use(transactionsRoutes)
   .use(whitelabelsRoutes)
   .use(withdrawalMethodsRoutes)
-  .use(casinoGamesAdminRoutes)
+  .use(casinoGamesOwnerRoutes)
 // .use((app) => domainsRoutes(app));

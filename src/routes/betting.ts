@@ -184,8 +184,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
-  // Admin: Declare match results
-  .post("/admin/declare-result", async ({ body, set }) => {
+  // Owner: Declare match results
+  .post("/owner/declare-result", async ({ body, set }) => {
     try {
       const { matchId, results } = body as {
         matchId: string;

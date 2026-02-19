@@ -4,7 +4,7 @@ import { cookie } from "@elysiajs/cookie";
 import { connectRedis } from "./db/redis";
 import { authRoutes } from "./routes/auth";
 import { profileRoutes } from "./routes/profile";
-import { adminRoutes } from "./routes/admin";
+import { ownerRoutes } from "./routes/owner";
 import { publicRoutes } from "./routes/public";
 import { sportsRoutes } from "./routes/sports";
 import { bettingRoutes } from "./routes/betting";
@@ -86,7 +86,7 @@ const app = new Elysia()
   .use(seriesRoutes)
   .use(authRoutes)
   .use(profileRoutes)
-  .use(adminRoutes)
+  .use(ownerRoutes)
   .use(gamesRoutes)
   .use(publicRoutes)
   .use(sportsRoutes)

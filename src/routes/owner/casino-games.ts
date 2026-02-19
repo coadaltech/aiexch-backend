@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { whitelabel_middleware } from "@middleware/whitelabel";
 import { DbType } from "../../types";
 
-export const casinoGamesAdminRoutes = new Elysia({
+export const casinoGamesOwnerRoutes = new Elysia({
   prefix: "/casino-games",
 })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {

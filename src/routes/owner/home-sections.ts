@@ -21,7 +21,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
       set.status = 200;
       return { success: true, data: sections };
     } catch (error) {
-      console.error("[ADMIN-SECTIONS] Error:");
+      console.error("[OWNER-SECTIONS] Error:");
       set.status = 500;
       return { success: false, message: "Failed to fetch home sections" };
     }
@@ -76,7 +76,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         set.status = 201;
         return { success: true, data: section };
       } catch (error) {
-        console.error("[ADMIN-CREATE-SECTION] Error:");
+        console.error("[OWNER-CREATE-SECTION] Error:");
         set.status = 500;
         return { success: false, message: "Failed to create home section" };
       }
