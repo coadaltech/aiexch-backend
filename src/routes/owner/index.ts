@@ -23,7 +23,7 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
     beforeHandle({ cookie, set, store }) {
       const state_result = app_middleware({
         cookie,
-        allowed: ["owner"],
+        allowed: ["owner", "admin", "super", "master", "agent"],
       });
 
       set.status = state_result.code;

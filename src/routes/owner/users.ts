@@ -12,8 +12,9 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
   })
   .post(
     "/",
-    async ({ body, set, db }) => {
+    async ({ body, set, db, store }) => {
       const { username, email, password, role, membership, status, balance, firstName, lastName, phone, country } = body;
+      const createdBy = (store as { id?: number; role?: string })?.id || null; // Get current user ID from store
 
       // Check if user already exists
       const existingUser = await db
@@ -47,6 +48,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
           status: status || "active",
           balance: balance || "0",
           emailVerified: true,
+          createdBy: createdBy,
         })
         .returning();
 

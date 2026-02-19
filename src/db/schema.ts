@@ -29,6 +29,7 @@ export const users = pgTable("users", {
     .default("0")
     .notNull(),
   emailVerified: boolean("email_verified").default(false),
+  createdBy: bigint("created_by", { mode: "number" }),
   lastLoginIp: varchar("last_login_ip", { length: 45 }),
   lastLoginAt: timestamp("last_login_at"),
   createdAt: timestamp("created_at").defaultNow(),
