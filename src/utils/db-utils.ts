@@ -14,6 +14,7 @@ export const generateDatabaseClient = (dbName: string) => {
     idle_timeout: 60,
     connect_timeout: 10,
     max_lifetime: 60 * 30,
+    ssl: { rejectUnauthorized: false },
   });
 
   const dbClient = drizzle(client, { schema }); // ✅ Make sure schema is passed

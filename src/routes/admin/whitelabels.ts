@@ -242,6 +242,14 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
 
   .post("/db/generate/:id", async ({ params, set }) => {
     try {
+      if (!process.env.DATABASE_BASE_URL) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "DATABASE_BASE_URL environment variable is not set",
+        };
+      }
+
       const [whitelabel] = await db
         .select()
         .from(whitelabels)
@@ -284,6 +292,14 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
 
   .post("/db/migrate/:id", async ({ params, set }) => {
     try {
+      if (!process.env.DATABASE_BASE_URL) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "DATABASE_BASE_URL environment variable is not set",
+        };
+      }
+
       const [whitelabel] = await db
         .select()
         .from(whitelabels)
@@ -302,22 +318,50 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       const dbName =
         config.dbName || whitelabel.name.toLowerCase().replace(/\s+/g, "_");
 
-      const adminDb = postgres(process.env.DATABASE_BASE_URL + "/postgres");
-      await adminDb.unsafe(`CREATE DATABASE ${dbName}`);
+      const adminDb = postgres(process.env.DATABASE_BASE_URL + "/postgres", {
+        ssl: { rejectUnauthorized: false },
+      });
+      
+      // Check if database already exists
+      const dbExists = await adminDb`
+        SELECT 1 FROM pg_database WHERE datname = ${dbName}
+      `;
+      
+      if (dbExists.length === 0) {
+        await adminDb.unsafe(`CREATE DATABASE ${dbName}`);
+        console.log(`Database ${dbName} created successfully`);
+      } else {
+        console.log(`Database ${dbName} already exists`);
+      }
       await adminDb.end();
 
       const dbUrl = `${process.env.DATABASE_BASE_URL}/${dbName}`;
-      const { stdout } = await execAsync("npm run db:migrate", {
-        cwd: process.cwd(),
-        env: { ...process.env, DATABASE_URL: dbUrl },
-      });
+      console.log(`Running migration for database: ${dbName}`);
+      console.log(`Database URL: ${dbUrl.replace(/:[^:@]+@/, ":****@")}`);
+      
+      try {
+        const { stdout, stderr } = await execAsync("bun run src/db/migrate.ts", {
+          cwd: process.cwd(),
+          env: { ...process.env, DATABASE_URL: dbUrl },
+        });
 
-      set.status = 200;
-      return {
-        success: true,
-        message: `Migration completed for ${whitelabel.name} (${dbName})`,
-        output: stdout,
-      };
+        const output = stdout || stderr || "";
+        console.log("Migration output:", output);
+
+        if (output.includes("Migration completed successfully")) {
+          set.status = 200;
+          return {
+            success: true,
+            message: `Migration completed for ${whitelabel.name} (${dbName})`,
+            output: output,
+          };
+        } else {
+          throw new Error(`Migration may have failed. Output: ${output}`);
+        }
+      } catch (execError: any) {
+        console.error("Migration execution error:", execError);
+        throw new Error(`Migration failed: ${execError.message || execError.stderr || execError.stdout || "Unknown error"}`);
+      }
     } catch (error: any) {
       set.status = 500;
       return {

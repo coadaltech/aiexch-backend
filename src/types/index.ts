@@ -1,20 +1,19 @@
 import { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { Context } from "elysia";
 import { db as mainDb } from "../db";
+import type { Context } from "elysia";
 
 export type DbType = typeof mainDb;
 
-declare module "elysia" {
-  interface Context {
-    db: PostgresJsDatabase<any>;
-    whitelabel?: {
-      id: number;
-      domain: string;
-      config?: string;
-      [key: string]: any;
-    };
-  }
-}
+// Extended Context type with db and whitelabel properties
+export type ExtendedContext = Context & {
+  db: PostgresJsDatabase<any>;
+  whitelabel?: {
+    id: number;
+    domain: string;
+    config?: string;
+    [key: string]: any;
+  };
+};
 
 export interface User {
   id: number;
@@ -54,4 +53,4 @@ export type CallbackAction = (typeof CALLBACK_ACTION)[number];
 
 export type RoleType = "owner" | "admin" | "super" | "master" | "agent" | "user";
 
-export type WhitelabelContext = Context;
+export type WhitelabelContext = import("elysia").Context;

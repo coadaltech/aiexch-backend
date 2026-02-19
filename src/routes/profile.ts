@@ -116,11 +116,6 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         .where(eq(profiles.userId, store.id))
         .limit(1);
 
-      if (!existingProfile) {
-        set.status = 404;
-        return { success: false, message: "Profile not found" };
-      }
-
       // Validate birth date if provided
       if (body.birthDate) {
         const birthDate = new Date(body.birthDate);
@@ -132,13 +127,27 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         }
       }
 
-      const [updatedProfile] = await db
-        .update(profiles)
-        .set({
-          ...body,
-        })
-        .where(eq(profiles.userId, store.id))
-        .returning();
+      let updatedProfile;
+
+      if (!existingProfile) {
+        // Create profile if it doesn't exist
+        [updatedProfile] = await db
+          .insert(profiles)
+          .values({
+            userId: store.id,
+            ...body,
+          })
+          .returning();
+      } else {
+        // Update existing profile
+        [updatedProfile] = await db
+          .update(profiles)
+          .set({
+            ...body,
+          })
+          .where(eq(profiles.userId, store.id))
+          .returning();
+      }
 
       set.status = 200;
       return {
