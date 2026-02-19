@@ -53,6 +53,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         id: user.id,
         username: user.username,
         email: user.email,
+        role: user.role,
         membership: user.membership,
         balance: user.balance,
       },
@@ -84,6 +85,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         username: user.username,
         email: user.email,
         balance: user.balance,
+        role: user.role,
       },
     };
   })

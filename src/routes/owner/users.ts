@@ -1,15 +1,105 @@
 import { Elysia, t } from "elysia";
 import { users, profiles } from "../../db/schema";
 import { eq } from "drizzle-orm";
-import bcrypt from "bcryptjs";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
+import { generateHashPassword } from "../../utils/password";
 
 export const usersRoutes = new Elysia({ prefix: "/users" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
   })
+  .post(
+    "/",
+    async ({ body, set, db }) => {
+      const { username, email, password, role, membership, status, balance, firstName, lastName, phone, country } = body;
+
+      // Check if user already exists
+      const existingUser = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email));
+      if (existingUser.length > 0) {
+        set.status = 409;
+        return { success: false, message: "Email already registered" };
+      }
+
+      const existingUsername = await db
+        .select()
+        .from(users)
+        .where(eq(users.username, username));
+      if (existingUsername.length > 0) {
+        set.status = 409;
+        return { success: false, message: "Username already taken" };
+      }
+
+      const hashedPassword = await generateHashPassword(password);
+
+      const [user] = await db
+        .insert(users)
+        .values({
+          username,
+          email,
+          password: hashedPassword,
+          role: role || "user",
+          membership: membership || "bronze",
+          status: status || "active",
+          balance: balance || "0",
+          emailVerified: true,
+        })
+        .returning();
+
+      // Create profile if personal info provided
+      if (firstName || lastName || phone || country) {
+        await db.insert(profiles).values({
+          userId: user.id,
+          firstName,
+          lastName,
+          phone,
+          country,
+        });
+      }
+
+      set.status = 201;
+      return {
+        success: true,
+        data: user,
+        message: "User created successfully",
+      };
+    },
+    {
+      body: t.Object({
+        username: t.String({ minLength: 3, maxLength: 50 }),
+        email: t.String({ format: "email" }),
+        password: t.String({ minLength: 6 }),
+        role: t.Optional(t.Union([
+          t.Literal("owner"),
+          t.Literal("admin"),
+          t.Literal("super"),
+          t.Literal("master"),
+          t.Literal("agent"),
+          t.Literal("user"),
+        ])),
+        membership: t.Optional(t.Union([
+          t.Literal("bronze"),
+          t.Literal("silver"),
+          t.Literal("gold"),
+          t.Literal("platinum"),
+        ])),
+        status: t.Optional(t.Union([
+          t.Literal("active"),
+          t.Literal("inactive"),
+          t.Literal("suspended"),
+        ])),
+        balance: t.Optional(t.String()),
+        firstName: t.Optional(t.String()),
+        lastName: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        country: t.Optional(t.String()),
+      }),
+    }
+  )
   .get("/", async ({ set, db }) => {
     const allUsers = await db.select().from(users);
     const usersWithProfiles = [];
@@ -44,7 +134,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
       const updateData = { ...body };
       if (body.password) {
-        updateData.password = await bcrypt.hash(body.password, 10);
+        updateData.password = await generateHashPassword(body.password);
       }
 
       const [updated] = await db
@@ -66,7 +156,14 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         id: t.String({ pattern: "^[1-9]\\d*$" }),
       }),
       body: t.Object({
-        role: t.Optional(t.Union([t.Literal("user"), t.Literal("admin")])),
+        role: t.Optional(t.Union([
+          t.Literal("owner"),
+          t.Literal("admin"),
+          t.Literal("super"),
+          t.Literal("master"),
+          t.Literal("agent"),
+          t.Literal("user"),
+        ])),
         membership: t.Optional(
           t.Union([
             t.Literal("bronze"),
