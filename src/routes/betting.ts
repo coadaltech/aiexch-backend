@@ -55,14 +55,28 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Invalid stake or odds values" };
       }
 
-      // Check user balance first
+      // Check user balance and bet status
       const userData = await db
-        .select({ balance: users.balance })
+        .select({
+          balance: users.balance,
+          betStatus: users.betStatus,
+          parentBetStatus: users.parentBetStatus,
+        })
         .from(users)
         .where(eq(users.id, store.id))
         .limit(1);
 
-      if (!userData[0] || parseFloat(userData[0].balance || "0") < stake) {
+      if (!userData[0]) {
+        set.status = 404;
+        return { success: false, error: "User not found" };
+      }
+      const canBet = (userData[0].betStatus ?? true) && (userData[0].parentBetStatus ?? true);
+      if (!canBet) {
+        console.log("bet is disabled")
+        set.status = 403;
+        return { success: false, error: "Betting is disabled for your account" };
+      }
+      if (parseFloat(userData[0].balance || "0") < stake) {
         set.status = 400;
         return { success: false, error: "Insufficient balance" };
       }

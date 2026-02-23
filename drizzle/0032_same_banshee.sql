@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "whitelabel_id" bigint;

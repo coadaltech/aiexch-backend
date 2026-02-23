@@ -10,10 +10,13 @@ import {
   integer,
   bigint,
   jsonb,
+  pgEnum,
   PgTextBuilder,
   PgTable,
 } from "drizzle-orm/pg-core";
 import { generateNumericId, generateNumericRandomId } from "../utils/generateId";
+
+export const whitelabelTypeEnum = pgEnum("whitelabel_type", ["B2B", "B2C"]);
 
 export const users = pgTable("users", {
   id: bigint("id", { mode: "number" })
@@ -24,11 +27,17 @@ export const users = pgTable("users", {
   password: varchar("password", { length: 255 }).notNull(),
   role: varchar("role", { length: 20 }).default("user"),
   membership: varchar("membership", { length: 20 }).default("bronze"),
-  status: varchar("status", { length: 20 }).default("active"),
+  accountStatus: boolean("account_status").default(true).notNull(),
+  betStatus: boolean("bet_status").default(true).notNull(),
+  parentAccountStatus: boolean("parent_account_status").default(true).notNull(),
+  parentBetStatus: boolean("parent_bet_status").default(true).notNull(),
   balance: decimal("balance", { precision: 15, scale: 2 })
     .default("0")
     .notNull(),
+  upline: decimal("upline", { precision: 5, scale: 2 }).default("0.00"),
+  downline: decimal("downline", { precision: 5, scale: 2 }).default("0.00"),
   emailVerified: boolean("email_verified").default(false),
+  whitelabelId: bigint("whitelabel_id", { mode: "number" }),
   createdBy: bigint("created_by", { mode: "number" }),
   lastLoginIp: varchar("last_login_ip", { length: 45 }),
   lastLoginAt: timestamp("last_login_at"),
@@ -158,6 +167,10 @@ export const whitelabels = pgTable("whitelabels", {
   id: bigint("id", { mode: "number" })
     .primaryKey()
     .$defaultFn(() => Number(generateNumericId())),
+  userId: bigint("user_id", { mode: "number" })
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  whitelabelType: whitelabelTypeEnum("whitelabel_type").notNull().default("B2C"),
   name: varchar("name", { length: 255 }).notNull(),
   domain: varchar("domain", { length: 255 }).notNull().unique(),
   title: varchar("title", { length: 255 }),
@@ -218,7 +231,7 @@ export const whitelabels = pgTable("whitelabels", {
       sports: true,
       liveCasino: true,
       promotions: true,
-      transactions: true,
+      vouchers: true,
       userManagement: false,
       reports: false,
       settings: false,
@@ -230,7 +243,7 @@ export const whitelabels = pgTable("whitelabels", {
     .$onUpdate(() => new Date()),
 });
 
-export const transactions = pgTable("transactions", {
+export const vouchers = pgTable("vouchers", {
   id: bigint("id", { mode: "number" })
     .primaryKey()
     .$defaultFn(() => Number(generateNumericId())),

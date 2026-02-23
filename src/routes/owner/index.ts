@@ -11,7 +11,7 @@ import { settingsRoutes } from "./settings";
 import { sportsGamesRoutes } from "./sports-games";
 import { homeSectionsRoutes } from "./home-sections";
 import { kycRoutes } from "./kyc";
-import { transactionsRoutes } from "./transactions";
+import { vouchersRoutes } from "./vouchers";
 import { whitelabelsRoutes } from "./whitelabels";
 import { withdrawalMethodsRoutes } from "./withdrawal-methods";
 import { casinoGamesOwnerRoutes } from "./casino-games";
@@ -44,7 +44,7 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(sportsGamesRoutes)
   .use(homeSectionsRoutes)
   .use(kycRoutes)
-  .use(transactionsRoutes)
+  .use(vouchersRoutes)
   .use(whitelabelsRoutes)
   .use(withdrawalMethodsRoutes)
   .use(casinoGamesOwnerRoutes)

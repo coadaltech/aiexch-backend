@@ -1,31 +1,29 @@
 import { db } from "@db/index";
 import { whitelabels } from "@db/schema";
-import { generateDatabaseClient } from "@utils/db-utils";
 import { eq } from "drizzle-orm";
 
+/**
+ * Resolves whitelabel by domain (x-whitelabel-domain header).
+ * Always returns the main db - all whitelabels use the same database.
+ * Filtering by whitelabel id is done in routes when needed.
+ */
 export const whitelabel_middleware = async (request: Request) => {
   const host = request.headers.get("x-whitelabel-domain") ?? "";
   if (!host) {
-    return { db, whitelabel: undefined };
+    return { db, whitelabel: undefined, dbError: undefined };
   }
 
   const whitelabel = await db.query.whitelabels.findFirst({
     where: eq(whitelabels.domain, host),
   });
 
-  if (!whitelabel || !whitelabel.config) {
-    return { db, whitelabel: undefined };
+  if (!whitelabel) {
+    return { db, whitelabel: undefined, dbError: undefined };
   }
 
-  try {
-    const configs = JSON.parse(whitelabel.config);
-    const clientDb = generateDatabaseClient(configs.dbName);
-    return {
-      db: clientDb,
-      whitelabel: { ...whitelabel, config: whitelabel.config ?? undefined },
-    };
-  } catch (err) {
-    console.error("Failed to parse whitelabel config:");
-    return { db, whitelabel: undefined };
-  }
+  return {
+    db,
+    whitelabel: { ...whitelabel, config: whitelabel.config ?? undefined },
+    dbError: undefined,
+  };
 };

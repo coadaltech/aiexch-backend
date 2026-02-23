@@ -1,29 +1,43 @@
 import { Elysia, t } from "elysia";
-import { transactions, users } from "../../db/schema";
+import { vouchers, users } from "../../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 
-export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
+export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
   })
   .get("/", async ({ set, db }) => {
-    const allTransactions = await db.select().from(transactions);
+    const allVouchers = await db.select().from(vouchers);
     set.status = 200;
-    return { success: true, data: allTransactions };
+    return { success: true, data: allVouchers };
   })
 
   .post(
     "/",
     async ({ body, set, db }) => {
-      const [transaction] = await db
-        .insert(transactions)
+      const [voucher] = await db
+        .insert(vouchers)
         .values(body)
         .returning();
+
+      // Automatically add to user balance if deposit/bonus and status is completed
+      if (
+        (voucher.type === "deposit" || voucher.type === "bonus") &&
+        voucher.status === "completed"
+      ) {
+        await db
+          .update(users)
+          .set({
+            balance: sql`${users.balance} + ${voucher.amount}`,
+          })
+          .where(eq(users.id, voucher.userId));
+      }
+
       set.status = 201;
-      return { success: true, data: transaction };
+      return { success: true, data: voucher };
     },
     {
       body: t.Object({
@@ -42,19 +56,19 @@ export const transactionsRoutes = new Elysia({ prefix: "/transactions" })
   .put(
     "/:id",
     async ({ params, body, set, db }) => {
-      const transactionId = parseInt(params.id);
+      const voucherId = parseInt(params.id);
       const [updated] = await db
-        .update(transactions)
+        .update(vouchers)
         .set({ status: body.status, updatedAt: new Date() })
-        .where(eq(transactions.id, transactionId))
+        .where(eq(vouchers.id, voucherId))
         .returning();
 
       if (!updated) {
         set.status = 404;
-        return { success: false, message: "Transaction not found" };
+        return { success: false, message: "Voucher not found" };
       }
 
-      if (updated.status === "completed" && updated.type === "deposit") {
+      if (updated.status === "completed" && (updated.type === "deposit" || updated.type === "bonus")) {
         await db
           .update(users)
           .set({

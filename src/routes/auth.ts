@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { users, profiles, otps } from "@db/schema";
+import { users, profiles, otps, whitelabels } from "@db/schema";
 import { eq, and } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
 import { decodeToken, generateTokens } from "@services/token";
@@ -10,14 +10,24 @@ import { cookieConfig } from "@config/cookie";
 import { DbType } from "../types";
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
-  .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
-    const { db, whitelabel } = await whitelabel_middleware(request);
-    return { db: db as DbType, whitelabel };
+  .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any; dbError?: string }> => {
+    const { db, whitelabel, dbError } = await whitelabel_middleware(request);
+    return { db: db as DbType, whitelabel, dbError };
+  })
+  .onBeforeHandle(({ dbError, set }) => {
+    if (dbError === "DATABASE_NOT_FOUND") {
+      set.status = 503;
+      return {
+        success: false,
+        error: "DATABASE_NOT_FOUND",
+        message: "Database not found. Please contact the owner to create the database.",
+      };
+    }
   })
   .post(
     "/register",
-    async ({ body, db, set }) => {
-      const { username, email, password, phone, country, otp } = body;
+    async ({ body, db, whitelabel, set }) => {
+      const { username, email, password, phone, country, otp, whitelabelId: bodyWhitelabelId, domain: bodyDomain } = body;
 
       // Verify OTP first
       const [otpRecord] = await db
@@ -57,6 +67,16 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       }
 
       const hashedPassword = await generateHashPassword(password);
+      let whitelabelId: number | null =
+        bodyWhitelabelId != null
+          ? Number(bodyWhitelabelId)
+          : whitelabel?.id != null
+            ? Number(whitelabel.id)
+            : null;
+      if (whitelabelId == null && bodyDomain && String(bodyDomain).trim()) {
+        const [wl] = await db.select({ id: whitelabels.id }).from(whitelabels).where(eq(whitelabels.domain, String(bodyDomain).trim())).limit(1);
+        if (wl) whitelabelId = Number(wl.id);
+      }
 
       const [user] = await db
         .insert(users)
@@ -65,6 +85,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           email,
           password: hashedPassword,
           emailVerified: true,
+          whitelabelId,
         })
         .returning();
 
@@ -94,81 +115,108 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         otp: t.String({ minLength: 6, maxLength: 6 }),
         phone: t.Optional(t.String()),
         country: t.Optional(t.String({ minLength: 2, maxLength: 50 })),
+        whitelabelId: t.Optional(t.Union([t.Number(), t.String()])),
+        domain: t.Optional(t.String()),
       }),
     }
   )
   .post(
     "/login",
-    async ({ body, headers, request, set, cookie, db }) => {
-      const { email, password } = body;
+    async ({ body, headers, request, set, cookie, db, whitelabel }) => {
+      try {
 
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, email));
+        const { email, password } = body;
 
-      if (!user) {
-        set.status = 404;
-        return { success: false, message: "Account not found" };
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, email));
+
+        if (!user) {
+          set.status = 404;
+          return { success: false, message: "Account not found" };
+        }
+
+        const isCorrectPassword = await comparePassword(password, user.password);
+        if (!isCorrectPassword) {
+          set.status = 401;
+          return { success: false, message: "Invalid credentials" };
+        }
+
+        const canLogin = (user.accountStatus ?? true) && (user.parentAccountStatus ?? true);
+        if (!canLogin) {
+          set.status = 403;
+          return { success: false, message: "Account suspended" };
+        }
+
+        if (whitelabel && user.role !== "owner") {
+          const userWlId = user.whitelabelId != null ? Number(user.whitelabelId) : null;
+          const wlId = whitelabel.id != null ? Number(whitelabel.id) : null;
+          const isAssignedAdmin = whitelabel.userId != null && Number(whitelabel.userId) === Number(user.id);
+          const belongsToWhitelabel = wlId != null && userWlId === wlId;
+          if (!belongsToWhitelabel && !isAssignedAdmin) {
+            set.status = 403;
+            return {
+              success: false,
+              message: "This account is not valid for this site. Please sign in on the correct domain.",
+            };
+          }
+          if (isAssignedAdmin && !belongsToWhitelabel && wlId != null) {
+            await db.update(users).set({ whitelabelId: wlId }).where(eq(users.id, user.id));
+          }
+        }
+
+        const clientIP = getCurrentIP(headers, request);
+
+        await db
+          .update(users)
+          .set({ lastLoginIp: clientIP, lastLoginAt: new Date() })
+          .where(eq(users.id, user.id));
+
+        // Generate tokens
+        const { accessToken, refreshToken } = generateTokens(
+          user.id,
+          user.email,
+          user.role || "user"
+        );
+
+        // console.log("Login - User role:", user.role);
+        // console.log("Login - Generated access token payload:", {
+        //   id: user.id,
+        //   email: user.email,
+        //   role: user.role,
+        // });
+        // console.log("Login - Cookie config:", cookieConfig);
+
+        // Save tokens in HttpOnly cookies
+        cookie.accessToken.set({
+          value: accessToken,
+          ...cookieConfig.accessToken,
+        });
+
+        cookie.refreshToken.set({
+          value: refreshToken,
+          ...cookieConfig.refreshToken,
+        });
+
+        // console.log("Login - Cookies set successfully");
+
+        // Return user info including role/balance for frontend redirect (user → website, admin/super/etc → panel)
+        set.status = 200;
+        return {
+          success: true,
+          user: {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            membership: user.membership,
+            balance: user.balance ?? "0",
+            role: user.role ?? "user",
+          },
+        };
+      } catch (e) {
+        console.log(e);
       }
-
-      const isCorrectPassword = await comparePassword(password, user.password);
-      if (!isCorrectPassword) {
-        set.status = 401;
-        return { success: false, message: "Invalid credentials" };
-      }
-
-      if (user.status === "suspended") {
-        set.status = 403;
-        return { success: false, message: "Account suspended" };
-      }
-
-      const clientIP = getCurrentIP(headers, request);
-
-      await db
-        .update(users)
-        .set({ lastLoginIp: clientIP, lastLoginAt: new Date() })
-        .where(eq(users.id, user.id));
-
-      // Generate tokens
-      const { accessToken, refreshToken } = generateTokens(
-        user.id,
-        user.email,
-        user.role || "user"
-      );
-
-      // console.log("Login - User role:", user.role);
-      // console.log("Login - Generated access token payload:", {
-      //   id: user.id,
-      //   email: user.email,
-      //   role: user.role,
-      // });
-      // console.log("Login - Cookie config:", cookieConfig);
-
-      // Save tokens in HttpOnly cookies
-      cookie.accessToken.set({
-        value: accessToken,
-        ...cookieConfig.accessToken,
-      });
-
-      cookie.refreshToken.set({
-        value: refreshToken,
-        ...cookieConfig.refreshToken,
-      });
-
-      // console.log("Login - Cookies set successfully");
-
-      // Return user info only (tokens are in HTTP-only cookies)
-      set.status = 200;
-      return {
-        success: true,
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          membership: user.membership,
-        },
-      };
     },
     {
       body: t.Object({
@@ -302,7 +350,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         return { success: false, message: "User not found" };
       }
 
-      if (user.status === "suspended") {
+      const canLogin = (user.accountStatus ?? true) && (user.parentAccountStatus ?? true);
+      if (!canLogin) {
         set.status = 403;
         return { success: false, message: "Account suspended" };
       }

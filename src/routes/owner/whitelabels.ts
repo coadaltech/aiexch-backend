@@ -1,34 +1,67 @@
 import { Elysia, t } from "elysia";
 import { db } from "../../db";
-import { whitelabels } from "../../db/schema";
+import { whitelabels, users } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { uploadFile, deleteFile } from "../../services/s3";
-import { exec } from "child_process";
-import { promisify } from "util";
-import postgres from "postgres";
-
-const execAsync = promisify(exec);
+import { resolveOwnerScope } from "../../utils/ownerScope";
 
 export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
-  .get("/", async ({ set }) => {
-    const allWhitelabels = await db.select().from(whitelabels);
-    const parsedWhitelabels = allWhitelabels.map((wl) => ({
-      ...wl,
-      theme: typeof wl.theme === "string" ? JSON.parse(wl.theme) : wl.theme,
-      layout: typeof wl.layout === "string" ? JSON.parse(wl.layout) : wl.layout,
-      config: typeof wl.config === "string" ? JSON.parse(wl.config) : wl.config,
+  .get("/", async ({ set, store }) => {
+    const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
+    let query = db
+      .select({
+        whitelabel: whitelabels,
+        user: {
+          id: users.id,
+          username: users.username,
+          email: users.email,
+        },
+      })
+      .from(whitelabels)
+      .leftJoin(users, eq(whitelabels.userId, users.id));
+    if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId != null) {
+      const rows = await query.where(eq(whitelabels.id, scope.scopeWhitelabelId));
+      const parsedWhitelabels = rows.map((row) => ({
+        ...row.whitelabel,
+        user: row.user,
+        theme: typeof row.whitelabel.theme === "string" ? JSON.parse(row.whitelabel.theme) : row.whitelabel.theme,
+        layout: typeof row.whitelabel.layout === "string" ? JSON.parse(row.whitelabel.layout) : row.whitelabel.layout,
+        config: typeof row.whitelabel.config === "string" ? JSON.parse(row.whitelabel.config) : row.whitelabel.config,
+        preferences:
+          typeof row.whitelabel.preferences === "string"
+            ? JSON.parse(row.whitelabel.preferences)
+            : row.whitelabel.preferences,
+        permissions:
+          typeof row.whitelabel.permissions === "string"
+            ? JSON.parse(row.whitelabel.permissions)
+            : row.whitelabel.permissions,
+        socialLinks:
+          typeof row.whitelabel.socialLinks === "string"
+            ? JSON.parse(row.whitelabel.socialLinks)
+            : row.whitelabel.socialLinks,
+      }));
+      set.status = 200;
+      return { success: true, data: parsedWhitelabels };
+    }
+    const allWhitelabels = await query;
+    const parsedWhitelabels = allWhitelabels.map((row) => ({
+      ...row.whitelabel,
+      user: row.user,
+      theme: typeof row.whitelabel.theme === "string" ? JSON.parse(row.whitelabel.theme) : row.whitelabel.theme,
+      layout: typeof row.whitelabel.layout === "string" ? JSON.parse(row.whitelabel.layout) : row.whitelabel.layout,
+      config: typeof row.whitelabel.config === "string" ? JSON.parse(row.whitelabel.config) : row.whitelabel.config,
       preferences:
-        typeof wl.preferences === "string"
-          ? JSON.parse(wl.preferences)
-          : wl.preferences,
+        typeof row.whitelabel.preferences === "string"
+          ? JSON.parse(row.whitelabel.preferences)
+          : row.whitelabel.preferences,
       permissions:
-        typeof wl.permissions === "string"
-          ? JSON.parse(wl.permissions)
-          : wl.permissions,
+        typeof row.whitelabel.permissions === "string"
+          ? JSON.parse(row.whitelabel.permissions)
+          : row.whitelabel.permissions,
       socialLinks:
-        typeof wl.socialLinks === "string"
-          ? JSON.parse(wl.socialLinks)
-          : wl.socialLinks,
+        typeof row.whitelabel.socialLinks === "string"
+          ? JSON.parse(row.whitelabel.socialLinks)
+          : row.whitelabel.socialLinks,
     }));
     set.status = 200;
     return { success: true, data: parsedWhitelabels };
@@ -36,7 +69,12 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
 
   .post(
     "/",
-    async ({ body, set }) => {
+    async ({ body, set, store }) => {
+      const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
+      if (scope.currentUserRole !== "owner") {
+        set.status = 403;
+        return { success: false, message: "Only owner can create whitelabels." };
+      }
       let logoUrl = body.logoUrl;
       let faviconUrl = body.faviconUrl;
 
@@ -55,9 +93,14 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         config.dbName = body.name.toLowerCase().replace(/\s+/g, "_");
       }
 
+      // Parse userId from string to number (FormData sends everything as strings)
+      const userId = typeof body.userId === "string" ? parseInt(body.userId, 10) : body.userId;
+
       const [whitelabel] = await db
         .insert(whitelabels)
         .values({
+          userId: userId,
+          whitelabelType: body.whitelabelType || "B2C",
           name: body.name,
           domain: body.domain,
           title: body.title,
@@ -74,11 +117,20 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
           permissions: body.permissions,
         })
         .returning();
+
+      // Link the selected user (admin) to this whitelabel
+      await db
+        .update(users)
+        .set({ whitelabelId: whitelabel.id })
+        .where(eq(users.id, userId));
+
       set.status = 201;
       return { success: true, data: whitelabel };
     },
     {
       body: t.Object({
+        userId: t.Union([t.Number(), t.String()]), // Accept both number and string (FormData sends strings)
+        whitelabelType: t.Optional(t.Union([t.Literal("B2B"), t.Literal("B2C")])),
         name: t.String(),
         domain: t.String(),
         title: t.Optional(t.String()),
@@ -101,13 +153,18 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
 
   .put(
     "/:id",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, store }) => {
+      const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
       const [existing] = await db
         .select()
         .from(whitelabels)
         .where(eq(whitelabels.id, parseInt(params.id)));
 
       if (!existing) {
+        set.status = 404;
+        return { success: false, error: "Whitelabel not found" };
+      }
+      if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId !== existing.id) {
         set.status = 404;
         return { success: false, error: "Whitelabel not found" };
       }
@@ -143,25 +200,36 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         faviconUrl = body.faviconUrl;
       }
 
+      const updateData: any = {
+        name: body.name,
+        domain: body.domain,
+        title: body.title,
+        description: body.description,
+        logo: logoUrl,
+        favicon: faviconUrl,
+        contactEmail: body.contactEmail,
+        socialLinks: body.socialLinks,
+        status: body.status,
+        theme: body.theme,
+        layout: body.layout,
+        config: body.config,
+        preferences: body.preferences,
+        permissions: body.permissions,
+        updatedAt: new Date(),
+      };
+      
+      if (body.userId !== undefined) {
+        // Parse userId from string to number (FormData sends everything as strings)
+        updateData.userId = typeof body.userId === "string" ? parseInt(body.userId, 10) : body.userId;
+      }
+
+      if (body.whitelabelType !== undefined) {
+        updateData.whitelabelType = body.whitelabelType;
+      }
+
       const [updated] = await db
         .update(whitelabels)
-        .set({
-          name: body.name,
-          domain: body.domain,
-          title: body.title,
-          description: body.description,
-          logo: logoUrl,
-          favicon: faviconUrl,
-          contactEmail: body.contactEmail,
-          socialLinks: body.socialLinks,
-          status: body.status,
-          theme: body.theme,
-          layout: body.layout,
-          config: body.config,
-          preferences: body.preferences,
-          permissions: body.permissions,
-          updatedAt: new Date(),
-        })
+        .set(updateData)
         .where(eq(whitelabels.id, parseInt(params.id)))
         .returning();
       set.status = 200;
@@ -169,6 +237,8 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
     },
     {
       body: t.Object({
+        userId: t.Optional(t.Union([t.Number(), t.String()])), // Accept both number and string (FormData sends strings)
+        whitelabelType: t.Optional(t.Union([t.Literal("B2B"), t.Literal("B2C")])),
         name: t.Optional(t.String()),
         domain: t.Optional(t.String()),
         title: t.Optional(t.String()),
@@ -189,11 +259,21 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
     }
   )
 
-  .delete("/:id", async ({ params, set }) => {
+  .delete("/:id", async ({ params, set, store }) => {
+    const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
     const [existing] = await db
       .select()
       .from(whitelabels)
       .where(eq(whitelabels.id, parseInt(params.id)));
+
+    if (!existing) {
+      set.status = 404;
+      return { success: false, error: "Whitelabel not found" };
+    }
+    if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId !== existing.id) {
+      set.status = 404;
+      return { success: false, error: "Whitelabel not found" };
+    }
 
     if (existing) {
       if (existing.logo) {
@@ -238,135 +318,4 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         file: t.File(),
       }),
     }
-  )
-
-  .post("/db/generate/:id", async ({ params, set }) => {
-    try {
-      if (!process.env.DATABASE_BASE_URL) {
-        set.status = 500;
-        return {
-          success: false,
-          message: "DATABASE_BASE_URL environment variable is not set",
-        };
-      }
-
-      const [whitelabel] = await db
-        .select()
-        .from(whitelabels)
-        .where(eq(whitelabels.id, parseInt(params.id)));
-
-      if (!whitelabel) {
-        set.status = 404;
-        return { success: false, message: "Whitelabel not found" };
-      }
-
-      const config =
-        typeof whitelabel.config === "string"
-          ? JSON.parse(whitelabel.config)
-          : whitelabel.config;
-
-      const dbName =
-        config.dbName || whitelabel.name.toLowerCase().replace(/\s+/g, "_");
-      const dbUrl = `${process.env.DATABASE_BASE_URL}/${dbName}`;
-
-      const { stdout } = await execAsync("npm run db:generate", {
-        cwd: process.cwd(),
-        env: { ...process.env, DATABASE_URL: dbUrl },
-      });
-
-      set.status = 200;
-      return {
-        success: true,
-        message: `Schema generated for ${whitelabel.name} (${dbName})`,
-        output: stdout,
-      };
-    } catch (error: any) {
-      set.status = 500;
-      return {
-        success: false,
-        message: "Failed to generate database schema",
-        error: error.message,
-      };
-    }
-  })
-
-  .post("/db/migrate/:id", async ({ params, set }) => {
-    try {
-      if (!process.env.DATABASE_BASE_URL) {
-        set.status = 500;
-        return {
-          success: false,
-          message: "DATABASE_BASE_URL environment variable is not set",
-        };
-      }
-
-      const [whitelabel] = await db
-        .select()
-        .from(whitelabels)
-        .where(eq(whitelabels.id, parseInt(params.id)));
-
-      if (!whitelabel) {
-        set.status = 404;
-        return { success: false, message: "Whitelabel not found" };
-      }
-
-      const config =
-        typeof whitelabel.config === "string"
-          ? JSON.parse(whitelabel.config)
-          : whitelabel.config;
-
-      const dbName =
-        config.dbName || whitelabel.name.toLowerCase().replace(/\s+/g, "_");
-
-      const adminDb = postgres(process.env.DATABASE_BASE_URL + "/postgres", {
-        ssl: { rejectUnauthorized: false },
-      });
-      
-      // Check if database already exists
-      const dbExists = await adminDb`
-        SELECT 1 FROM pg_database WHERE datname = ${dbName}
-      `;
-      
-      if (dbExists.length === 0) {
-        await adminDb.unsafe(`CREATE DATABASE ${dbName}`);
-        console.log(`Database ${dbName} created successfully`);
-      } else {
-        console.log(`Database ${dbName} already exists`);
-      }
-      await adminDb.end();
-
-      const dbUrl = `${process.env.DATABASE_BASE_URL}/${dbName}`;
-      console.log(`Running migration for database: ${dbName}`);
-      console.log(`Database URL: ${dbUrl.replace(/:[^:@]+@/, ":****@")}`);
-      
-      try {
-        const { stdout, stderr } = await execAsync("bun run src/db/migrate.ts", {
-          cwd: process.cwd(),
-          env: { ...process.env, DATABASE_URL: dbUrl },
-        });
-
-        const output = stdout || stderr || "";
-        console.log("Migration output:", output);
-
-        if (output.includes("Migration completed successfully")) {
-          set.status = 200;
-          return {
-            success: true,
-            message: `Migration completed for ${whitelabel.name} (${dbName})`,
-            output: output,
-          };
-        } else {
-          throw new Error(`Migration may have failed. Output: ${output}`);
-        }
-      } catch (execError: any) {
-        console.error("Migration execution error:", execError);
-        throw new Error(`Migration failed: ${execError.message || execError.stderr || execError.stdout || "Unknown error"}`);
-      }
-    } catch (error: any) {
-      set.status = 500;
-      return {
-        success: false,
-        message: error.message || "Failed to run database migration",
-      };
-    }
-  });
+  );

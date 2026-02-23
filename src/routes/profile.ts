@@ -4,7 +4,7 @@ import {
   notifications,
   profiles,
   promocodes,
-  transactions,
+  vouchers,
   userReadNotifications,
   users,
 } from "../db/schema";
@@ -29,9 +29,19 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       store.role = state_result.data.role;
     },
   })
-  .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
-    const { db, whitelabel } = await whitelabel_middleware(request);
-    return { db: db as DbType, whitelabel };
+  .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any; dbError?: string }> => {
+    const { db, whitelabel, dbError } = await whitelabel_middleware(request);
+    return { db: db as DbType, whitelabel, dbError };
+  })
+  .onBeforeHandle(({ dbError, set }) => {
+    if (dbError === "DATABASE_NOT_FOUND") {
+      set.status = 503;
+      return {
+        success: false,
+        error: "DATABASE_NOT_FOUND",
+        message: "Database not found. Please contact the owner to create the database.",
+      };
+    }
   })
 
   .get("/me", async ({ store, set, db }) => {
@@ -41,7 +51,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       .where(eq(users.id, store.id))
       .limit(1);
 
-    if (!user || user.status === "suspended") {
+    const canLogin = (user?.accountStatus ?? true) && (user?.parentAccountStatus ?? true);
+    if (!user || !canLogin) {
       set.status = 401;
       return { loggedIn: false };
     }
@@ -56,6 +67,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         role: user.role,
         membership: user.membership,
         balance: user.balance,
+        upline: user.upline ?? "0.00",
+        downline: user.downline ?? "0.00",
       },
     };
   })
@@ -171,22 +184,22 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }
   )
 
-  // Get user transactions
+  // Get user transactions (queries vouchers table but endpoint name remains "transactions" for user-facing API)
   .get("/transactions", async ({ query, store, set, db }) => {
-    const { transactions } = await import("../db/schema");
+    const { vouchers } = await import("../db/schema");
 
-    let whereConditions = [eq(transactions.userId, store.id)];
+    let whereConditions = [eq(vouchers.userId, store.id)];
 
     if (query.type && query.type !== "all") {
-      whereConditions.push(eq(transactions.type, query.type));
+      whereConditions.push(eq(vouchers.type, query.type));
     }
 
     const queryBuilder = db
       .select()
-      .from(transactions)
+      .from(vouchers)
       .where(and(...whereConditions));
 
-    const userTransactions = await queryBuilder.orderBy(transactions.createdAt);
+    const userTransactions = await queryBuilder.orderBy(vouchers.createdAt);
     set.status = 200;
     return { success: true, data: userTransactions };
   })
@@ -315,7 +328,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       }
 
       const [transaction] = await db
-        .insert(transactions)
+        .insert(vouchers)
         .values({
           ...updatedBody,
           userId: store.id,
@@ -373,7 +386,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         .where(eq(users.id, store.id));
 
       const [transaction] = await db
-        .insert(transactions)
+        .insert(vouchers)
         .values({
           userId: store.id,
           type: "withdraw",
@@ -436,12 +449,12 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
 
       const [existingRedemption] = await db
         .select()
-        .from(transactions)
+        .from(vouchers)
         .where(
           and(
-            eq(transactions.userId, store.id),
-            eq(transactions.type, "promocode"),
-            eq(transactions.reference, promocode.code)
+            eq(vouchers.userId, store.id),
+            eq(vouchers.type, "promocode"),
+            eq(vouchers.reference, promocode.code)
           )
         )
         .limit(1);
@@ -472,7 +485,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         bonusAmount = parseFloat(promocode.value);
       }
 
-      await db.insert(transactions).values({
+      await db.insert(vouchers).values({
         userId: store.id,
         type: "promocode",
         amount: bonusAmount.toString(),

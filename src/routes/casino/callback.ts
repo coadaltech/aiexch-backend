@@ -1,4 +1,6 @@
 import { Elysia, t } from "elysia";
+import { eq } from "drizzle-orm";
+import { users } from "../../db/schema";
 import { whitelabel_middleware } from "@middleware/whitelabel";
 import { CasinoCallbackService } from "@services/casino/casino-callback";
 import type { CallbackHeaders } from "@services/casino/casino-callback";
@@ -202,6 +204,17 @@ export const casinoCallbackRoutes = new Elysia({ prefix: "/casino/callback" })
               console.log({ success: false, error: "Player not found" });
 
               return { success: false, error: "Player not found" };
+            }
+
+            const [playerUser] = await db
+              .select({ betStatus: users.betStatus, parentBetStatus: users.parentBetStatus })
+              .from(users)
+              .where(eq(users.id, playerId))
+              .limit(1);
+            const canBet = (playerUser?.betStatus ?? true) && (playerUser?.parentBetStatus ?? true);
+            if (!canBet) {
+              set.status = 403;
+              return { success: false, error: "Betting is disabled for your account" };
             }
 
             // Convert EUR amount to INR for database operations

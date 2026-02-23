@@ -1,5 +1,5 @@
 import { DbType } from "../../types";
-import { users, transactions } from "@db/schema";
+import { users, vouchers } from "@db/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import "dotenv/config";
@@ -195,7 +195,7 @@ export const CasinoCallbackService = {
     currency: string = "INR",
     extra?: { method?: string; txnHash?: string }
   ) {
-    await db.insert(transactions).values({
+    await db.insert(vouchers).values({
       userId: playerId,
       type,
       amount,
@@ -210,8 +210,8 @@ export const CasinoCallbackService = {
   async getTransaction(db: DbType, txnId: string) {
     const [txn] = await db
       .select()
-      .from(transactions)
-      .where(eq(transactions.reference, txnId))
+      .from(vouchers)
+      .where(eq(vouchers.reference, txnId))
       .limit(1);
     return txn;
   },
@@ -219,16 +219,16 @@ export const CasinoCallbackService = {
   async getTransactionByTxnHash(db: DbType, txnHash: string) {
     const [txn] = await db
       .select()
-      .from(transactions)
-      .where(eq(transactions.txnHash, txnHash))
+      .from(vouchers)
+      .where(eq(vouchers.txnHash, txnHash))
       .limit(1);
     return txn;
   },
 
   async updateTransactionStatus(db: DbType, txnId: string, status: string) {
     await db
-      .update(transactions)
+      .update(vouchers)
       .set({ status })
-      .where(eq(transactions.reference, txnId));
+      .where(eq(vouchers.reference, txnId));
   },
 };

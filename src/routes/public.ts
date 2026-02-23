@@ -17,13 +17,38 @@ import { DbType } from "../types";
 import { db as myDb } from "../db";
 
 export const publicRoutes = new Elysia({ prefix: "/public" })
-  .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
-    const { db, whitelabel } = await whitelabel_middleware(request);
-    return { db: db as DbType, whitelabel };
+  .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any; dbError?: string }> => {
+    const { db, whitelabel, dbError } = await whitelabel_middleware(request);
+    return { db: db as DbType, whitelabel, dbError };
+  })
+  .get("/whitelabel-info", async ({ set, whitelabel }) => {
+    if (!whitelabel) {
+      set.status = 200;
+      return { success: true, data: { whitelabelType: null, id: null, name: null } };
+    }
+    const rawType = whitelabel.whitelabelType ?? "B2C";
+    const whitelabelType = String(rawType).toUpperCase() === "B2B" ? "B2B" : "B2C";
+    set.status = 200;
+    return {
+      success: true,
+      data: {
+        whitelabelType,
+        id: whitelabel.id,
+        name: whitelabel.name,
+      },
+    };
   })
   .get(
     "/promotions",
-    async ({ set, db, request }) => {
+    async ({ set, db, request, dbError }) => {
+      if (dbError === "DATABASE_NOT_FOUND") {
+        set.status = 503;
+        return { 
+          success: false, 
+          error: "DATABASE_NOT_FOUND",
+          message: "Database not found. Please contact the owner to create the database." 
+        };
+      }
       const data = await db
         .select()
         .from(promotions)

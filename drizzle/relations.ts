@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { users, kycDocuments, accountStatements, bets, refreshTokens, homeSections, homeSectionGames, profiles, transactions, userReadNotifications, notifications } from "./schema";
+import { users, kycDocuments, accountStatements, bets, refreshTokens, homeSections, homeSectionGames, profiles, vouchers, userReadNotifications, notifications } from "./schema";
 
 export const kycDocumentsRelations = relations(kycDocuments, ({one}) => ({
 	user: one(users, {
@@ -14,7 +14,7 @@ export const usersRelations = relations(users, ({many}) => ({
 	bets: many(bets),
 	refreshTokens: many(refreshTokens),
 	profiles: many(profiles),
-	transactions: many(transactions),
+	vouchers: many(vouchers),
 	userReadNotifications: many(userReadNotifications),
 }));
 
@@ -57,9 +57,9 @@ export const profilesRelations = relations(profiles, ({one}) => ({
 	}),
 }));
 
-export const transactionsRelations = relations(transactions, ({one}) => ({
+export const vouchersRelations = relations(vouchers, ({one}) => ({
 	user: one(users, {
-		fields: [transactions.userId],
+		fields: [vouchers.userId],
 		references: [users.id]
 	}),
 }));
