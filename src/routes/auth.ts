@@ -149,6 +149,14 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           return { success: false, message: "Account suspended" };
         }
 
+        if (!whitelabel && user.role !== "owner") {
+          set.status = 403;
+          return {
+            success: false,
+            message: "This domain is not registered. Only the owner can sign in here.",
+          };
+        }
+
         if (whitelabel && user.role !== "owner") {
           const userWlId = user.whitelabelId != null ? Number(user.whitelabelId) : null;
           const wlId = whitelabel.id != null ? Number(whitelabel.id) : null;
