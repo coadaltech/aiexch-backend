@@ -582,9 +582,36 @@ export const competitions = pgTable("competitions", {
     .$onUpdate(() => new Date()),
 });
 
+// Managed currencies (owner-only): code, name, country, current value
+export const currencies = pgTable("currencies", {
+  id: bigint("id", { mode: "number" })
+    .primaryKey()
+    .$defaultFn(() => Number(generateNumericId())),
+  code: varchar("code", { length: 10 }).notNull().unique(),
+  name: varchar("name", { length: 100 }).notNull(),
+  countryName: varchar("country_name", { length: 100 }).notNull(),
+  value: decimal("value", { precision: 18, scale: 6 }).notNull().default("1"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
 
+// History of currency value changes (when owner updates a currency value)
+export const currencyValueHistory = pgTable("currency_value_history", {
+  id: bigint("id", { mode: "number" })
+    .primaryKey()
+    .$defaultFn(() => Number(generateNumericId())),
+  currencyId: bigint("currency_id", { mode: "number" })
+    .references(() => currencies.id, { onDelete: "cascade" })
+    .notNull(),
+  value: decimal("value", { precision: 18, scale: 6 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
 // Create indexes
+export const currencyValueHistoryIndex = { table: currencyValueHistory, columns: [currencyValueHistory.currencyId] as const };
+
 export const sportsIndexes = [
   // Create index for is_active for faster filtering
   { table: sports, columns: [sports.is_active] },

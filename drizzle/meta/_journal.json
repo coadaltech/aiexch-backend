@@ -246,6 +246,20 @@
       "when": 1771825600000,
       "tag": "0035_drop_users_status",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1771825700000,
+      "tag": "0036_add_currencies_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1771851930831,
+      "tag": "0036_flashy_triathlon",
+      "breakpoints": true
     }
   ]
 }

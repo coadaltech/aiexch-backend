@@ -16,6 +16,7 @@ import { whitelabelsRoutes } from "./whitelabels";
 import { withdrawalMethodsRoutes } from "./withdrawal-methods";
 import { casinoGamesOwnerRoutes } from "./casino-games";
 import { domainsRoutes } from "./domains";
+import { currenciesRoutes } from "./currencies";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .state({ id: 0, role: "" })
@@ -48,4 +49,5 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(whitelabelsRoutes)
   .use(withdrawalMethodsRoutes)
   .use(casinoGamesOwnerRoutes)
+  .use(currenciesRoutes)
 // .use((app) => domainsRoutes(app));
