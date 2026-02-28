@@ -60,9 +60,13 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Invalid stake or odds values" };
       }
 
-      if (!runners || runners.length < 2) {
+      const isLineBet = marketType === "sessions";
+      if (!runners || runners.length < (isLineBet ? 1 : 2)) {
         set.status = 400;
-        return { success: false, error: "At least two runners are required" };
+        return {
+          success: false,
+          error: isLineBet ? "Runner is required" : "At least two runners are required",
+        };
       }
 
       const userData = await db
@@ -108,7 +112,11 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       const ua = parseUserAgent(request.headers.get("user-agent"));
 
-      const potentialPayout = (stake * odds).toFixed(2);
+      // For LINE (sessions) markets: profit = stake × (rate / 100), total = stake + profit
+      // For ODDS/BOOKMAKER: potentialPayout = stake × odds
+      const potentialPayout = isLineBet
+        ? (stake + stake * (odds / 100)).toFixed(2)
+        : (stake * odds).toFixed(2);
 
       const [txn] = await db.transaction(async (tx) => {
         // Deduct stake from balance
@@ -146,7 +154,9 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         const detailRows = runners.map((runner) => {
           const isSelected = runner.id === selectionId;
           const runnerReturn = isSelected
-            ? (stake * odds).toFixed(2)
+            ? isLineBet
+              ? (stake + stake * (odds / 100)).toFixed(2)
+              : (stake * odds).toFixed(2)
             : "0";
           return {
             transactionId: newTxn.id,
