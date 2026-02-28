@@ -63,7 +63,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
             status: body.status,
             updatedAt: new Date(),
           })
-          .where(eq(sportsGames.id, parseInt(params.id)))
+          .where(eq(sportsGames.id, params.id))
           .returning();
         set.status = 200;
         return { success: true, data: game };
@@ -88,7 +88,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
   )
   .delete("/:id", async ({ params, set }) => {
     try {
-      await db.delete(sportsGames).where(eq(sportsGames.id, parseInt(params.id)));
+      await db.delete(sportsGames).where(eq(sportsGames.id, params.id));
       set.status = 200;
       return { success: true };
     } catch (error) {

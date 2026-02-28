@@ -10,15 +10,28 @@ export const ROLES_CREATABLE_BY: Record<string, string[]> = {
   agent: ["user"],
 };
 
+export const ROLE_TO_GROUP_ID: Record<string, number> = {
+  owner: 0,
+  admin: 3,
+  super: 4,
+  master: 5,
+  agent: 6,
+  user: 7,
+};
+
+export function getGroupIdForRole(role: string): number {
+  return ROLE_TO_GROUP_ID[role.toLowerCase()] ?? 7;
+}
+
 export interface OwnerScopeResult {
   /** Whitelabel id the current user is allowed to see (null = no access / owner not on a whitelabel domain) */
-  scopeWhitelabelId: number | null;
+  scopeWhitelabelId: string | null;
   /** "B2B" | "B2C" for scope whitelabel */
   whitelabelType: "B2B" | "B2C" | null;
   /** If true, filter users by createdBy = current user id (only users they created). If false, show all users of the whitelabel. */
   filterUsersByCreatedBy: boolean;
   /** Current user id (for createdBy filter) */
-  currentUserId: number;
+  currentUserId: string;
   /** Current user role */
   currentUserRole: string;
   /** Roles the current user is allowed to create */
@@ -34,10 +47,10 @@ export interface OwnerScopeResult {
  */
 export async function resolveOwnerScope(
   db: DbType,
-  requestWhitelabel: { id: number; whitelabelType?: string } | undefined,
-  store: { id?: number; role?: string }
+  requestWhitelabel: { id: string; whitelabelType?: string } | undefined,
+  store: { id?: string; role?: string }
 ): Promise<OwnerScopeResult> {
-  const currentUserId = Number(store.id) || 0;
+  const currentUserId = store.id ?? "";
   const currentUserRole = String((store.role as string) || "user").toLowerCase();
   const allowedRolesToCreate = ROLES_CREATABLE_BY[currentUserRole] ?? [];
 
@@ -59,7 +72,7 @@ export async function resolveOwnerScope(
   }
 
   // Non-owner: scope = their whitelabel (whitelabelId or whitelabel where they are admin)
-  let scopeWhitelabelId: number | null = null;
+  let scopeWhitelabelId: string | null = null;
   let whitelabelType: "B2B" | "B2C" | null = null;
 
   const [currentUser] = await db
@@ -68,7 +81,7 @@ export async function resolveOwnerScope(
     .where(eq(users.id, currentUserId))
     .limit(1);
   if (currentUser?.whitelabelId != null) {
-    scopeWhitelabelId = Number(currentUser.whitelabelId);
+    scopeWhitelabelId = currentUser.whitelabelId;
   }
   if (scopeWhitelabelId == null) {
     const [wl] = await db
@@ -77,7 +90,7 @@ export async function resolveOwnerScope(
       .where(eq(whitelabels.userId, currentUserId))
       .limit(1);
     if (wl) {
-      scopeWhitelabelId = Number(wl.id);
+      scopeWhitelabelId = wl.id;
       whitelabelType = String(wl.whitelabelType).toUpperCase() === "B2B" ? "B2B" : "B2C";
     }
   }

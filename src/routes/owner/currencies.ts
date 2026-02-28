@@ -100,7 +100,7 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
     "/:id",
     async ({ params, body, set }) => {
       try {
-        const id = Number(params.id);
+        const id = params.id;
         const newValue = body.value != null ? String(body.value) : undefined;
         if (newValue == null) {
           set.status = 400;
@@ -132,7 +132,7 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
   )
   .get("/:id/history", async ({ params, set }) => {
     try {
-      const id = Number(params.id);
+      const id = params.id;
       const list = await db
         .select()
         .from(currencyValueHistory)

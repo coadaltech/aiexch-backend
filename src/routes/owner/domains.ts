@@ -52,7 +52,7 @@ export const domainsRoutes = (app: Elysia) =>
           
           const [domain] = await db.update(domainsTable)
             .set({ name, status, updatedAt: new Date() })
-            .where(eq(domainsTable.id, parseInt(domainId)))
+            .where(eq(domainsTable.id, domainId))
             .returning();
           
           set.status = 200;
@@ -70,7 +70,7 @@ export const domainsRoutes = (app: Elysia) =>
 
           await db
             .delete(domainsTable)
-            .where(eq(domainsTable.id, parseInt(domainId)));
+            .where(eq(domainsTable.id, domainId));
 
           set.status = 200;
           return { success: true };

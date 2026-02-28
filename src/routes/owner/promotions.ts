@@ -78,7 +78,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
         const [current] = await db
           .select()
           .from(promotions)
-          .where(eq(promotions.id, parseInt(params.id)));
+          .where(eq(promotions.id, params.id));
 
 
 
@@ -127,7 +127,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
         const [updated] = await db
           .update(promotions)
           .set(updateData)
-          .where(eq(promotions.id, parseInt(params.id)))
+          .where(eq(promotions.id, params.id))
           .returning();
 
         set.status = 200;
@@ -159,7 +159,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
     const [current] = await db
       .select()
       .from(promotions)
-      .where(eq(promotions.id, parseInt(params.id)));
+      .where(eq(promotions.id, params.id));
 
     if (!current) {
       set.status = 404;
@@ -174,7 +174,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
       }
     }
 
-    await db.delete(promotions).where(eq(promotions.id, parseInt(params.id)));
+    await db.delete(promotions).where(eq(promotions.id, params.id));
     set.status = 200;
     return { success: true };
   });

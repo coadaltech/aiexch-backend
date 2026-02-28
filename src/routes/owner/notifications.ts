@@ -40,7 +40,7 @@ export const notificationsRoutes = new Elysia({ prefix: "/notifications" })
       const [updated] = await db
         .update(notifications)
         .set(body)
-        .where(eq(notifications.id, parseInt(params.id)))
+        .where(eq(notifications.id, params.id))
         .returning();
       set.status = 200;
       return { success: true, data: updated };
@@ -56,7 +56,7 @@ export const notificationsRoutes = new Elysia({ prefix: "/notifications" })
   )
 
   .delete("/:id", async ({ params, set, db }) => {
-    const id = parseInt(params.id);
+    const id = params.id;
     if (isNaN(id)) {
       set.status = 400;
       throw new Error("Invalid notification ID");

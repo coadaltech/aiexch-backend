@@ -5,7 +5,6 @@ import { DbType } from "../../types";
 import { casino_games, users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { app_middleware } from "@middleware/auth";
-import { generateNumericId } from "@utils/generateId";
 
 export const casinoAggregatorRoutes = new Elysia({ prefix: "/casino" })
   .resolve(async ({ request }): Promise<{ db: DbType }> => {
@@ -100,7 +99,7 @@ export const casinoAggregatorRoutes = new Elysia({ prefix: "/casino" })
           return { success: false, error: "Player not found" };
         }
 
-        const uniqueSessionId = generateNumericId();
+        const uniqueSessionId = crypto.randomUUID();
 
         const requestBody = {
           game_uuid,

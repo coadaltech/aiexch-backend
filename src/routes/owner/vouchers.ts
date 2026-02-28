@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { vouchers, users } from "../../db/schema";
+import { vouchers, profiles } from "../../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
@@ -23,17 +23,16 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
         .values(body)
         .returning();
 
-      // Automatically add to user balance if deposit/bonus and status is completed
       if (
         (voucher.type === "deposit" || voucher.type === "bonus") &&
         voucher.status === "completed"
       ) {
         await db
-          .update(users)
+          .update(profiles)
           .set({
-            balance: sql`${users.balance} + ${voucher.amount}`,
+            balance: sql`${profiles.balance} + ${voucher.amount}`,
           })
-          .where(eq(users.id, voucher.userId));
+          .where(eq(profiles.userId, voucher.userId));
       }
 
       set.status = 201;
@@ -41,7 +40,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
     },
     {
       body: t.Object({
-        userId: t.Number(),
+        userId: t.String(),
         type: t.String(),
         amount: t.String(),
         currency: t.Optional(t.String()),
@@ -56,7 +55,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
   .put(
     "/:id",
     async ({ params, body, set, db }) => {
-      const voucherId = parseInt(params.id);
+      const voucherId = params.id;
       const [updated] = await db
         .update(vouchers)
         .set({ status: body.status, updatedAt: new Date() })
@@ -70,19 +69,18 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
       if (updated.status === "completed" && (updated.type === "deposit" || updated.type === "bonus")) {
         await db
-          .update(users)
+          .update(profiles)
           .set({
-            balance: sql`${users.balance} + ${updated.amount}`,
+            balance: sql`${profiles.balance} + ${updated.amount}`,
           })
-          .where(eq(users.id, updated.userId));
+          .where(eq(profiles.userId, updated.userId));
       } else if (updated.status === "failed" && updated.type === "withdraw") {
-        // Refund balance for rejected withdrawals
         await db
-          .update(users)
+          .update(profiles)
           .set({
-            balance: sql`${users.balance} + ${updated.amount}`,
+            balance: sql`${profiles.balance} + ${updated.amount}`,
           })
-          .where(eq(users.id, updated.userId));
+          .where(eq(profiles.userId, updated.userId));
       }
 
       set.status = 200;

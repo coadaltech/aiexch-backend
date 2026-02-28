@@ -205,7 +205,7 @@ export const publicRoutes = new Elysia({ prefix: "/public" })
       .from(homeSectionGames)
       .where(
         and(
-          eq(homeSectionGames.sectionId, parseInt(params.id)),
+          eq(homeSectionGames.sectionId, params.id),
           eq(homeSectionGames.status, "active")
         )
       )

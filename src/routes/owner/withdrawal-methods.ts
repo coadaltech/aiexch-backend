@@ -50,7 +50,7 @@ export const withdrawalMethodsRoutes = new Elysia({
       const [updated] = await db
         .update(withdrawalMethods)
         .set({ ...body, updatedAt: new Date() })
-        .where(eq(withdrawalMethods.id, parseInt(params.id)))
+        .where(eq(withdrawalMethods.id, params.id))
         .returning();
       set.status = 200;
       return { success: true, data: updated };
@@ -74,7 +74,7 @@ export const withdrawalMethodsRoutes = new Elysia({
   .delete("/:id", async ({ params, set, db }) => {
     await db
       .delete(withdrawalMethods)
-      .where(eq(withdrawalMethods.id, parseInt(params.id)));
+      .where(eq(withdrawalMethods.id, params.id));
     set.status = 200;
     return { success: true };
   });

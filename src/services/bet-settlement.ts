@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { bets } from "../db/schema";
-import { eq, and, inArray, sql, isNull, or, lt } from "drizzle-orm";
+import { transactions } from "../db/schema";
+import { eq, and, inArray, isNull, or, lt } from "drizzle-orm";
 import { SportsService } from "./sports";
 import { addResultToQueue } from "../queues/betting";
 
@@ -149,7 +149,7 @@ async function fetchAndMapResults(
 }
 
 /**
- * Process and settle bets for a finished match
+ * Process and settle transactions for a finished match
  */
 async function settleMatchBets(
   matchId: string,
@@ -166,21 +166,21 @@ async function settleMatchBets(
       // Use default "odds" if marketType is null/undefined
       const effectiveMarketType = marketType || "odds";
 
-      const betsForMarketType = await db
-        .select({ marketId: bets.marketId })
-        .from(bets)
+      const transactionsForMarketType = await db
+        .select({ marketId: transactions.marketId })
+        .from(transactions)
         .where(
           and(
-            eq(bets.matchId, matchId),
-            eq(bets.eventTypeId, eventTypeId),
-            eq(bets.status, "matched"),
-            eq(bets.marketType, effectiveMarketType),
-            inArray(bets.marketId, marketIds)
+            eq(transactions.matchId, matchId),
+            eq(transactions.eventTypeId, eventTypeId),
+            eq(transactions.status, "matched"),
+            eq(transactions.marketType, effectiveMarketType),
+            inArray(transactions.marketId, marketIds)
           )
         )
-        .groupBy(bets.marketId);
+        .groupBy(transactions.marketId);
 
-      const marketIdsForType = betsForMarketType.map((b) => b.marketId);
+      const marketIdsForType = transactionsForMarketType.map((b) => b.marketId);
 
       if (marketIdsForType.length > 0) {
         const typeResults = await fetchAndMapResults(
@@ -206,53 +206,53 @@ async function settleMatchBets(
       );
     }
   } catch (error) {
-    console.error(`Error settling bets for match ${matchId}:`, error);
+    console.error(`Error settling transactions for match ${matchId}:`, error);
   }
 }
 
 /**
- * Check and settle bets for finished matches
+ * Check and settle transactions for finished matches
  */
 export async function checkAndSettleBets(): Promise<void> {
   try {
     console.log("Starting bet settlement check...");
 
-    // Get all matched bets that haven't been settled
-    // Check only bets that haven't been checked recently (within last hour)
+    // Get all matched transactions that haven't been settled
+    // Check only transactions that haven't been checked recently (within last hour)
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
     const unsettledBets = await db
       .select({
-        matchId: bets.matchId,
-        eventTypeId: bets.eventTypeId,
-        marketId: bets.marketId,
-        marketType: bets.marketType,
+        matchId: transactions.matchId,
+        eventTypeId: transactions.eventTypeId,
+        marketId: transactions.marketId,
+        marketType: transactions.marketType,
       })
-      .from(bets)
+      .from(transactions)
       .where(
         and(
-          eq(bets.status, "matched"),
+          eq(transactions.status, "matched"),
           or(
-            isNull(bets.resultCheckedAt),
-            lt(bets.resultCheckedAt, oneHourAgo)
+            isNull(transactions.resultCheckedAt),
+            lt(transactions.resultCheckedAt, oneHourAgo)
           )
         )
       )
       .groupBy(
-        bets.matchId,
-        bets.eventTypeId,
-        bets.marketId,
-        bets.marketType
+        transactions.matchId,
+        transactions.eventTypeId,
+        transactions.marketId,
+        transactions.marketType
       );
 
     if (unsettledBets.length === 0) {
-      console.log("No unsettled bets found");
+      console.log("No unsettled transactions found");
       return;
     }
 
-    console.log(`Found ${unsettledBets.length} groups of unsettled bets`);
+    console.log(`Found ${unsettledBets.length} groups of unsettled transactions`);
 
-    // Group bets by match
+    // Group transactions by match
     const matchGroups = new Map<string, MatchBetGroup>();
 
     for (const bet of unsettledBets) {
@@ -282,13 +282,13 @@ export async function checkAndSettleBets(): Promise<void> {
 
         // Update resultCheckedAt to prevent duplicate checks
         await db
-          .update(bets)
+          .update(transactions)
           .set({ resultCheckedAt: new Date() })
           .where(
             and(
-              eq(bets.matchId, group.matchId),
-              eq(bets.eventTypeId, eventTypeId),
-              eq(bets.status, "matched")
+              eq(transactions.matchId, group.matchId),
+              eq(transactions.eventTypeId, eventTypeId),
+              eq(transactions.status, "matched")
             )
           );
 
@@ -297,7 +297,7 @@ export async function checkAndSettleBets(): Promise<void> {
 
         if (isFinished) {
           console.log(
-            `Match ${group.matchId} is finished, settling bets...`
+            `Match ${group.matchId} is finished, settling transactions...`
           );
           await settleMatchBets(
             group.matchId,

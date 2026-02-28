@@ -16,7 +16,7 @@ export const kycRoutes = new Elysia({ prefix: "/kyc" })
       const [updated] = await db
         .update(kycDocuments)
         .set({ status: body.status, reviewNotes: body.reviewNotes })
-        .where(eq(kycDocuments.id, parseInt(params.id)))
+        .where(eq(kycDocuments.id, params.id))
         .returning();
       set.status = 200;
       return { success: true, data: updated };

@@ -73,7 +73,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
         const [existing] = await db
           .select()
           .from(banners)
-          .where(eq(banners.id, parseInt(params.id)));
+          .where(eq(banners.id, params.id));
 
         if (!existing) {
           set.status = 404;
@@ -107,7 +107,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
         const [updated] = await db
           .update(banners)
           .set(updateData)
-          .where(eq(banners.id, parseInt(params.id)))
+          .where(eq(banners.id, params.id))
           .returning();
         set.status = 200;
         return { success: true, data: updated };
@@ -139,7 +139,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
     const [existing] = await db
       .select()
       .from(banners)
-      .where(eq(banners.id, parseInt(params.id)));
+      .where(eq(banners.id, params.id));
 
     if (existing?.imageUrl) {
       try {
@@ -149,7 +149,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
       }
     }
 
-    await db.delete(banners).where(eq(banners.id, parseInt(params.id)));
+    await db.delete(banners).where(eq(banners.id, params.id));
     set.status = 200;
     return { success: true };
   });

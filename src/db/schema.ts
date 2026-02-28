@@ -1,6 +1,5 @@
 import {
   pgTable,
-  serial,
   varchar,
   text,
   timestamp,
@@ -8,39 +7,26 @@ import {
   date,
   decimal,
   integer,
-  bigint,
   jsonb,
   pgEnum,
-  PgTextBuilder,
-  PgTable,
+  uuid,
+  serial,
 } from "drizzle-orm/pg-core";
-import { generateNumericId, generateNumericRandomId } from "../utils/generateId";
 
 export const whitelabelTypeEnum = pgEnum("whitelabel_type", ["B2B", "B2C"]);
 
 export const users = pgTable("users", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   username: varchar("username", { length: 50 }).notNull().unique(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   password: varchar("password", { length: 255 }).notNull(),
   role: varchar("role", { length: 20 }).default("user"),
-  membership: varchar("membership", { length: 20 }).default("bronze"),
   accountStatus: boolean("account_status").default(true).notNull(),
-  betStatus: boolean("bet_status").default(true).notNull(),
   parentAccountStatus: boolean("parent_account_status").default(true).notNull(),
-  parentBetStatus: boolean("parent_bet_status").default(true).notNull(),
-  balance: decimal("balance", { precision: 15, scale: 2 })
-    .default("0")
-    .notNull(),
-  upline: decimal("upline", { precision: 5, scale: 2 }).default("0.00"),
-  downline: decimal("downline", { precision: 5, scale: 2 }).default("0.00"),
+  groupId: integer("group_id"),
   emailVerified: boolean("email_verified").default(false),
-  whitelabelId: bigint("whitelabel_id", { mode: "number" }),
-  createdBy: bigint("created_by", { mode: "number" }),
-  lastLoginIp: varchar("last_login_ip", { length: 45 }),
-  lastLoginAt: timestamp("last_login_at"),
+  whitelabelId: uuid("whitelabel_id"),
+  createdBy: uuid("created_by"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
@@ -48,9 +34,7 @@ export const users = pgTable("users", {
 });
 
 export const casino_games = pgTable("casino_games", {
-  id: varchar("id", { length: 30 })
-    .primaryKey()
-    .$defaultFn(() => generateNumericId()),
+  id: uuid("id").primaryKey().defaultRandom(),
   uuid: varchar("uuid", { length: 255 }).notNull().unique(),
   name: text("name").notNull(),
   image: text("image").notNull(), // only main image
@@ -77,9 +61,7 @@ export const casino_games = pgTable("casino_games", {
 });
 
 export const otps = pgTable("otps", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   email: varchar("email", { length: 255 }).notNull(),
   otp: varchar("otp", { length: 6 }).notNull(),
   type: varchar("type", { length: 20 }).default("email_verification"),
@@ -89,10 +71,8 @@ export const otps = pgTable("otps", {
 });
 
 export const refreshTokens = pgTable("refresh_tokens", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   token: varchar("token", { length: 255 }).notNull().unique(),
@@ -101,9 +81,7 @@ export const refreshTokens = pgTable("refresh_tokens", {
 });
 
 export const promotions = pgTable("promotions", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
   type: varchar("type", { length: 50 }).notNull(),
@@ -116,9 +94,7 @@ export const promotions = pgTable("promotions", {
 });
 
 export const promocodes = pgTable("promocodes", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   code: varchar("code", { length: 50 }).notNull().unique(),
   type: varchar("type", { length: 50 }).notNull(),
   value: varchar("value", { length: 100 }).notNull(),
@@ -134,9 +110,7 @@ export const promocodes = pgTable("promocodes", {
 });
 
 export const banners = pgTable("banners", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   title: varchar("title", { length: 255 }).notNull(),
   imageUrl: text("image_url").notNull(),
   linkUrl: text("link_url"),
@@ -150,9 +124,7 @@ export const banners = pgTable("banners", {
 });
 
 export const popups = pgTable("popups", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   title: varchar("title", { length: 255 }).notNull(),
   imageUrl: text("image_url").notNull(),
   targetPage: varchar("target_page", { length: 100 }).notNull(),
@@ -164,10 +136,8 @@ export const popups = pgTable("popups", {
 });
 
 export const whitelabels = pgTable("whitelabels", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   whitelabelType: whitelabelTypeEnum("whitelabel_type").notNull().default("B2C"),
@@ -244,10 +214,8 @@ export const whitelabels = pgTable("whitelabels", {
 });
 
 export const vouchers = pgTable("vouchers", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   type: varchar("type", { length: 50 }).notNull(),
@@ -269,10 +237,8 @@ export const vouchers = pgTable("vouchers", {
 });
 
 export const kycDocuments = pgTable("kyc_documents", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   documentType: varchar("document_type", { length: 50 }).notNull(),
@@ -286,12 +252,19 @@ export const kycDocuments = pgTable("kyc_documents", {
 });
 
 export const profiles = pgTable("profiles", {
-  id: bigint("id", { mode: "number" })
+  userId: uuid("user_id")
     .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
+  membership: varchar("membership", { length: 20 }).default("bronze"),
+  betStatus: boolean("bet_status").default(true).notNull(),
+  parentBetStatus: boolean("parent_bet_status").default(true).notNull(),
+  balance: decimal("balance", { precision: 15, scale: 2 })
+    .default("0")
+    .notNull(),
+  upline: decimal("upline", { precision: 5, scale: 2 }).default("0.00"),
+  downline: decimal("downline", { precision: 5, scale: 2 }).default("0.00"),
+  currencyId: uuid("currency_id"),
   firstName: varchar("first_name", { length: 100 }),
   lastName: varchar("last_name", { length: 100 }),
   birthDate: date("birth_date"),
@@ -301,6 +274,8 @@ export const profiles = pgTable("profiles", {
   withdrawalAddress: text("withdrawal_address"),
   phone: varchar("phone", { length: 20 }),
   avatar: text("avatar"),
+  lastLoginIp: varchar("last_login_ip", { length: 45 }),
+  lastLoginAt: timestamp("last_login_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
@@ -308,9 +283,7 @@ export const profiles = pgTable("profiles", {
 });
 
 export const settings = pgTable("settings", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   siteName: varchar("site_name", { length: 255 }).default("AIEXCH"),
   logo: text("logo"),
   favicon: text("favicon"),
@@ -357,10 +330,19 @@ export const settings = pgTable("settings", {
     .$onUpdate(() => new Date()),
 });
 
+export const ledgerGroups = pgTable("ledger_groups", {
+  ledgerGroupsid: serial("ledger_group_id").primaryKey().notNull(),
+  ledgerGroupsname: varchar("ledger_group_name", { length: 100 }).notNull(),
+  createdBy: varchar("created_by", { length: 50 }).default("system").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+  updatedBy: varchar("updated_by", { length: 50 }).default("system").notNull(),
+});
+
 export const notifications = pgTable("notifications", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   title: varchar("title", { length: 255 }).notNull(),
   message: text("message").notNull(),
   type: varchar("type", { length: 50 }).default("info"),
@@ -372,13 +354,11 @@ export const notifications = pgTable("notifications", {
 });
 
 export const userReadNotifications = pgTable("user_read_notifications", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
-  notificationId: bigint("notification_id", { mode: "number" })
+  notificationId: uuid("notification_id")
     .references(() => notifications.id, { onDelete: "cascade" })
     .notNull(),
   isRead: boolean("is_read").default(true),
@@ -387,9 +367,7 @@ export const userReadNotifications = pgTable("user_read_notifications", {
 });
 
 export const qrCodes = pgTable("qr_codes", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   paymentMethod: varchar("payment_method", { length: 100 }).notNull(),
   currency: varchar("currency", { length: 10 }).default("INR"),
   qrCodeUrl: text("qr_code_url"),
@@ -402,37 +380,50 @@ export const qrCodes = pgTable("qr_codes", {
     .$onUpdate(() => new Date()),
 });
 
-export const bets = pgTable("bets", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
+export const transactions = pgTable("transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
-  eventTypeId: varchar("event_type_id", { length: 50 }).notNull(), // Required for fetching results
+  whitelabelId: uuid("whitelabel_id"),
+  eventTypeId: varchar("event_type_id", { length: 50 }).notNull(),
   matchId: varchar("match_id", { length: 100 }).notNull(),
   marketId: varchar("market_id", { length: 100 }).notNull(),
+  marketName: varchar("market_name", { length: 255 }),
+  marketType: varchar("market_type", { length: 20 }).default("odds"), // odds | bookmakers | sessions | fancy
   selectionId: varchar("selection_id", { length: 100 }).notNull(),
-  marketName: varchar("market_name", { length: 255 }), // Human-readable market name
-  runnerName: varchar("runner_name", { length: 255 }), // Human-readable runner/selection name
-  marketType: varchar("market_type", { length: 20 }).default("odds"), // odds, bookmakers, sessions, fancy
-  odds: decimal("odds", { precision: 10, scale: 2 }).notNull(),
-  stake: decimal("stake", { precision: 10, scale: 2 }).notNull(),
-  type: varchar("type", { length: 10 }).notNull(), // back, lay
-  status: varchar("status", { length: 20 }).default("pending"), // pending, matched, won, lost, cancelled
-  payout: decimal("payout", { precision: 10, scale: 2 }).default("0"),
+  selectionName: varchar("selection_name", { length: 255 }),
+  betType: varchar("bet_type", { length: 10 }).notNull(), // back | lay
+  stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
+  odds: decimal("odds", { precision: 10, scale: 4 }).notNull(),
+  potentialPayout: decimal("potential_payout", { precision: 15, scale: 2 }).notNull(),
+  status: varchar("status", { length: 20 }).default("matched"), // matched | won | lost | cancelled | void
+  settledAmount: decimal("settled_amount", { precision: 15, scale: 2 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
   createdAt: timestamp("created_at").defaultNow(),
   matchedAt: timestamp("matched_at"),
   settledAt: timestamp("settled_at"),
   cancelledAt: timestamp("cancelled_at"),
-  resultCheckedAt: timestamp("result_checked_at"), // Track when results were last checked
+  resultCheckedAt: timestamp("result_checked_at"),
+});
+
+export const transactionDetails = pgTable("transaction_details", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id")
+    .references(() => transactions.id, { onDelete: "cascade" })
+    .notNull(),
+  runnerId: varchar("runner_id", { length: 100 }).notNull(),
+  runnerName: varchar("runner_name", { length: 255 }),
+  isUserSelection: boolean("is_user_selection").default(false).notNull(),
+  price: decimal("price", { precision: 10, scale: 4 }).notNull(),
+  stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
+  potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
+  actualReturn: decimal("actual_return", { precision: 15, scale: 2 }),
 });
 
 export const accountStatements = pgTable("account_statements", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  userId: bigint("user_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   statementType: varchar("statement_type", { length: 50 }).default("monthly"),
@@ -464,9 +455,7 @@ export const accountStatements = pgTable("account_statements", {
 });
 
 export const sportsGames = pgTable("sports_games", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   eventType: varchar("event_type", { length: 50 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   imageUrl: text("image_url"),
@@ -480,9 +469,7 @@ export const sportsGames = pgTable("sports_games", {
 });
 
 export const homeSections = pgTable("home_sections", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   title: varchar("title", { length: 255 }).notNull(),
   subtitle: varchar("subtitle", { length: 255 }),
   type: varchar("type", { length: 50 }).notNull().default("games"),
@@ -495,9 +482,7 @@ export const homeSections = pgTable("home_sections", {
 });
 
 export const domains = pgTable("domains", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull().unique(),
   status: varchar("status", { length: 20 }).default("active"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -507,10 +492,8 @@ export const domains = pgTable("domains", {
 });
 
 export const homeSectionGames = pgTable("home_section_games", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  sectionId: bigint("section_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  sectionId: uuid("section_id")
     .references(() => homeSections.id, { onDelete: "cascade" })
     .notNull(),
   name: varchar("name", { length: 255 }).notNull(),
@@ -527,9 +510,7 @@ export const homeSectionGames = pgTable("home_section_games", {
 });
 
 export const withdrawalMethods = pgTable("withdrawal_methods", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 100 }).notNull(),
   type: varchar("type", { length: 50 }).notNull(),
   currency: varchar("currency", { length: 10 }).default("INR"),
@@ -552,9 +533,7 @@ export const withdrawalMethods = pgTable("withdrawal_methods", {
 // Add these to your existing schema file
 
 export const sports = pgTable("sports", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   sport_id: varchar("sport_id", { length: 50 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull(),
   is_active: boolean("is_active").default(true),
@@ -566,9 +545,7 @@ export const sports = pgTable("sports", {
 });
 
 export const competitions = pgTable("competitions", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericRandomId())),
+  id: uuid("id").primaryKey().defaultRandom(),
   competition_id: varchar("competition_id", { length: 50 }).notNull().unique(),
   sport_id: varchar("sport_id", { length: 50 }).notNull(),
   name: varchar("name", { length: 200 }).notNull(),
@@ -584,9 +561,9 @@ export const competitions = pgTable("competitions", {
 
 // Managed currencies (owner-only): code, name, country, current value
 export const currencies = pgTable("currencies", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
+
+  
+  id: uuid("id").primaryKey().defaultRandom(),
   code: varchar("code", { length: 10 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull(),
   countryName: varchar("country_name", { length: 100 }).notNull(),
@@ -599,13 +576,57 @@ export const currencies = pgTable("currencies", {
 
 // History of currency value changes (when owner updates a currency value)
 export const currencyValueHistory = pgTable("currency_value_history", {
-  id: bigint("id", { mode: "number" })
-    .primaryKey()
-    .$defaultFn(() => Number(generateNumericId())),
-  currencyId: bigint("currency_id", { mode: "number" })
+  id: uuid("id").primaryKey().defaultRandom(),
+  currencyId: uuid("currency_id")
     .references(() => currencies.id, { onDelete: "cascade" })
     .notNull(),
   value: decimal("value", { precision: 18, scale: 6 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const userLoginLogs = pgTable("user_login_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  browser: varchar("browser", { length: 100 }),
+  browserVersion: varchar("browser_version", { length: 50 }),
+  os: varchar("os", { length: 100 }),
+  osVersion: varchar("os_version", { length: 50 }),
+  deviceType: varchar("device_type", { length: 20 }), // desktop | mobile | tablet | unknown
+  deviceBrand: varchar("device_brand", { length: 100 }),
+  deviceModel: varchar("device_model", { length: 100 }),
+  country: varchar("country", { length: 100 }),
+  city: varchar("city", { length: 100 }),
+  status: varchar("status", { length: 20 }).default("success"), // success | failed
+  failureReason: varchar("failure_reason", { length: 255 }),
+  loginAt: timestamp("login_at").defaultNow(),
+  logoutAt: timestamp("logout_at"),
+  sessionDurationSeconds: integer("session_duration_seconds"), // filled on logout
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const transactionLogs = pgTable("transaction_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id")
+    .references(() => transactions.id, { onDelete: "cascade" })
+    .notNull(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  browser: varchar("browser", { length: 100 }),
+  browserVersion: varchar("browser_version", { length: 50 }),
+  os: varchar("os", { length: 100 }),
+  osVersion: varchar("os_version", { length: 50 }),
+  deviceType: varchar("device_type", { length: 20 }), // desktop | mobile | tablet | unknown
+  deviceBrand: varchar("device_brand", { length: 100 }),
+  deviceModel: varchar("device_model", { length: 100 }),
+  country: varchar("country", { length: 100 }),
+  city: varchar("city", { length: 100 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

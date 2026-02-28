@@ -1,5 +1,5 @@
 import { DbType } from "../../types";
-import { users, vouchers } from "@db/schema";
+import { users, profiles, vouchers } from "@db/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import "dotenv/config";
@@ -135,12 +135,12 @@ export const CasinoCallbackService = {
   },
 
   async getBalance(db: DbType, playerId: number): Promise<string | null> {
-    const [user] = await db
-      .select({ balance: users.balance })
-      .from(users)
-      .where(eq(users.id, playerId))
+    const [profile] = await db
+      .select({ balance: profiles.balance })
+      .from(profiles)
+      .where(eq(profiles.userId, playerId))
       .limit(1);
-    return user?.balance || null;
+    return profile?.balance || null;
   },
 
   async deductBalance(
@@ -148,19 +148,19 @@ export const CasinoCallbackService = {
     playerId: number,
     amount: string
   ): Promise<boolean> {
-    const [user] = await db
-      .select({ balance: users.balance })
-      .from(users)
-      .where(eq(users.id, playerId))
+    const [profile] = await db
+      .select({ balance: profiles.balance })
+      .from(profiles)
+      .where(eq(profiles.userId, playerId))
       .limit(1);
 
-    if (!user) return false;
+    if (!profile) return false;
 
-    const newBalance = (Number(user.balance) - Number(amount)).toString();
+    const newBalance = (Number(profile.balance) - Number(amount)).toString();
     await db
-      .update(users)
+      .update(profiles)
       .set({ balance: newBalance })
-      .where(eq(users.id, playerId));
+      .where(eq(profiles.userId, playerId));
     return true;
   },
 
@@ -169,19 +169,19 @@ export const CasinoCallbackService = {
     playerId: number,
     amount: string
   ): Promise<boolean> {
-    const [user] = await db
-      .select({ balance: users.balance })
-      .from(users)
-      .where(eq(users.id, playerId))
+    const [profile] = await db
+      .select({ balance: profiles.balance })
+      .from(profiles)
+      .where(eq(profiles.userId, playerId))
       .limit(1);
 
-    if (!user) return false;
+    if (!profile) return false;
 
-    const newBalance = (Number(user.balance) + Number(amount)).toString();
+    const newBalance = (Number(profile.balance) + Number(amount)).toString();
     await db
-      .update(users)
+      .update(profiles)
       .set({ balance: newBalance })
-      .where(eq(users.id, playerId));
+      .where(eq(profiles.userId, playerId));
     return true;
   },
 

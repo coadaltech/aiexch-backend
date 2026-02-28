@@ -780,7 +780,7 @@ export const SportsService = {
           const matchesWithOdds = await Promise.all(
             series.matches.map(async (match: any) => {
               const odds = await this.getMarketsWithOdds({
-                eventTypeId,
+                // eventTypeId,
                 eventId: match.event.id,
               });
 
@@ -805,6 +805,38 @@ export const SportsService = {
     }
   },
 
+  async getNewMarketResult({ marketId }: { marketId: string }) {
+    const resultBaseUrl = process.env.SPORTS_GAME_PROVIDER_BASE_RESULT_URL;
+    const response = await axios.get(`${resultBaseUrl}/market/result/${marketId}`);
+    return response.data;
+  },
+
+  async getNewMatchResults({ eventId }: { eventId: string }) {
+    const markets = await this.getMarkets({ eventId });
+
+    if (!markets || markets.length === 0) {
+      console.log(`[NewResult] No markets found for event ${eventId}`);
+      return [];
+    }
+
+    console.log(`[NewResult] Fetching results for ${markets.length} markets of event ${eventId}`);
+
+    const results = await Promise.allSettled(
+      markets.map(async (market: any) => {
+        try {
+          const result = await this.getNewMarketResult({ marketId: market.marketId });
+          console.log(`[NewResult] marketId=${market.marketId} (${market.marketName}):`, JSON.stringify(result, null, 2));
+          return { marketId: market.marketId, marketName: market.marketName, result };
+        } catch (error: any) {
+          console.error(`[NewResult] Failed for marketId=${market.marketId}:`, error?.message);
+          return { marketId: market.marketId, marketName: market.marketName, result: null, error: error?.message };
+        }
+      })
+    );
+
+    return results.map((r) => (r.status === "fulfilled" ? r.value : null)).filter(Boolean);
+  },
+
   async getMatchDetails({
     eventTypeId,
     matchId,
@@ -816,7 +848,7 @@ export const SportsService = {
       const isRacingEvent = ["7", "4339"].includes(eventTypeId);
 
       const marketOdds = this.getMarketsWithOdds({
-        eventTypeId,
+        // eventTypeId,
         eventId: matchId,
       });
 

@@ -61,7 +61,7 @@ export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
   .put(
     "/:id",
     async ({ params, body, set, db }) => {
-      const id = parseInt(params.id);
+      const id = params.id;
 
       // Fetch existing QR code
       const [existing] = await db
@@ -116,7 +116,7 @@ export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
 
   // 🔴 Delete QR Code (and its file)
   .delete("/:id", async ({ params, set, db }) => {
-    const id = parseInt(params.id);
+    const id = params.id;
 
     const [existing] = await db
       .select()

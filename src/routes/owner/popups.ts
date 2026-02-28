@@ -79,7 +79,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
         const [existing] = await db
           .select()
           .from(popups)
-          .where(eq(popups.id, parseInt(params.id)));
+          .where(eq(popups.id, params.id));
 
         if (!existing) {
           set.status = 404;
@@ -95,7 +95,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
 
           if (
             existingPage.length > 0 &&
-            existingPage[0].id !== parseInt(params.id)
+            existingPage[0].id !== params.id
           ) {
             set.status = 409;
             return {
@@ -130,7 +130,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
         const [updated] = await db
           .update(popups)
           .set(updateData)
-          .where(eq(popups.id, parseInt(params.id)))
+          .where(eq(popups.id, params.id))
           .returning();
         set.status = 200;
         return { success: true, data: updated };
@@ -157,7 +157,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
     const [existing] = await db
       .select()
       .from(popups)
-      .where(eq(popups.id, parseInt(params.id)));
+      .where(eq(popups.id, params.id));
 
     if (existing?.imageUrl) {
       try {
@@ -167,7 +167,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
       }
     }
 
-    await db.delete(popups).where(eq(popups.id, parseInt(params.id)));
+    await db.delete(popups).where(eq(popups.id, params.id));
     set.status = 200;
     return { success: true };
   });

@@ -1,13 +1,15 @@
 import { Elysia, t } from "elysia";
-import { users, profiles, otps, whitelabels } from "@db/schema";
+import { users, profiles, otps, whitelabels, userLoginLogs } from "@db/schema";
 import { eq, and } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
 import { decodeToken, generateTokens } from "@services/token";
 import { getCurrentIP } from "@utils/user-ip";
+import { parseUserAgent } from "@utils/parse-ua";
 import { comparePassword, generateHashPassword } from "@utils/password";
 import { whitelabel_middleware } from "@middleware/whitelabel";
 import { cookieConfig } from "@config/cookie";
 import { DbType } from "../types";
+import { getGroupIdForRole } from "@utils/ownerScope";
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any; dbError?: string }> => {
@@ -67,15 +69,13 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       }
 
       const hashedPassword = await generateHashPassword(password);
-      let whitelabelId: number | null =
+      let whitelabelId: string | null =
         bodyWhitelabelId != null
-          ? Number(bodyWhitelabelId)
-          : whitelabel?.id != null
-            ? Number(whitelabel.id)
-            : null;
+          ? String(bodyWhitelabelId)
+          : whitelabel?.id ?? null;
       if (whitelabelId == null && bodyDomain && String(bodyDomain).trim()) {
         const [wl] = await db.select({ id: whitelabels.id }).from(whitelabels).where(eq(whitelabels.domain, String(bodyDomain).trim())).limit(1);
-        if (wl) whitelabelId = Number(wl.id);
+        if (wl) whitelabelId = wl.id;
       }
 
       const [user] = await db
@@ -86,6 +86,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           password: hashedPassword,
           emailVerified: true,
           whitelabelId,
+          groupId: getGroupIdForRole("user"),
         })
         .returning();
 
@@ -93,6 +94,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         userId: user.id,
         phone,
         country,
+        membership: "bronze",
+        balance: "0",
       });
 
       // Mark OTP as used
@@ -127,6 +130,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
 
         const { email, password } = body;
 
+        const clientIP = getCurrentIP(headers, request);
+        const ua = parseUserAgent(request.headers.get("user-agent"));
+
         const [user] = await db
           .select()
           .from(users)
@@ -139,12 +145,26 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
 
         const isCorrectPassword = await comparePassword(password, user.password);
         if (!isCorrectPassword) {
+          await db.insert(userLoginLogs).values({
+            userId: user.id,
+            ipAddress: clientIP,
+            ...ua,
+            status: "failed",
+            failureReason: "Invalid credentials",
+          });
           set.status = 401;
           return { success: false, message: "Invalid credentials" };
         }
 
         const canLogin = (user.accountStatus ?? true) && (user.parentAccountStatus ?? true);
         if (!canLogin) {
+          await db.insert(userLoginLogs).values({
+            userId: user.id,
+            ipAddress: clientIP,
+            ...ua,
+            status: "failed",
+            failureReason: "Account suspended",
+          });
           set.status = 403;
           return { success: false, message: "Account suspended" };
         }
@@ -158,9 +178,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         }
 
         if (whitelabel && user.role !== "owner") {
-          const userWlId = user.whitelabelId != null ? Number(user.whitelabelId) : null;
-          const wlId = whitelabel.id != null ? Number(whitelabel.id) : null;
-          const isAssignedAdmin = whitelabel.userId != null && Number(whitelabel.userId) === Number(user.id);
+          const userWlId = user.whitelabelId ?? null;
+          const wlId = whitelabel.id ?? null;
+          const isAssignedAdmin = whitelabel.userId != null && whitelabel.userId === user.id;
           const belongsToWhitelabel = wlId != null && userWlId === wlId;
           if (!belongsToWhitelabel && !isAssignedAdmin) {
             set.status = 403;
@@ -174,29 +194,38 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           }
         }
 
-        const clientIP = getCurrentIP(headers, request);
+        const [profile] = await db
+          .select()
+          .from(profiles)
+          .where(eq(profiles.userId, user.id))
+          .limit(1);
 
-        await db
-          .update(users)
-          .set({ lastLoginIp: clientIP, lastLoginAt: new Date() })
-          .where(eq(users.id, user.id));
+        if (profile) {
+          await db
+            .update(profiles)
+            .set({ lastLoginIp: clientIP, lastLoginAt: new Date() })
+            .where(eq(profiles.userId, user.id));
+        } else {
+          await db.insert(profiles).values({
+            userId: user.id,
+            lastLoginIp: clientIP,
+            lastLoginAt: new Date(),
+          });
+        }
 
-        // Generate tokens
+        await db.insert(userLoginLogs).values({
+          userId: user.id,
+          ipAddress: clientIP,
+          ...ua,
+          status: "success",
+        });
+
         const { accessToken, refreshToken } = generateTokens(
           user.id,
           user.email,
           user.role || "user"
         );
 
-        // console.log("Login - User role:", user.role);
-        // console.log("Login - Generated access token payload:", {
-        //   id: user.id,
-        //   email: user.email,
-        //   role: user.role,
-        // });
-        // console.log("Login - Cookie config:", cookieConfig);
-
-        // Save tokens in HttpOnly cookies
         cookie.accessToken.set({
           value: accessToken,
           ...cookieConfig.accessToken,
@@ -207,9 +236,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           ...cookieConfig.refreshToken,
         });
 
-        // console.log("Login - Cookies set successfully");
-
-        // Return user info including role/balance for frontend redirect (user → website, admin/super/etc → panel)
         set.status = 200;
         return {
           success: true,
@@ -217,9 +243,11 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             id: user.id,
             username: user.username,
             email: user.email,
-            membership: user.membership,
-            balance: user.balance ?? "0",
+            membership: profile?.membership ?? "bronze",
+            balance: profile?.balance ?? "0",
             role: user.role ?? "user",
+            groupId: user.groupId,
+            currencyId: profile?.currencyId ?? null,
           },
         };
       } catch (e) {

@@ -90,7 +90,6 @@ export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
     const { eventTypeId } = params;
     const cacheKey = `series:withMatches:${eventTypeId}`;
     try {
-
       const cachedData = await CacheService.get<any[]>(cacheKey);
       if (cachedData) {
         // console.log(`[API] Cache HIT for ${cacheKey}`);

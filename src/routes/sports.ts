@@ -32,7 +32,7 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
   .get("/odds/:eventTypeId/:marketId", async ({ params, set }) => {
     try {
       const data = await SportsService.getOdds({
-        eventTypeId: params.eventTypeId,
+        // eventTypeId: params.eventTypeId,
         marketId: params.marketId,
       });
       set.status = 200;
@@ -97,7 +97,7 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
   })
   .get("/series/:eventTypeId", async ({ params, set }) => {
     try {
-      
+
       const data = await SportsService.getSeriesListWithMatches({
         eventTypeId: params.eventTypeId,
       });
@@ -243,6 +243,17 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
       return { success: false, error: "Failed to fetch fancy results" };
     }
   })
+  .get("/new-result/:eventId", async ({ params, set }) => {
+    try {
+      const data = await SportsService.getNewMatchResults({ eventId: params.eventId });
+      set.status = 200;
+      return { success: true, data };
+    } catch {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch new market results" };
+    }
+  })
+
   .post("/matchDetails/:eventTypeId/:eventId", async ({ set, params }) => {
     try {
       const { eventTypeId, eventId } = params;

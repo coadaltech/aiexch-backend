@@ -1,11 +1,12 @@
 import { Elysia, t } from "elysia";
 import { users, profiles, whitelabels } from "../../db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, ne } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
 import { generateHashPassword, comparePassword } from "../../utils/password";
-import { resolveOwnerScope } from "../../utils/ownerScope";
+import { resolveOwnerScope, getGroupIdForRole } from "../../utils/ownerScope";
 import { computeParentStatuses, cascadeParentStatuses } from "../../utils/userStatusCascade";
+import { notEqual } from "assert";
 
 export const usersRoutes = new Elysia({ prefix: "/users" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
@@ -15,7 +16,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
   .post(
     "/",
     async ({ body, set, db, whitelabel, store }) => {
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: number; role?: string });
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
       const requestedRole = (body.role as string) || "user";
       if (!scope.allowedRolesToCreate.includes(requestedRole)) {
         set.status = 403;
@@ -26,24 +27,22 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "No whitelabel scope. You must operate from your whitelabel domain." };
       }
 
-      const { username, email, password, role, membership, balance, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain } = body;
-      const createdBy = (store as { id?: number; role?: string })?.id || null;
-      let whitelabelId: number | null =
+      const { username, email, password, role, membership, balance, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId } = body as any;
+      const createdBy = (store as { id?: string; role?: string })?.id || null;
+      let whitelabelId: string | null =
         bodyWhitelabelId != null
-          ? Number(bodyWhitelabelId)
-          : whitelabel?.id != null
-            ? Number(whitelabel.id)
-            : null;
+          ? String(bodyWhitelabelId)
+          : whitelabel?.id ?? null;
       if (whitelabelId == null && bodyDomain && String(bodyDomain).trim()) {
         const [wl] = await db.select({ id: whitelabels.id }).from(whitelabels).where(eq(whitelabels.domain, String(bodyDomain).trim())).limit(1);
-        if (wl) whitelabelId = Number(wl.id);
+        if (wl) whitelabelId = wl.id;
       }
       if (whitelabelId == null && createdBy != null) {
         const [creator] = await db.select({ whitelabelId: users.whitelabelId }).from(users).where(eq(users.id, createdBy)).limit(1);
-        if (creator?.whitelabelId != null) whitelabelId = Number(creator.whitelabelId);
+        if (creator?.whitelabelId != null) whitelabelId = creator.whitelabelId;
         else {
           const [wlByAdmin] = await db.select({ id: whitelabels.id }).from(whitelabels).where(eq(whitelabels.userId, createdBy)).limit(1);
-          if (wlByAdmin) whitelabelId = Number(wlByAdmin.id);
+          if (wlByAdmin) whitelabelId = wlByAdmin.id;
         }
       }
       if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId != null) {
@@ -78,51 +77,56 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       let parentBetStatus = true;
       if (createdBy != null) {
         const [parent] = await db
-          .select({ accountStatus: users.accountStatus, parentAccountStatus: users.parentAccountStatus, betStatus: users.betStatus, parentBetStatus: users.parentBetStatus })
+          .select({ accountStatus: users.accountStatus, parentAccountStatus: users.parentAccountStatus })
           .from(users)
           .where(eq(users.id, createdBy))
+          .limit(1);
+        const [parentProfile] = await db
+          .select({ betStatus: profiles.betStatus, parentBetStatus: profiles.parentBetStatus })
+          .from(profiles)
+          .where(eq(profiles.userId, createdBy))
           .limit(1);
         parentAccountStatus = parent
           ? (parent.accountStatus ?? true) && (parent.parentAccountStatus ?? true)
           : true;
-        parentBetStatus = parent
-          ? (parent.betStatus ?? true) && (parent.parentBetStatus ?? true)
+        parentBetStatus = parentProfile
+          ? (parentProfile.betStatus ?? true) && (parentProfile.parentBetStatus ?? true)
           : true;
       }
 
       const toStr = (v: string | number | undefined) =>
         v === undefined ? "0.00" : typeof v === "number" ? v.toString() : v;
+      const finalRole = role || "user";
       const [user] = await db
         .insert(users)
         .values({
           username,
           email,
           password: hashedPassword,
-          role: role || "user",
-          membership: membership || "bronze",
+          role: finalRole,
           accountStatus: true,
-          betStatus: true,
           parentAccountStatus,
-          parentBetStatus,
-          balance: balance || "0",
-          upline: toStr(upline),
-          downline: toStr(downline),
           emailVerified: true,
           whitelabelId,
           createdBy: createdBy,
+          groupId: getGroupIdForRole(finalRole),
         })
         .returning();
 
-      // Create profile if personal info provided
-      if (firstName || lastName || phone || country) {
-        await db.insert(profiles).values({
-          userId: user.id,
-          firstName,
-          lastName,
-          phone,
-          country,
-        });
-      }
+      await db.insert(profiles).values({
+        userId: user.id,
+        membership: membership || "bronze",
+        betStatus: true,
+        parentBetStatus,
+        balance: balance || "0",
+        upline: toStr(upline),
+        downline: toStr(downline),
+        currencyId: currencyId || null,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        phone: phone || null,
+        country: country || null,
+      });
 
       set.status = 201;
       return {
@@ -155,6 +159,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         downline: t.Optional(t.Union([t.String(), t.Number()])),
         whitelabelId: t.Optional(t.Union([t.Number(), t.String()])),
         domain: t.Optional(t.String()),
+        currencyId: t.Optional(t.String()),
         firstName: t.Optional(t.String()),
         lastName: t.Optional(t.String()),
         phone: t.Optional(t.String()),
@@ -163,11 +168,12 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     }
   )
   .get("/", async ({ set, db, whitelabel, store }) => {
-    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: number; role?: string });
+    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
     const isOwnerNoScope = scope.currentUserRole === "owner" && scope.scopeWhitelabelId == null;
-    let visibleUsers: { id: number; username: string; email: string; [k: string]: unknown }[];
+    let visibleUsers: { id: string; username: string; email: string;[k: string]: unknown }[];
     if (isOwnerNoScope) {
-      visibleUsers = await db.select().from(users);
+      // Get all users except the current user
+      visibleUsers = await db.select().from(users).where(ne(users.id, scope.currentUserId));
     } else if (scope.scopeWhitelabelId == null) {
       set.status = 200;
       return { success: true, data: [] };
@@ -176,10 +182,11 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       if (scope.filterUsersByCreatedBy) {
         conditions.push(eq(users.createdBy, scope.currentUserId));
       }
+      conditions.push(ne(users.id, scope.currentUserId))
       visibleUsers = await db.select().from(users).where(and(...conditions));
     }
-    const creatorIds = [...new Set(visibleUsers.map((u) => u.createdBy).filter((id): id is number => id != null))];
-    const whitelabelIds = [...new Set(visibleUsers.map((u) => u.whitelabelId).filter((id): id is number => id != null))];
+    const creatorIds = [...new Set(visibleUsers.map((u) => u.createdBy).filter((id): id is string => id != null))];
+    const whitelabelIds = [...new Set(visibleUsers.map((u) => u.whitelabelId).filter((id): id is string => id != null))];
     const creators =
       creatorIds.length > 0
         ? await db.select({ id: users.id, username: users.username }).from(users).where(inArray(users.id, creatorIds))
@@ -193,19 +200,28 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
     const usersWithProfiles = [];
     for (const user of visibleUsers) {
-      const profile = await db
+      const [profile] = await db
         .select()
         .from(profiles)
         .where(eq(profiles.userId, user.id))
         .limit(1);
       usersWithProfiles.push({
         ...user,
-        firstName: profile[0]?.firstName || null,
-        lastName: profile[0]?.lastName || null,
-        phone: profile[0]?.phone || null,
-        country: profile[0]?.country || null,
-        createdByUsername: user.createdBy != null ? (creatorMap.get(Number(user.createdBy)) ?? null) : null,
-        whitelabelName: user.whitelabelId != null ? (wlMap.get(Number(user.whitelabelId)) ?? null) : null,
+        membership: profile?.membership ?? "bronze",
+        betStatus: profile?.betStatus ?? true,
+        parentBetStatus: profile?.parentBetStatus ?? true,
+        balance: profile?.balance ?? "0",
+        upline: profile?.upline ?? "0.00",
+        downline: profile?.downline ?? "0.00",
+        currencyId: profile?.currencyId ?? null,
+        lastLoginIp: profile?.lastLoginIp ?? null,
+        lastLoginAt: profile?.lastLoginAt ?? null,
+        firstName: profile?.firstName || null,
+        lastName: profile?.lastName || null,
+        phone: profile?.phone || null,
+        country: profile?.country || null,
+        createdByUsername: user.createdBy != null ? (creatorMap.get(user.createdBy as string) ?? null) : null,
+        whitelabelName: user.whitelabelId != null ? (wlMap.get(user.whitelabelId as string) ?? null) : null,
       });
     }
     set.status = 200;
@@ -215,19 +231,18 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
   .put(
     "/:id",
     async ({ params, set, body, db, whitelabel, store }) => {
-      const userId = parseInt(params.id);
-      if (isNaN(userId) || userId <= 0) {
+      const userId = params.id;
+      if (!userId || typeof userId !== "string") {
         set.status = 400;
         return { success: false, message: "Invalid user ID" };
       }
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: number; role?: string });
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
       const [target] = await db
         .select({
           id: users.id,
           whitelabelId: users.whitelabelId,
           createdBy: users.createdBy,
           accountStatus: users.accountStatus,
-          betStatus: users.betStatus,
         })
         .from(users)
         .where(eq(users.id, userId))
@@ -236,6 +251,12 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         set.status = 404;
         return { success: false, message: "User not found" };
       }
+      const [targetProfile] = await db
+        .select({ betStatus: profiles.betStatus })
+        .from(profiles)
+        .where(eq(profiles.userId, userId))
+        .limit(1);
+
       if (scope.scopeWhitelabelId != null && target.whitelabelId !== scope.scopeWhitelabelId) {
         set.status = 404;
         return { success: false, message: "User not found" };
@@ -245,7 +266,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "User not found" };
       }
 
-      const isCreator = target.createdBy === (store as { id?: number }).id;
+      const isCreator = target.createdBy === (store as { id?: string }).id;
       const isChangingStatus =
         isCreator &&
         (body.accountStatus !== undefined || body.betStatus !== undefined);
@@ -255,8 +276,8 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
           set.status = 401;
           return { success: false, message: "Transaction password is required to change status" };
         }
-        const currentUserId = Number((store as { id?: number }).id);
-        if (!Number.isFinite(currentUserId)) {
+        const currentUserId = (store as { id?: string }).id;
+        if (!currentUserId) {
           set.status = 401;
           return { success: false, message: "Unauthorized" };
         }
@@ -276,32 +297,50 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         }
       }
 
-      const updateData: Record<string, unknown> = { ...body };
-      delete updateData.currentUserPassword;
-      delete updateData.status;
-      if (isChangingStatus) delete updateData.password;
-      else if (body.password) updateData.password = await generateHashPassword(body.password);
-      if (body.upline !== undefined) {
-        updateData.upline = typeof body.upline === "number" ? body.upline.toString() : body.upline;
-      }
-      if (body.downline !== undefined) {
-        updateData.downline = typeof body.downline === "number" ? body.downline.toString() : body.downline;
-      }
       if (!isCreator && (body.accountStatus !== undefined || body.betStatus !== undefined)) {
         set.status = 403;
         return { success: false, message: "Only the user's creator can change their status" };
       }
-      if (!isCreator) {
-        delete updateData.accountStatus;
-        delete updateData.betStatus;
+
+      const userUpdateData: Record<string, unknown> = {};
+      const profileUpdateData: Record<string, unknown> = {};
+
+      if (body.role !== undefined) {
+        userUpdateData.role = body.role;
+        userUpdateData.groupId = getGroupIdForRole(body.role);
+      }
+      if (body.accountStatus !== undefined && isCreator) userUpdateData.accountStatus = body.accountStatus;
+      if (body.password && !isChangingStatus) userUpdateData.password = await generateHashPassword(body.password);
+
+      if (body.membership !== undefined) profileUpdateData.membership = body.membership;
+      if (body.betStatus !== undefined && isCreator) profileUpdateData.betStatus = body.betStatus;
+      if (body.balance !== undefined) profileUpdateData.balance = body.balance;
+      if (body.upline !== undefined) profileUpdateData.upline = typeof body.upline === "number" ? body.upline.toString() : body.upline;
+      if (body.downline !== undefined) profileUpdateData.downline = typeof body.downline === "number" ? body.downline.toString() : body.downline;
+      if (body.currencyId !== undefined) profileUpdateData.currencyId = body.currencyId;
+
+      let updated: any = null;
+      if (Object.keys(userUpdateData).length > 0) {
+        const [u] = await db
+          .update(users)
+          .set(userUpdateData)
+          .where(eq(users.id, userId))
+          .returning();
+        updated = u;
+      }
+      if (Object.keys(profileUpdateData).length > 0) {
+        const existingProfile = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
+        if (existingProfile.length > 0) {
+          await db.update(profiles).set(profileUpdateData).where(eq(profiles.userId, userId));
+        } else {
+          await db.insert(profiles).values({ userId, ...profileUpdateData });
+        }
       }
 
-      const [updated] = await db
-        .update(users)
-        .set(updateData)
-        .where(eq(users.id, userId))
-        .returning();
-
+      if (!updated) {
+        const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+        updated = u;
+      }
       if (!updated) {
         set.status = 404;
         return { success: false, message: "User not found" };
@@ -309,17 +348,18 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
       const statusChanged =
         (body.accountStatus !== undefined && body.accountStatus !== target.accountStatus) ||
-        (body.betStatus !== undefined && body.betStatus !== target.betStatus);
+        (body.betStatus !== undefined && body.betStatus !== (targetProfile?.betStatus ?? true));
       if (isCreator && statusChanged) {
         await cascadeParentStatuses(db, userId);
       }
 
+      const [updatedProfile] = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
       set.status = 200;
-      return { success: true, data: updated };
+      return { success: true, data: { ...updated, ...updatedProfile } };
     },
     {
       params: t.Object({
-        id: t.String({ pattern: "^[1-9]\\d*$" }),
+        id: t.String(),
       }),
       body: t.Object({
         role: t.Optional(t.Union([
@@ -345,6 +385,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         upline: t.Optional(t.Union([t.String(), t.Number()])),
         downline: t.Optional(t.Union([t.String(), t.Number()])),
         password: t.Optional(t.String({ minLength: 6 })),
+        currencyId: t.Optional(t.Union([t.String(), t.Null()])),
       }),
     }
   )
@@ -352,8 +393,12 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
   .put(
     "/:id/profile",
     async ({ params, body, set, db, whitelabel, store }) => {
-      const userId = parseInt(params.id);
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: number; role?: string });
+      const userId = params.id;
+      if (!userId) {
+        set.status = 400;
+        return { success: false, message: "Invalid user ID" };
+      }
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
       const [target] = await db.select({ id: users.id, whitelabelId: users.whitelabelId, createdBy: users.createdBy }).from(users).where(eq(users.id, userId)).limit(1);
       if (!target) {
         set.status = 404;

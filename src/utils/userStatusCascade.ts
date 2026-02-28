@@ -1,4 +1,4 @@
-import { users } from "../db/schema";
+import { users, profiles } from "../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import type { DbType } from "../types";
 
@@ -8,11 +8,11 @@ import type { DbType } from "../types";
  */
 export async function getDescendantUserIds(
   db: DbType,
-  userId: number
-): Promise<number[]> {
-  const result: number[] = [];
-  let currentLevel: number[] = [userId];
-  const seen = new Set<number>([userId]);
+  userId: string
+): Promise<string[]> {
+  const result: string[] = [];
+  let currentLevel: string[] = [userId];
+  const seen = new Set<string>([userId]);
 
   while (currentLevel.length > 0) {
     const next = await db
@@ -34,7 +34,7 @@ export async function getDescendantUserIds(
  */
 export async function computeParentStatuses(
   db: DbType,
-  userId: number
+  userId: string
 ): Promise<{ parentAccountStatus: boolean; parentBetStatus: boolean }> {
   let parentAccountStatus = true;
   let parentBetStatus = true;
@@ -43,21 +43,25 @@ export async function computeParentStatuses(
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
-  let currentId: number | null = self?.createdBy ?? null;
+  let currentId: string | null = self?.createdBy ?? null;
 
   while (currentId != null) {
     const [row] = await db
       .select({
         createdBy: users.createdBy,
         accountStatus: users.accountStatus,
-        betStatus: users.betStatus,
       })
       .from(users)
       .where(eq(users.id, currentId))
       .limit(1);
     if (!row) break;
+    const [rowProfile] = await db
+      .select({ betStatus: profiles.betStatus })
+      .from(profiles)
+      .where(eq(profiles.userId, currentId))
+      .limit(1);
     parentAccountStatus = parentAccountStatus && (row.accountStatus ?? true);
-    parentBetStatus = parentBetStatus && (row.betStatus ?? true);
+    parentBetStatus = parentBetStatus && (rowProfile?.betStatus ?? true);
     currentId = row.createdBy;
   }
 
@@ -78,17 +82,21 @@ export async function computeParentStatuses(
  */
 export async function cascadeParentStatuses(
   db: DbType,
-  userId: number
+  userId: string
 ): Promise<void> {
   const descendantIds = await getDescendantUserIds(db, userId);
   for (const id of descendantIds) {
     const { parentAccountStatus, parentBetStatus } = await computeParentStatuses(db, id);
     await db
       .update(users)
-      .set({
-        parentAccountStatus,
-        parentBetStatus,
-      })
+      .set({ parentAccountStatus })
       .where(eq(users.id, id));
+    const existingProfile = await db.select().from(profiles).where(eq(profiles.userId, id)).limit(1);
+    if (existingProfile.length > 0) {
+      await db
+        .update(profiles)
+        .set({ parentBetStatus })
+        .where(eq(profiles.userId, id));
+    }
   }
 }

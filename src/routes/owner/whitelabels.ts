@@ -7,7 +7,7 @@ import { resolveOwnerScope } from "../../utils/ownerScope";
 
 export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .get("/", async ({ set, store }) => {
-    const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
+    const scope = await resolveOwnerScope(db, undefined, store as { id?: string; role?: string });
     let query = db
       .select({
         whitelabel: whitelabels,
@@ -70,62 +70,71 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .post(
     "/",
     async ({ body, set, store }) => {
-      const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
-      if (scope.currentUserRole !== "owner") {
-        set.status = 403;
-        return { success: false, message: "Only owner can create whitelabels." };
+      try {
+        const scope = await resolveOwnerScope(db, undefined, store as { id?: string; role?: string });
+        console.log("Lo mai a gya...")
+        if (scope.currentUserRole !== "owner") {
+          set.status = 403;
+          return { success: false, message: "Only owner can create whitelabels." };
+        }
+        let logoUrl = body.logoUrl;
+        let faviconUrl = body.faviconUrl;
+
+        if (body.logo) {
+          const key = `whitelabels/logos/${Date.now()}-${body.logo.name}`;
+          logoUrl = await uploadFile(body.logo, key);
+        }
+
+        if (body.favicon) {
+          const key = `whitelabels/favicons/${Date.now()}-${body.favicon.name}`;
+          faviconUrl = await uploadFile(body.favicon, key);
+        }
+
+        const config = body.config ? JSON.parse(body.config) : {};
+        if (!config.dbName) {
+          config.dbName = body.name.toLowerCase().replace(/\s+/g, "_");
+        }
+
+        // Parse userId from string to number (FormData sends everything as strings)
+        // const userId = typeof body.userId === "string" ? parseInt(body.userId, 10) : body.userId;
+        const userId = String(body.userId)
+        console.log(userId)
+
+        const [whitelabel] = await db
+          .insert(whitelabels)
+          .values({
+            userId: userId,
+            whitelabelType: body.whitelabelType || "B2C",
+            name: body.name,
+            domain: body.domain,
+            title: body.title,
+            description: body.description,
+            logo: logoUrl,
+            favicon: faviconUrl,
+            contactEmail: body.contactEmail,
+            socialLinks: body.socialLinks,
+            status: body.status,
+            theme: body.theme,
+            layout: body.layout,
+            config: JSON.stringify(config),
+            preferences: body.preferences,
+            permissions: body.permissions,
+          })
+          .returning();
+
+        // Link the selected user (admin) to this whitelabel
+        await db
+          .update(users)
+          .set({ whitelabelId: whitelabel.id })
+          .where(eq(users.id, userId));
+
+        set.status = 201;
+        return { success: true, data: whitelabel };
+      } catch (e) {
+        console.log("Error occur");
+        console.log(e)
+        return { success: false, data: { message: "failed to create whitelabel" } }
       }
-      let logoUrl = body.logoUrl;
-      let faviconUrl = body.faviconUrl;
-
-      if (body.logo) {
-        const key = `whitelabels/logos/${Date.now()}-${body.logo.name}`;
-        logoUrl = await uploadFile(body.logo, key);
-      }
-
-      if (body.favicon) {
-        const key = `whitelabels/favicons/${Date.now()}-${body.favicon.name}`;
-        faviconUrl = await uploadFile(body.favicon, key);
-      }
-
-      const config = body.config ? JSON.parse(body.config) : {};
-      if (!config.dbName) {
-        config.dbName = body.name.toLowerCase().replace(/\s+/g, "_");
-      }
-
-      // Parse userId from string to number (FormData sends everything as strings)
-      const userId = typeof body.userId === "string" ? parseInt(body.userId, 10) : body.userId;
-
-      const [whitelabel] = await db
-        .insert(whitelabels)
-        .values({
-          userId: userId,
-          whitelabelType: body.whitelabelType || "B2C",
-          name: body.name,
-          domain: body.domain,
-          title: body.title,
-          description: body.description,
-          logo: logoUrl,
-          favicon: faviconUrl,
-          contactEmail: body.contactEmail,
-          socialLinks: body.socialLinks,
-          status: body.status,
-          theme: body.theme,
-          layout: body.layout,
-          config: JSON.stringify(config),
-          preferences: body.preferences,
-          permissions: body.permissions,
-        })
-        .returning();
-
-      // Link the selected user (admin) to this whitelabel
-      await db
-        .update(users)
-        .set({ whitelabelId: whitelabel.id })
-        .where(eq(users.id, userId));
-
-      set.status = 201;
-      return { success: true, data: whitelabel };
     },
     {
       body: t.Object({
@@ -154,11 +163,11 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .put(
     "/:id",
     async ({ params, body, set, store }) => {
-      const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
+      const scope = await resolveOwnerScope(db, undefined, store as { id?: string; role?: string });
       const [existing] = await db
         .select()
         .from(whitelabels)
-        .where(eq(whitelabels.id, parseInt(params.id)));
+        .where(eq(whitelabels.id, params.id));
 
       if (!existing) {
         set.status = 404;
@@ -217,11 +226,11 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         permissions: body.permissions,
         updatedAt: new Date(),
       };
-      
-      if (body.userId !== undefined) {
-        // Parse userId from string to number (FormData sends everything as strings)
-        updateData.userId = typeof body.userId === "string" ? parseInt(body.userId, 10) : body.userId;
-      }
+
+      // if (body.userId !== undefined) {
+      //   // Parse userId from string to number (FormData sends everything as strings)
+      //   updateData.userId = typeof body.userId === "string" ? parseInt(body.userId, 10) : body.userId;
+      // }
 
       if (body.whitelabelType !== undefined) {
         updateData.whitelabelType = body.whitelabelType;
@@ -230,7 +239,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       const [updated] = await db
         .update(whitelabels)
         .set(updateData)
-        .where(eq(whitelabels.id, parseInt(params.id)))
+        .where(eq(whitelabels.id, params.id))
         .returning();
       set.status = 200;
       return { success: true, data: updated };
@@ -260,11 +269,11 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   )
 
   .delete("/:id", async ({ params, set, store }) => {
-    const scope = await resolveOwnerScope(db, undefined, store as { id?: number; role?: string });
+    const scope = await resolveOwnerScope(db, undefined, store as { id?: string; role?: string });
     const [existing] = await db
       .select()
       .from(whitelabels)
-      .where(eq(whitelabels.id, parseInt(params.id)));
+      .where(eq(whitelabels.id, params.id));
 
     if (!existing) {
       set.status = 404;
@@ -292,7 +301,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       }
     }
 
-    await db.delete(whitelabels).where(eq(whitelabels.id, parseInt(params.id)));
+    await db.delete(whitelabels).where(eq(whitelabels.id, params.id));
     set.status = 200;
     return { success: true };
   })

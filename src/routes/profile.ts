@@ -17,7 +17,7 @@ import { whitelabel_middleware } from "../middleware/whitelabel";
 import { DbType } from "../types";
 
 export const profileRoutes = new Elysia({ prefix: "/profile" })
-  .state({ id: 0, role: "" })
+  .state({ id: "", role: "" })
   .guard({
     beforeHandle({ cookie, set, store }) {
       const state_result = app_middleware({ cookie });
@@ -57,6 +57,12 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       return { loggedIn: false };
     }
 
+    const [profile] = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, store.id))
+      .limit(1);
+
     set.status = 200;
     return {
       loggedIn: true,
@@ -65,10 +71,12 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         username: user.username,
         email: user.email,
         role: user.role,
-        membership: user.membership,
-        balance: user.balance,
-        upline: user.upline ?? "0.00",
-        downline: user.downline ?? "0.00",
+        membership: profile?.membership ?? "bronze",
+        balance: profile?.balance ?? "0",
+        upline: profile?.upline ?? "0.00",
+        downline: profile?.downline ?? "0.00",
+        groupId: user.groupId,
+        currencyId: profile?.currencyId ?? null,
       },
     };
   })
@@ -97,28 +105,23 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         ...profile,
         username: user.username,
         email: user.email,
-        balance: user.balance,
+        balance: profile?.balance ?? "0",
         role: user.role,
       },
     };
   })
 
   .get("/balance", async ({ store, set, db }) => {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, store.id))
+    const [profile] = await db
+      .select({ balance: profiles.balance })
+      .from(profiles)
+      .where(eq(profiles.userId, store.id))
       .limit(1);
-
-    if (!user) {
-      set.status = 404;
-      return { success: false, message: "User not found" };
-    }
 
     set.status = 200;
     return {
       success: true,
-      balance: user.balance || "0",
+      balance: profile?.balance || "0",
     };
   })
 
@@ -251,7 +254,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
 
   // Get user notifications
   .get("/notifications/user/:userId", async ({ params, set, db }) => {
-    const userId = parseInt(params.userId);
+    const userId = params.userId;
     const userNotifications = await db
       .select({
         id: notifications.id,
@@ -288,8 +291,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     },
     {
       body: t.Object({
-        userId: t.Number(),
-        notificationId: t.Number(),
+        userId: t.String(),
+        notificationId: t.String(),
       }),
     }
   )
@@ -355,13 +358,13 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   .post(
     "/withdraw",
     async ({ body, store, set, db }) => {
-      const [user] = await db
+      const [profile] = await db
         .select()
-        .from(users)
-        .where(eq(users.id, store.id))
+        .from(profiles)
+        .where(eq(profiles.userId, store.id))
         .limit(1);
 
-      if (!user) {
+      if (!profile) {
         set.status = 404;
         return {
           success: false,
@@ -373,17 +376,17 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           ? parseFloat(body.amount) * 82
           : parseFloat(body.amount);
 
-      if (parseFloat(user?.balance) < convertedAmount) {
+      if (parseFloat(profile.balance) < convertedAmount) {
         set.status = 400;
         return { success: false, message: "Insufficient balance" };
       }
 
       await db
-        .update(users)
+        .update(profiles)
         .set({
-          balance: decrement(users.balance, convertedAmount),
+          balance: decrement(profiles.balance, convertedAmount),
         })
-        .where(eq(users.id, store.id));
+        .where(eq(profiles.userId, store.id));
 
       const [transaction] = await db
         .insert(vouchers)
@@ -464,19 +467,18 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         return { success: false, message: "Promocode already used" };
       }
 
-      // Get user balance for percentage calculations
-      const [user] = await db
+      const [userProfile] = await db
         .select()
-        .from(users)
-        .where(eq(users.id, store.id))
+        .from(profiles)
+        .where(eq(profiles.userId, store.id))
         .limit(1);
-      if (!user) {
+      if (!userProfile) {
         set.status = 404;
         return { success: false, message: "User not found" };
       }
 
       let bonusAmount = 0;
-      const userBalance = parseFloat(user.balance);
+      const userBalance = parseFloat(userProfile.balance);
 
       // Calculate bonus based on types
       if (promocode.type === "percentage") {
@@ -496,11 +498,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       });
 
       await db
-        .update(users)
+        .update(profiles)
         .set({
-          balance: increment(users.balance, bonusAmount),
+          balance: increment(profiles.balance, bonusAmount),
         })
-        .where(eq(users.id, store.id));
+        .where(eq(profiles.userId, store.id));
 
       await db
         .update(promocodes)

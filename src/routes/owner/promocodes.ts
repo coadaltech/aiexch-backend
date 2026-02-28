@@ -68,7 +68,7 @@ export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
       const [updated] = await db
         .update(promocodes)
         .set({ ...body, updatedAt: new Date() })
-        .where(eq(promocodes.id, parseInt(params.id)))
+        .where(eq(promocodes.id, params.id))
         .returning();
       set.status = 200;
       return { success: true, data: updated };
@@ -84,7 +84,7 @@ export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
   )
 
   .delete("/:id", async ({ params, db, set }) => {
-    await db.delete(promocodes).where(eq(promocodes.id, parseInt(params.id)));
+    await db.delete(promocodes).where(eq(promocodes.id, params.id));
     set.status = 200;
     return { success: true };
   });

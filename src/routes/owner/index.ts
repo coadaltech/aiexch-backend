@@ -19,7 +19,7 @@ import { domainsRoutes } from "./domains";
 import { currenciesRoutes } from "./currencies";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
-  .state({ id: 0, role: "" })
+  .state({ id: "", role: "" })
   .guard({
     beforeHandle({ cookie, set, store }) {
       const state_result = app_middleware({

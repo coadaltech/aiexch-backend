@@ -36,7 +36,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         const games = await db
           .select()
           .from(homeSectionGames)
-          .where(eq(homeSectionGames.sectionId, parseInt(id)))
+          .where(eq(homeSectionGames.sectionId, id))
           .orderBy(asc(homeSectionGames.order));
 
         set.status = 200;
@@ -116,7 +116,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         const [game] = await db
           .insert(homeSectionGames)
           .values({
-            sectionId: parseInt(id),
+            sectionId: id,
             name: body.name,
             image: imageUrl,
             link: body.link,
@@ -168,7 +168,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
             status,
             updatedAt: new Date(),
           })
-          .where(eq(homeSections.id, parseInt(id)))
+          .where(eq(homeSections.id, id))
           .returning();
 
         set.status = 200;
@@ -204,7 +204,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         const [current] = await db
           .select()
           .from(homeSectionGames)
-          .where(eq(homeSectionGames.id, parseInt(gameId)));
+          .where(eq(homeSectionGames.id, gameId));
 
         if (!current) {
           set.status = 404;
@@ -245,7 +245,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         const [game] = await db
           .update(homeSectionGames)
           .set(updateData)
-          .where(eq(homeSectionGames.id, parseInt(gameId)))
+          .where(eq(homeSectionGames.id, gameId))
           .returning();
 
         set.status = 200;
@@ -278,7 +278,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
     async ({ params, set, db }) => {
       try {
         const { id } = params;
-        await db.delete(homeSections).where(eq(homeSections.id, parseInt(id)));
+        await db.delete(homeSections).where(eq(homeSections.id, id));
         set.status = 200;
         return { success: true, message: "Home section deleted successfully" };
       } catch (error) {
@@ -302,7 +302,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
         const [current] = await db
           .select()
           .from(homeSectionGames)
-          .where(eq(homeSectionGames.id, parseInt(gameId)));
+          .where(eq(homeSectionGames.id, gameId));
 
         if (current?.image) {
           try {
@@ -314,7 +314,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
 
         await db
           .delete(homeSectionGames)
-          .where(eq(homeSectionGames.id, parseInt(gameId)));
+          .where(eq(homeSectionGames.id, gameId));
         set.status = 200;
         return { success: true, message: "Game deleted successfully" };
       } catch (error) {

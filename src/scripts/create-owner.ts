@@ -14,9 +14,10 @@ import "dotenv/config";
 // Now import after env is loaded
 // import { db } from "../index";
 import { db } from "@db/index";
-import { users } from "../db/schema";
+import { users, profiles } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { generateHashPassword } from "../utils/password";
+import { getGroupIdForRole } from "../utils/ownerScope";
 
 async function createOwnerUser() {
   try {
@@ -27,32 +28,30 @@ async function createOwnerUser() {
     const existingUser = await db
       .select()
       .from(users)
-      .where(eq(users.email, "erfanaalam@gmail.com"))
+      .where(eq(users.email, "admin@gmail.com"))
       .limit(1);
 
 
     if (existingUser.length > 0) {
-      console.log("Owner user already exists with email erfanaalam@gmail.com");
+      console.log("Owner user already exists with email admin@gmail.com");
       console.log("User ID:", existingUser[0].id);
       return;
     }
 
 
     // Hash the password
-    const hashedPassword = await generateHashPassword("Owner@123");
+    const hashedPassword = await generateHashPassword("Admin@123");
 
     // Insert the owner user
     const result = await db
       .insert(users)
       .values({
-        username: "erfan2",
-        email: "erfanaalam@gmail.com",
+        username: "owner",
+        email: "admin@gmail.com",
         password: hashedPassword,
         role: "owner",
-        membership: "platinum",
-        status: "active",
-        balance: "0",
         emailVerified: true,
+        groupId: getGroupIdForRole("owner"),
       })
       .returning({
         id: users.id,
@@ -60,6 +59,12 @@ async function createOwnerUser() {
         email: users.email,
         role: users.role,
       });
+
+    await db.insert(profiles).values({
+      userId: result[0].id,
+      membership: "platinum",
+      balance: "0",
+    });
 
 
     console.log("Owner user created successfully!");

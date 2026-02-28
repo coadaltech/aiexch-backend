@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { eq } from "drizzle-orm";
-import { users } from "../../db/schema";
+import { users, profiles } from "../../db/schema";
 import { whitelabel_middleware } from "@middleware/whitelabel";
 import { CasinoCallbackService } from "@services/casino/casino-callback";
 import type { CallbackHeaders } from "@services/casino/casino-callback";
@@ -206,12 +206,12 @@ export const casinoCallbackRoutes = new Elysia({ prefix: "/casino/callback" })
               return { success: false, error: "Player not found" };
             }
 
-            const [playerUser] = await db
-              .select({ betStatus: users.betStatus, parentBetStatus: users.parentBetStatus })
-              .from(users)
-              .where(eq(users.id, playerId))
+            const [playerProfile] = await db
+              .select({ betStatus: profiles.betStatus, parentBetStatus: profiles.parentBetStatus })
+              .from(profiles)
+              .where(eq(profiles.userId, playerId))
               .limit(1);
-            const canBet = (playerUser?.betStatus ?? true) && (playerUser?.parentBetStatus ?? true);
+            const canBet = (playerProfile?.betStatus ?? true) && (playerProfile?.parentBetStatus ?? true);
             if (!canBet) {
               set.status = 403;
               return { success: false, error: "Betting is disabled for your account" };
