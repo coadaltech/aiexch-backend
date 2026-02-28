@@ -1,10 +1,10 @@
 import { Elysia, t } from "elysia";
 import { users, profiles, whitelabels } from "../../db/schema";
-import { eq, and, inArray, ne } from "drizzle-orm";
+import { eq, and, inArray, ne, gt } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
 import { generateHashPassword, comparePassword } from "../../utils/password";
-import { resolveOwnerScope, getGroupIdForRole } from "../../utils/ownerScope";
+import { resolveOwnerScope, getGroupIdForRole, ROLE_TO_GROUP_ID } from "../../utils/ownerScope";
 import { computeParentStatuses, cascadeParentStatuses } from "../../utils/userStatusCascade";
 import { notEqual } from "assert";
 
@@ -172,17 +172,25 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     const isOwnerNoScope = scope.currentUserRole === "owner" && scope.scopeWhitelabelId == null;
     let visibleUsers: { id: string; username: string; email: string;[k: string]: unknown }[];
     if (isOwnerNoScope) {
-      // Get all users except the current user
+      // Owner with no whitelabel scope: sees all users except self
       visibleUsers = await db.select().from(users).where(ne(users.id, scope.currentUserId));
     } else if (scope.scopeWhitelabelId == null) {
       set.status = 200;
       return { success: true, data: [] };
     } else {
-      const conditions = [eq(users.whitelabelId, scope.scopeWhitelabelId)];
-      if (scope.filterUsersByCreatedBy) {
-        conditions.push(eq(users.createdBy, scope.currentUserId));
+      const conditions = [
+        eq(users.whitelabelId, scope.scopeWhitelabelId),
+        ne(users.id, scope.currentUserId),
+      ];
+      // Role-hierarchy filter:
+      // - owner (with scope) / admin: see all users of the whitelabel
+      // - super (groupId 4): sees master, agent, user (groupId > 4)
+      // - master (groupId 5): sees agent, user (groupId > 5)
+      // - agent (groupId 6): sees user only (groupId > 6)
+      const currentGroupId = ROLE_TO_GROUP_ID[scope.currentUserRole] ?? 7;
+      if (scope.currentUserRole !== "owner" && scope.currentUserRole !== "admin") {
+        conditions.push(gt(users.groupId, currentGroupId));
       }
-      conditions.push(ne(users.id, scope.currentUserId))
       visibleUsers = await db.select().from(users).where(and(...conditions));
     }
     const creatorIds = [...new Set(visibleUsers.map((u) => u.createdBy).filter((id): id is string => id != null))];
