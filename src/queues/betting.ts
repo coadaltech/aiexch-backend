@@ -126,17 +126,8 @@ const initializeResultProcessor = () => {
             })
             .where(eq(transactions.id, bet.id));
 
-          // Credit winnings to user
-          if (isWinner) {
-            const payout =
-              parseFloat(bet.stake || "0") * parseFloat(bet.odds || "0");
-            await db
-              .update(profiles)
-              .set({
-                balance: sql`CAST(${profiles.balance} AS DECIMAL) + ${payout.toString()}`,
-              })
-              .where(eq(profiles.userId, bet.userId));
-          }
+          // Ledger (userBalance + exposure) is updated automatically by the
+          // trg_ledger_limit_on_settle DB trigger when the status changes above.
         }
 
         return { success: true, processedBets: matchBets.length };

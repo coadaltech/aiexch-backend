@@ -4,6 +4,7 @@ import { whitelabels, users } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { uploadFile, deleteFile } from "../../services/s3";
 import { resolveOwnerScope } from "../../utils/ownerScope";
+import { addAllowedOrigin, removeAllowedOrigin } from "../../utils/cors-origins";
 
 export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .get("/", async ({ set, store }) => {
@@ -128,6 +129,9 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
           .set({ whitelabelId: whitelabel.id })
           .where(eq(users.id, userId));
 
+        // Immediately allow this domain in CORS without a server restart
+        if (whitelabel.domain) addAllowedOrigin(whitelabel.domain);
+
         set.status = 201;
         return { success: true, data: whitelabel };
       } catch (e) {
@@ -241,6 +245,13 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         .set(updateData)
         .where(eq(whitelabels.id, params.id))
         .returning();
+
+      // Keep CORS allow-list in sync when the domain changes
+      if (body.domain && body.domain !== existing.domain) {
+        if (existing.domain) removeAllowedOrigin(existing.domain);
+        addAllowedOrigin(body.domain);
+      }
+
       set.status = 200;
       return { success: true, data: updated };
     },
@@ -302,6 +313,10 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
     }
 
     await db.delete(whitelabels).where(eq(whitelabels.id, params.id));
+
+    // Remove the domain from the CORS allow-list
+    if (existing.domain) removeAllowedOrigin(existing.domain);
+
     set.status = 200;
     return { success: true };
   })

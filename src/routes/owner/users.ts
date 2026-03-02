@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { users, profiles, whitelabels } from "../../db/schema";
+import { users, profiles, whitelabels, ledgerLimit } from "../../db/schema";
 import { eq, and, inArray, ne, gt } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
@@ -27,7 +27,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "No whitelabel scope. You must operate from your whitelabel domain." };
       }
 
-      const { username, email, password, role, membership, balance, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId } = body as any;
+      const { username, email, password, role, membership, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId } = body as any;
       const createdBy = (store as { id?: string; role?: string })?.id || null;
       let whitelabelId: string | null =
         bodyWhitelabelId != null
@@ -118,7 +118,6 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         membership: membership || "bronze",
         betStatus: true,
         parentBetStatus,
-        balance: balance || "0",
         upline: toStr(upline),
         downline: toStr(downline),
         currencyId: currencyId || null,
@@ -126,6 +125,18 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         lastName: lastName || null,
         phone: phone || null,
         country: country || null,
+      });
+
+      // Create ledger_limit record — all amounts start at 0;
+      // admin can assign a credit limit (userLimit) separately.
+      await db.insert(ledgerLimit).values({
+        userId: user.id,
+        userBalance: "0",
+        userLimit: "0",
+        limitConsumed: "0",
+        limitConsumedAfterDeclare: "0",
+        finalLimit: "0",
+        addedBy: createdBy ?? undefined,
       });
 
       set.status = 201;
@@ -154,7 +165,6 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
           t.Literal("gold"),
           t.Literal("platinum"),
         ])),
-        balance: t.Optional(t.String()),
         upline: t.Optional(t.Union([t.String(), t.Number()])),
         downline: t.Optional(t.Union([t.String(), t.Number()])),
         whitelabelId: t.Optional(t.Union([t.Number(), t.String()])),
@@ -218,7 +228,6 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         membership: profile?.membership ?? "bronze",
         betStatus: profile?.betStatus ?? true,
         parentBetStatus: profile?.parentBetStatus ?? true,
-        balance: profile?.balance ?? "0",
         upline: profile?.upline ?? "0.00",
         downline: profile?.downline ?? "0.00",
         currencyId: profile?.currencyId ?? null,
@@ -322,7 +331,6 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
       if (body.membership !== undefined) profileUpdateData.membership = body.membership;
       if (body.betStatus !== undefined && isCreator) profileUpdateData.betStatus = body.betStatus;
-      if (body.balance !== undefined) profileUpdateData.balance = body.balance;
       if (body.upline !== undefined) profileUpdateData.upline = typeof body.upline === "number" ? body.upline.toString() : body.upline;
       if (body.downline !== undefined) profileUpdateData.downline = typeof body.downline === "number" ? body.downline.toString() : body.downline;
       if (body.currencyId !== undefined) profileUpdateData.currencyId = body.currencyId;
@@ -389,7 +397,6 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         accountStatus: t.Optional(t.Boolean()),
         betStatus: t.Optional(t.Boolean()),
         currentUserPassword: t.Optional(t.String()),
-        balance: t.Optional(t.String()),
         upline: t.Optional(t.Union([t.String(), t.Number()])),
         downline: t.Optional(t.Union([t.String(), t.Number()])),
         password: t.Optional(t.String({ minLength: 6 })),

@@ -244,7 +244,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             username: user.username,
             email: user.email,
             membership: profile?.membership ?? "bronze",
-            balance: profile?.balance ?? "0",
             role: user.role ?? "user",
             groupId: user.groupId,
             currencyId: profile?.currencyId ?? null,

@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit } from "../db/schema";
+// Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { addResultToQueue } from "../queues/betting";
@@ -33,6 +34,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         eventTypeId,
         odds,
         stake,
+        run,
         type,
         runners,
       } = body as {
@@ -45,6 +47,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         eventTypeId?: string;
         odds: number;
         stake: number;
+        run?: number | null;
         type: "back" | "lay";
         runners: { id: string; name: string; price: number }[];
       };
@@ -71,7 +74,6 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       const userData = await db
         .select({
-          balance: profiles.balance,
           betStatus: profiles.betStatus,
           parentBetStatus: profiles.parentBetStatus,
         })
@@ -90,11 +92,6 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Betting is disabled for your account" };
       }
 
-      if (parseFloat(userData[0].balance || "0") < stake) {
-        set.status = 400;
-        return { success: false, error: "Insufficient balance" };
-      }
-
       // Fetch whitelabelId from users table
       const userRecord = await db
         .select({ whitelabelId: users.whitelabelId })
@@ -103,7 +100,6 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         .limit(1);
 
       const whitelabelId = userRecord[0]?.whitelabelId ?? null;
-      console.log("Request ", request)
 
       const ipAddress =
         request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
@@ -112,22 +108,10 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       const ua = parseUserAgent(request.headers.get("user-agent"));
 
-      // For LINE (sessions) markets: profit = stake × (rate / 100), total = stake + profit
-      // For ODDS/BOOKMAKER: potentialPayout = stake × odds
-      const potentialPayout = isLineBet
-        ? (stake + stake * (odds / 100)).toFixed(2)
-        : (stake * odds).toFixed(2);
-
       const [txn] = await db.transaction(async (tx) => {
-        // Deduct stake from balance
-        await tx
-          .update(profiles)
-          .set({
-            balance: (parseFloat(userData[0].balance || "0") - stake).toString(),
-          })
-          .where(eq(profiles.userId, store.id));
-
         // Insert main transaction record
+        // Note: no balance deduction — the DB trigger on transaction_details
+        // recalculates exposure and enforces the credit limit automatically.
         const [newTxn] = await tx
           .insert(transactions)
           .values({
@@ -143,31 +127,33 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             betType: type,
             stake: stake.toString(),
             odds: odds.toString(),
-            potentialPayout,
             status: "matched",
             ipAddress,
             matchedAt: new Date(),
           })
           .returning();
 
-        // Insert one row per runner into transaction_details
-        const detailRows = runners.map((runner) => {
-          const isSelected = runner.id === selectionId;
-          const runnerReturn = isSelected
-            ? isLineBet
-              ? (stake + stake * (odds / 100)).toFixed(2)
-              : (stake * odds).toFixed(2)
-            : "0";
-          return {
-            transactionId: newTxn.id,
-            runnerId: runner.id,
-            runnerName: runner.name || null,
-            isUserSelection: isSelected,
-            price: runner.price.toString(),
-            stake: stake.toString(),
-            potentialReturn: runnerReturn,
-          };
-        });
+        // Insert one row per runner into transaction_details.
+        // Selected runner MUST be last so it is inserted after all other runners.
+        // The DB trigger fires WHEN is_user_selection = TRUE; at that point all
+        // sibling runner rows must already be visible for correct P&L calculation.
+        const detailRows = runners
+          .map((runner) => {
+            const isSelected = runner.id === selectionId;
+            const runnerReturn = isSelected ? (stake * odds).toFixed(2) : "0";
+            return {
+              transactionId: newTxn.id,
+              runnerId: runner.id,
+              runnerName: runner.name || null,
+              isUserSelection: isSelected,
+              betType: type,
+              price: runner.price.toString(),
+              run: isSelected && run != null ? run.toString() : "0",
+              stake: stake.toString(),
+              potentialReturn: runnerReturn,
+            };
+          })
+          .sort((a, b) => (a.isUserSelection ? 1 : 0) - (b.isUserSelection ? 1 : 0));
 
         await tx.insert(transactionDetails).values(detailRows);
 
@@ -184,11 +170,14 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       set.status = 201;
       return { success: true, transactionId: txn.id };
     } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to place bet";
+      // Trigger raises an exception when exposure exceeds the user's limit
+      if (msg.startsWith("Bet rejected:")) {
+        set.status = 400;
+        return { success: false, error: msg };
+      }
       set.status = 500;
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to place bet",
-      };
+      return { success: false, error: msg };
     }
   })
 
@@ -269,31 +258,12 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         };
       }
 
-      // Refund the stake
-      const profile = await db
-        .select({ balance: profiles.balance })
-        .from(profiles)
-        .where(eq(profiles.userId, store.id))
-        .limit(1);
-
-      await db.transaction(async (tx) => {
-        await tx
-          .update(transactions)
-          .set({ status: "cancelled", cancelledAt: new Date() })
-          .where(eq(transactions.id, params.transactionId));
-
-        if (profile[0]) {
-          await tx
-            .update(profiles)
-            .set({
-              balance: (
-                parseFloat(profile[0].balance || "0") +
-                parseFloat(txn[0].stake || "0")
-              ).toString(),
-            })
-            .where(eq(profiles.userId, store.id));
-        }
-      });
+      // Cancel the bet — the ledger exposure will be recalculated by
+      // the next bet placement. A dedicated recalc can be triggered on demand.
+      await db
+        .update(transactions)
+        .set({ status: "cancelled", cancelledAt: new Date() })
+        .where(eq(transactions.id, params.transactionId));
 
       set.status = 200;
       return { success: true };
@@ -324,16 +294,36 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
-  .get("/balance", async ({ store, set }) => {
+  .get("/ledger-info", async ({ store, set }) => {
     try {
-      const userData = await db
-        .select({ balance: profiles.balance })
-        .from(profiles)
-        .where(eq(profiles.userId, store.id))
+      const ledgerData = await db
+        .select()
+        .from(ledgerLimit)
+        .where(eq(ledgerLimit.userId, store.id))
         .limit(1);
 
       set.status = 200;
-      return { success: true, balance: userData[0]?.balance || 0 };
+      return { success: true, data: ledgerData[0] || null };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch ledger info" };
+    }
+  })
+
+  .get("/balance", async ({ store, set }) => {
+    try {
+      const ledgerData = await db
+        .select({ userBalance: ledgerLimit.userBalance, finalLimit: ledgerLimit.finalLimit })
+        .from(ledgerLimit)
+        .where(eq(ledgerLimit.userId, store.id))
+        .limit(1);
+
+      set.status = 200;
+      return {
+        success: true,
+        balance: ledgerData[0]?.userBalance || "0",
+        finalLimit: ledgerData[0]?.finalLimit || "0",
+      };
     } catch (error) {
       console.error("Failed to fetch balance:");
       set.status = 500;

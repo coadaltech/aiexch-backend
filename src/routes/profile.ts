@@ -7,6 +7,7 @@ import {
   vouchers,
   userReadNotifications,
   users,
+  ledgerLimit,
 } from "../db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
@@ -72,7 +73,6 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         email: user.email,
         role: user.role,
         membership: profile?.membership ?? "bronze",
-        balance: profile?.balance ?? "0",
         upline: profile?.upline ?? "0.00",
         downline: profile?.downline ?? "0.00",
         groupId: user.groupId,
@@ -105,23 +105,22 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         ...profile,
         username: user.username,
         email: user.email,
-        balance: profile?.balance ?? "0",
         role: user.role,
       },
     };
   })
 
   .get("/balance", async ({ store, set, db }) => {
-    const [profile] = await db
-      .select({ balance: profiles.balance })
-      .from(profiles)
-      .where(eq(profiles.userId, store.id))
+    const [ledger] = await db
+      .select({ finalLimit: ledgerLimit.finalLimit })
+      .from(ledgerLimit)
+      .where(eq(ledgerLimit.userId, store.id))
       .limit(1);
 
     set.status = 200;
     return {
       success: true,
-      balance: profile?.balance || "0",
+      balance: ledger?.finalLimit || "0",
     };
   })
 
@@ -371,22 +370,30 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           message: "User not found",
         };
       }
+
       const convertedAmount =
         body.currency === "USD"
           ? parseFloat(body.amount) * 82
           : parseFloat(body.amount);
 
-      if (parseFloat(profile.balance) < convertedAmount) {
+      // Check cash balance in ledger_limit
+      const [ledger] = await db
+        .select({ userBalance: ledgerLimit.userBalance })
+        .from(ledgerLimit)
+        .where(eq(ledgerLimit.userId, store.id))
+        .limit(1);
+
+      if (!ledger || parseFloat(ledger.userBalance || "0") < convertedAmount) {
         set.status = 400;
         return { success: false, message: "Insufficient balance" };
       }
 
       await db
-        .update(profiles)
+        .update(ledgerLimit)
         .set({
-          balance: decrement(profiles.balance, convertedAmount),
+          userBalance: decrement(ledgerLimit.userBalance, convertedAmount),
         })
-        .where(eq(profiles.userId, store.id));
+        .where(eq(ledgerLimit.userId, store.id));
 
       const [transaction] = await db
         .insert(vouchers)
@@ -498,11 +505,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       });
 
       await db
-        .update(profiles)
+        .update(ledgerLimit)
         .set({
-          balance: increment(profiles.balance, bonusAmount),
+          userBalance: increment(ledgerLimit.userBalance, bonusAmount),
         })
-        .where(eq(profiles.userId, store.id));
+        .where(eq(ledgerLimit.userId, store.id));
 
       await db
         .update(promocodes)

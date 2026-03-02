@@ -323,6 +323,27 @@
       "when": 1772121401895,
       "tag": "0045_dusty_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1772440197124,
+      "tag": "0046_lethal_squirrel_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1772449933530,
+      "tag": "0047_curious_mole_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1772451329044,
+      "tag": "0048_square_iron_monger",
+      "breakpoints": true
     }
   ]
 }

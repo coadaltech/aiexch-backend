@@ -1,5 +1,5 @@
 import { DbType } from "../../types";
-import { users, profiles, vouchers } from "@db/schema";
+import { users, profiles, vouchers, ledgerLimit } from "@db/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import "dotenv/config";
@@ -135,12 +135,12 @@ export const CasinoCallbackService = {
   },
 
   async getBalance(db: DbType, playerId: number): Promise<string | null> {
-    const [profile] = await db
-      .select({ balance: profiles.balance })
-      .from(profiles)
-      .where(eq(profiles.userId, playerId))
+    const [ledger] = await db
+      .select({ userBalance: ledgerLimit.userBalance })
+      .from(ledgerLimit)
+      .where(eq(ledgerLimit.userId, playerId))
       .limit(1);
-    return profile?.balance || null;
+    return ledger?.userBalance || null;
   },
 
   async deductBalance(
@@ -148,19 +148,19 @@ export const CasinoCallbackService = {
     playerId: number,
     amount: string
   ): Promise<boolean> {
-    const [profile] = await db
-      .select({ balance: profiles.balance })
-      .from(profiles)
-      .where(eq(profiles.userId, playerId))
+    const [ledger] = await db
+      .select({ userBalance: ledgerLimit.userBalance })
+      .from(ledgerLimit)
+      .where(eq(ledgerLimit.userId, playerId))
       .limit(1);
 
-    if (!profile) return false;
+    if (!ledger) return false;
 
-    const newBalance = (Number(profile.balance) - Number(amount)).toString();
+    const newBalance = (Number(ledger.userBalance) - Number(amount)).toString();
     await db
-      .update(profiles)
-      .set({ balance: newBalance })
-      .where(eq(profiles.userId, playerId));
+      .update(ledgerLimit)
+      .set({ userBalance: newBalance })
+      .where(eq(ledgerLimit.userId, playerId));
     return true;
   },
 
@@ -169,19 +169,19 @@ export const CasinoCallbackService = {
     playerId: number,
     amount: string
   ): Promise<boolean> {
-    const [profile] = await db
-      .select({ balance: profiles.balance })
-      .from(profiles)
-      .where(eq(profiles.userId, playerId))
+    const [ledger] = await db
+      .select({ userBalance: ledgerLimit.userBalance })
+      .from(ledgerLimit)
+      .where(eq(ledgerLimit.userId, playerId))
       .limit(1);
 
-    if (!profile) return false;
+    if (!ledger) return false;
 
-    const newBalance = (Number(profile.balance) + Number(amount)).toString();
+    const newBalance = (Number(ledger.userBalance) + Number(amount)).toString();
     await db
-      .update(profiles)
-      .set({ balance: newBalance })
-      .where(eq(profiles.userId, playerId));
+      .update(ledgerLimit)
+      .set({ userBalance: newBalance })
+      .where(eq(ledgerLimit.userId, playerId));
     return true;
   },
 

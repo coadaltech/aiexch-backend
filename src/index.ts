@@ -18,13 +18,27 @@ import { initSocket } from "@services/socket-service";
 import { websocketRoutes } from "@routes/websocket";
 import { startCronJobs } from "@db/seed";
 import { gamesRoutes } from "@routes/dashboard/games-routes";
-import { competitions } from "@db/schema";
+import { competitions, whitelabels } from "@db/schema";
 import { db } from "./db";
+import { dynamicOrigins, addAllowedOrigin } from "./utils/cors-origins";
 
+// On startup, load all existing whitelabel domains from DB so they survive restarts.
+async function loadWhitelabelOrigins() {
+  try {
+    const rows = await db.select({ domain: whitelabels.domain }).from(whitelabels);
+    for (const row of rows) {
+      if (row.domain) addAllowedOrigin(row.domain);
+    }
+    console.log(`[CORS] Loaded ${rows.length} whitelabel domain(s) into allow-list`);
+  } catch (e) {
+    console.error("[CORS] Failed to load whitelabel origins:", e);
+  }
+}
 
 // // Initialize services
 async function initializeServices() {
   await connectRedis();
+  await loadWhitelabelOrigins();
   // Start automatic bet settlement service
   startBetSettlementService();
 }
@@ -32,32 +46,18 @@ initializeServices();
 
 const port = Number(process.env.PORT || 3001);
 
-// Temporarily allow all origins for development
-// Set ALLOW_ALL_ORIGINS=true in .env to enable this (works in production too)
-const allowAllOrigins = false;
-// process.env.ALLOW_ALL_ORIGINS === "true" ||
-// process.env.NODE_ENV !== "production";
-
 const app = new Elysia()
   // Register WebSocket routes first — before CORS/cookie middleware
   // so the upgrade handshake isn't intercepted
   .use(
     cors({
-      origin: allowAllOrigins
-        ? true // Allow all origins - useful for local dev connecting to prod
-        : [
-          "http://localhost:3002",
-          "http://localhost:3000",
-          "http://localhost:3003",
-          "http://localhost:3001",
-          "http://10.42.0.1:3002",
-          "http://10.42.0.1:3003",
-          "http://10.42.0.1:3000",
-          "http://10.42.0.1:3001",
-          "https://aiexch-two.vercel.app",
-          "https://aiexch.com",
-          "https://www.aiexch.com",
-        ],
+      // Dynamic origin check — runs on every request against the live in-memory set.
+      // New whitelabel domains are reflected immediately without a server restart.
+      origin: (request) => {
+        const origin = request.headers.get("origin");
+        if (!origin) return false;
+        return dynamicOrigins.has(origin);
+      },
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain"],
       credentials: true,

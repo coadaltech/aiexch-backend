@@ -259,9 +259,6 @@ export const profiles = pgTable("profiles", {
   membership: varchar("membership", { length: 20 }).default("bronze"),
   betStatus: boolean("bet_status").default(true).notNull(),
   parentBetStatus: boolean("parent_bet_status").default(true).notNull(),
-  balance: decimal("balance", { precision: 15, scale: 2 })
-    .default("0")
-    .notNull(),
   upline: decimal("upline", { precision: 5, scale: 2 }).default("0.00"),
   downline: decimal("downline", { precision: 5, scale: 2 }).default("0.00"),
   currencyId: uuid("currency_id"),
@@ -396,7 +393,6 @@ export const transactions = pgTable("transactions", {
   betType: varchar("bet_type", { length: 10 }).notNull(), // back | lay
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   odds: decimal("odds", { precision: 10, scale: 4 }).notNull(),
-  potentialPayout: decimal("potential_payout", { precision: 15, scale: 2 }).notNull(),
   status: varchar("status", { length: 20 }).default("matched"), // matched | won | lost | cancelled | void
   settledAmount: decimal("settled_amount", { precision: 15, scale: 2 }),
   ipAddress: varchar("ip_address", { length: 45 }),
@@ -415,10 +411,11 @@ export const transactionDetails = pgTable("transaction_details", {
   runnerId: varchar("runner_id", { length: 100 }).notNull(),
   runnerName: varchar("runner_name", { length: 255 }),
   isUserSelection: boolean("is_user_selection").default(false).notNull(),
+  betType: varchar("bet_type", { length: 10 }), // back | lay
   price: decimal("price", { precision: 10, scale: 4 }).notNull(),
+  run: decimal("run", { precision: 10, scale: 2 }).default("0"),
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
-  actualReturn: decimal("actual_return", { precision: 15, scale: 2 }),
 });
 
 export const accountStatements = pgTable("account_statements", {
@@ -628,6 +625,22 @@ export const transactionLogs = pgTable("transaction_logs", {
   country: varchar("country", { length: 100 }),
   city: varchar("city", { length: 100 }),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const ledgerLimit = pgTable("ledger_limit", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  userBalance: decimal("user_balance", { precision: 15, scale: 2 }).default("0").notNull(),
+  userLimit: decimal("user_limit", { precision: 15, scale: 2 }).default("0").notNull(),
+  limitConsumed: decimal("limit_consumed", { precision: 15, scale: 2 }).default("0").notNull(),
+  limitConsumedAfterDeclare: decimal("limit_consumed_after_declare", { precision: 15, scale: 2 }).default("0").notNull(),
+  finalLimit: decimal("final_limit", { precision: 15, scale: 2 }).default("0").notNull(),
+  addedBy: uuid("added_by"),
+  addedAt: timestamp("added_at").defaultNow(),
+  updatedBy: uuid("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()),
 });
 
 // Create indexes

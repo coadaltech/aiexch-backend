@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { vouchers, profiles } from "../../db/schema";
+import { vouchers, profiles, ledgerLimit } from "../../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
@@ -28,11 +28,11 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
         voucher.status === "completed"
       ) {
         await db
-          .update(profiles)
+          .update(ledgerLimit)
           .set({
-            balance: sql`${profiles.balance} + ${voucher.amount}`,
+            userBalance: sql`${ledgerLimit.userBalance} + ${voucher.amount}`,
           })
-          .where(eq(profiles.userId, voucher.userId));
+          .where(eq(ledgerLimit.userId, voucher.userId));
       }
 
       set.status = 201;
@@ -69,18 +69,19 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
       if (updated.status === "completed" && (updated.type === "deposit" || updated.type === "bonus")) {
         await db
-          .update(profiles)
+          .update(ledgerLimit)
           .set({
-            balance: sql`${profiles.balance} + ${updated.amount}`,
+            userBalance: sql`${ledgerLimit.userBalance} + ${updated.amount}`,
           })
-          .where(eq(profiles.userId, updated.userId));
+          .where(eq(ledgerLimit.userId, updated.userId));
       } else if (updated.status === "failed" && updated.type === "withdraw") {
+        // Refund the withdrawal amount back to the user's cash balance
         await db
-          .update(profiles)
+          .update(ledgerLimit)
           .set({
-            balance: sql`${profiles.balance} + ${updated.amount}`,
+            userBalance: sql`${ledgerLimit.userBalance} + ${updated.amount}`,
           })
-          .where(eq(profiles.userId, updated.userId));
+          .where(eq(ledgerLimit.userId, updated.userId));
       }
 
       set.status = 200;

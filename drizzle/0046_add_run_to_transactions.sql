@@ -1,0 +1,2 @@
+-- This migration was superseded by 0047_restructure_transaction_details.sql
+-- run is stored in transaction_details instead of transactions
