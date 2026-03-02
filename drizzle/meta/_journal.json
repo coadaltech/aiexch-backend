@@ -344,6 +344,13 @@
       "when": 1772451329044,
       "tag": "0048_square_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1772458282660,
+      "tag": "0049_medical_starjammers",
+      "breakpoints": true
     }
   ]
 }

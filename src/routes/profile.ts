@@ -11,7 +11,7 @@ import {
 } from "../db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
-import { decrement, increment } from "../utils/numbers";
+import { increment } from "../utils/numbers";
 import { uploadFile } from "../services/s3";
 import { comparePassword, generateHashPassword } from "../utils/password";
 import { whitelabel_middleware } from "../middleware/whitelabel";
@@ -313,29 +313,26 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     return { success: true, data: statements };
   })
 
-  // Create deposit transaction
+  // Create deposit transaction (pending — admin must approve, trigger updates ledger)
   .post(
     "/deposit",
     async ({ body, store, set, db }) => {
-      const updatedBody = {} as any;
-
-      if (body.amount) updatedBody.amount = body.amount;
-      if (body.currency) updatedBody.currency = body.currency;
-      if (body.method) updatedBody.method = body.method;
-      if (body.reference) updatedBody.reference = body.reference;
-
+      let proofImageUrl: string | undefined;
       if (body.proofImage) {
-        const image = await uploadFile(body.proofImage);
-        updatedBody.proofImage = image;
+        proofImageUrl = await uploadFile(body.proofImage);
       }
 
       const [transaction] = await db
         .insert(vouchers)
         .values({
-          ...updatedBody,
           userId: store.id,
           type: "deposit",
+          amount: body.amount,
+          method: body.method,
+          reference: body.reference,
+          proofImage: proofImageUrl,
           status: "pending",
+          createdBy: store.id,
         })
         .returning();
 
@@ -345,7 +342,6 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     {
       body: t.Object({
         amount: t.String(),
-        currency: t.Optional(t.String()),
         method: t.String(),
         reference: t.Optional(t.String()),
         proofImage: t.File(),
@@ -353,28 +349,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }
   )
 
-  // Create withdrawal transaction
+  // Create withdrawal transaction (pending — balance deducted only on admin approval via trigger)
   .post(
     "/withdraw",
     async ({ body, store, set, db }) => {
-      const [profile] = await db
-        .select()
-        .from(profiles)
-        .where(eq(profiles.userId, store.id))
-        .limit(1);
-
-      if (!profile) {
-        set.status = 404;
-        return {
-          success: false,
-          message: "User not found",
-        };
-      }
-
-      const convertedAmount =
-        body.currency === "USD"
-          ? parseFloat(body.amount) * 82
-          : parseFloat(body.amount);
+      const amount = parseFloat(body.amount);
 
       // Check cash balance in ledger_limit
       const [ledger] = await db
@@ -383,17 +362,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         .where(eq(ledgerLimit.userId, store.id))
         .limit(1);
 
-      if (!ledger || parseFloat(ledger.userBalance || "0") < convertedAmount) {
+      if (!ledger || parseFloat(ledger.userBalance || "0") < amount) {
         set.status = 400;
         return { success: false, message: "Insufficient balance" };
       }
-
-      await db
-        .update(ledgerLimit)
-        .set({
-          userBalance: decrement(ledgerLimit.userBalance, convertedAmount),
-        })
-        .where(eq(ledgerLimit.userId, store.id));
 
       const [transaction] = await db
         .insert(vouchers)
@@ -401,11 +373,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           userId: store.id,
           type: "withdraw",
           amount: body.amount,
-          currency: body.currency,
           method: body.method,
           reference: body.address,
           withdrawalAddress: body.withdrawalAddress || body.address,
           status: "pending",
+          createdBy: store.id,
         })
         .returning();
 
@@ -415,10 +387,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     {
       body: t.Object({
         amount: t.String(),
-        currency: t.Optional(t.String()),
         method: t.String(),
         address: t.String(),
-
         withdrawalAddress: t.Optional(t.String()),
       }),
     }
@@ -463,7 +433,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         .where(
           and(
             eq(vouchers.userId, store.id),
-            eq(vouchers.type, "promocode"),
+            eq(vouchers.type, "bonus"),
             eq(vouchers.reference, promocode.code)
           )
         )
@@ -474,18 +444,20 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         return { success: false, message: "Promocode already used" };
       }
 
-      const [userProfile] = await db
-        .select()
-        .from(profiles)
-        .where(eq(profiles.userId, store.id))
+      // Fetch user's cash balance from ledger for percentage-based promos
+      const [ledger] = await db
+        .select({ userBalance: ledgerLimit.userBalance })
+        .from(ledgerLimit)
+        .where(eq(ledgerLimit.userId, store.id))
         .limit(1);
-      if (!userProfile) {
+
+      if (!ledger) {
         set.status = 404;
         return { success: false, message: "User not found" };
       }
 
       let bonusAmount = 0;
-      const userBalance = parseFloat(userProfile.balance);
+      const userBalance = parseFloat(ledger.userBalance || "0");
 
       // Calculate bonus based on types
       if (promocode.type === "percentage") {
@@ -494,22 +466,18 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         bonusAmount = parseFloat(promocode.value);
       }
 
+      // Auto-approved voucher — DB trigger updates ledger_limit.user_balance
       await db.insert(vouchers).values({
         userId: store.id,
-        type: "promocode",
+        type: "bonus",
         amount: bonusAmount.toString(),
-        currency: "INR",
         method: "promocode",
         reference: promocode.code,
-        status: "completed",
+        status: "approved",
+        createdBy: store.id,
+        approvedBy: store.id,
+        approvedAt: new Date(),
       });
-
-      await db
-        .update(ledgerLimit)
-        .set({
-          userBalance: increment(ledgerLimit.userBalance, bonusAmount),
-        })
-        .where(eq(ledgerLimit.userId, store.id));
 
       await db
         .update(promocodes)

@@ -218,22 +218,40 @@ export const vouchers = pgTable("vouchers", {
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
-  type: varchar("type", { length: 50 }).notNull(),
-  amount: decimal("amount", {
-    scale: 2,
-    precision: 16,
-  }).notNull(),
-  currency: varchar("currency", { length: 10 }).default("INR"),
-  status: varchar("status", { length: 20 }).default("pending"),
+  userGroupId: integer("user_group_id"),
+  type: varchar("type", { length: 20 }).notNull(), // credit | debit | limit | deposit | withdraw | bonus | settlement
+  ledgerField: varchar("ledger_field", { length: 20 }), // user_balance | user_limit | both
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  status: varchar("status", { length: 20 }).default("pending"), // pending | approved | rejected
+  remarks: text("remarks"),
   method: varchar("method", { length: 50 }),
   reference: varchar("reference", { length: 255 }),
-  txnHash: varchar("txn_hash", { length: 255 }),
   proofImage: text("proof_image"),
-  withdrawalAddress: text("withdrawl_address"),
+  withdrawalAddress: text("withdrawal_address"),
+  transactionId: uuid("transaction_id"),
+  createdBy: uuid("created_by"),
+  approvedBy: uuid("approved_by"),
+  approvedAt: timestamp("approved_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
     .$onUpdate(() => new Date()),
+});
+
+export const voucherDetails = pgTable("voucher_details", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  voucherId: uuid("voucher_id")
+    .references(() => vouchers.id, { onDelete: "cascade" })
+    .notNull(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  userGroupId: integer("user_group_id"),
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  commissionPercent: decimal("commission_percent", { precision: 5, scale: 2 }),
+  accountType: varchar("account_type", { length: 20 }), // ledger | capital | sport_pnl
+  description: varchar("description", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const kycDocuments = pgTable("kyc_documents", {
