@@ -351,6 +351,41 @@
       "when": 1772458282660,
       "tag": "0049_medical_starjammers",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1772458382660,
+      "tag": "0050_remove_profile_balance",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1772458482660,
+      "tag": "0051_ledger_settle_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1772458582660,
+      "tag": "0052_voucher_redesign",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1772458682660,
+      "tag": "0053_bet_final_limit_enforcement",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1772458782660,
+      "tag": "0054_bet_final_limit_session_market",
+      "breakpoints": true
     }
   ]
 }

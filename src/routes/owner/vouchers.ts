@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { vouchers } from "../../db/schema";
+import { vouchers, voucherDetails, users } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
@@ -20,23 +20,32 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
     async ({ body, set, db, store }) => {
       const adminId = (store as { id?: string })?.id || null;
 
+      // Look up user's groupId
+      const [user] = await db
+        .select({ groupId: users.groupId })
+        .from(users)
+        .where(eq(users.id, body.userId));
+
+      const userGroupId = user?.groupId ?? null;
+      const status = body.status || "approved";
+
       // Insert voucher — if status is 'approved', the DB trigger
       // automatically updates ledger_limit (no manual update needed).
       const [voucher] = await db
         .insert(vouchers)
         .values({
           userId: body.userId,
-          userGroupId: body.userGroupId,
+          userGroupId,
           type: body.type,
           ledgerField: body.ledgerField,
           amount: body.amount,
-          status: body.status || "approved",
+          status,
           remarks: body.remarks,
           method: body.method,
           reference: body.reference,
           createdBy: adminId,
-          approvedBy: body.status === "approved" ? adminId : null,
-          approvedAt: body.status === "approved" ? new Date() : null,
+          approvedBy: status === "approved" ? adminId : null,
+          approvedAt: status === "approved" ? new Date() : null,
         })
         .returning();
 
@@ -46,7 +55,6 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
     {
       body: t.Object({
         userId: t.String(),
-        userGroupId: t.Optional(t.Number()),
         type: t.String(), // limit | credit | debit | deposit | withdraw | bonus | settlement
         ledgerField: t.Optional(t.String()), // user_balance | user_limit | both
         amount: t.String(),

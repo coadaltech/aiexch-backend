@@ -107,14 +107,24 @@ BEGIN
    WHERE worst_pnl < 0;
 
   -- Apply all updates in one pass
+  -- user_limit tracks user_balance on settlement so users can't bet more than their balance
   UPDATE ledger_limit
      SET limit_consumed_after_declare = v_prev_consumed,
          limit_consumed               = v_total_exposure,
-         final_limit                  = user_limit - v_total_exposure,
          user_balance = CASE
            WHEN NEW.status = 'won'  THEN user_balance + (v_potential_return - v_stake)
            WHEN NEW.status = 'lost' THEN user_balance - v_stake
-           ELSE user_balance  -- cancelled / void: no cash movement
+           ELSE user_balance
+         END,
+         user_limit = CASE
+           WHEN NEW.status = 'won'  THEN user_limit + (v_potential_return - v_stake)
+           WHEN NEW.status = 'lost' THEN user_limit - v_stake
+           ELSE user_limit
+         END,
+         final_limit = CASE
+           WHEN NEW.status = 'won'  THEN (user_limit + (v_potential_return - v_stake)) - v_total_exposure
+           WHEN NEW.status = 'lost' THEN (user_limit - v_stake) - v_total_exposure
+           ELSE user_limit - v_total_exposure
          END,
          updated_at = NOW()
    WHERE user_id = NEW.user_id;

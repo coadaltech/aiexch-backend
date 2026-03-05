@@ -46,12 +46,17 @@ CREATE TABLE "voucher_details" (
 );
 
 -- Step 4: Trigger to update ledger_limit when a voucher is approved
+--
+-- All voucher types update BOTH user_balance and user_limit together:
+--   credit/deposit/bonus/limit → ADD amount to balance, limit, final_limit
+--   debit/withdraw             → SUBTRACT amount from balance, limit, final_limit
+--
+-- Bet placement only touches limit_consumed/final_limit (not balance).
+-- Result declaration updates all fields via the settle trigger.
 CREATE OR REPLACE FUNCTION trg_voucher_ledger_update()
 RETURNS TRIGGER AS $$
 BEGIN
   -- Only act when status becomes 'approved'
-  -- For INSERT: NEW.status must be 'approved'
-  -- For UPDATE: OLD.status must NOT be 'approved' and NEW.status must be 'approved'
   IF TG_OP = 'UPDATE' AND (OLD.status = 'approved' OR NEW.status <> 'approved') THEN
     RETURN NEW;
   END IF;
@@ -59,35 +64,20 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- Determine which field to update based on type (ledger_field overrides if set)
-  IF NEW.type = 'limit' OR NEW.ledger_field = 'user_limit' THEN
-    -- Admin assigning credit limit: add to user_limit, recalculate final_limit
-    UPDATE ledger_limit
-       SET user_limit  = user_limit + NEW.amount,
-           final_limit = (user_limit + NEW.amount) - limit_consumed,
-           updated_at  = NOW()
-     WHERE user_id = NEW.user_id;
-
-  ELSIF NEW.type IN ('credit', 'deposit', 'bonus') OR NEW.ledger_field = 'user_balance' THEN
-    -- Add to cash balance
-    UPDATE ledger_limit
-       SET user_balance = user_balance + NEW.amount,
-           updated_at   = NOW()
-     WHERE user_id = NEW.user_id;
-
-  ELSIF NEW.type IN ('debit', 'withdraw') THEN
-    -- Subtract from cash balance
+  IF NEW.type IN ('debit', 'withdraw') THEN
+    -- Deduct from both balance and limit
     UPDATE ledger_limit
        SET user_balance = user_balance - NEW.amount,
+           user_limit   = user_limit - NEW.amount,
+           final_limit  = (user_limit - NEW.amount) - limit_consumed,
            updated_at   = NOW()
      WHERE user_id = NEW.user_id;
-
-  ELSIF NEW.ledger_field = 'both' THEN
-    -- Update both fields (special case)
+  ELSE
+    -- Add to both balance and limit (limit, credit, deposit, bonus, settlement)
     UPDATE ledger_limit
-       SET user_limit   = user_limit + NEW.amount,
+       SET user_balance = user_balance + NEW.amount,
+           user_limit   = user_limit + NEW.amount,
            final_limit  = (user_limit + NEW.amount) - limit_consumed,
-           user_balance = user_balance + NEW.amount,
            updated_at   = NOW()
      WHERE user_id = NEW.user_id;
   END IF;
