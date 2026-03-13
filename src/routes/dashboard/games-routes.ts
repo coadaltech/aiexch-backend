@@ -5,7 +5,7 @@ import Elysia from "elysia";
 
 export const gamesRoutes = new Elysia({ prefix: "/api/dashboard" })
   .get("/sports-list", async () => {
-    console.log("yhaaaa");
+    // console.log("yhaaaa");
     const sportsList = await getAvailableSportsList();
 
     return {

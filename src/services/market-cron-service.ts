@@ -1,6 +1,6 @@
 // services/market-cron-service.ts
 import cron from "node-cron";
-import { SportsService } from "./sports";
+import { MarketPipelineService } from "./market-pipeline-service";
 
 // Track events that need updates
 const activeEvents = new Set<string>();
@@ -30,13 +30,13 @@ export class MarketCronService {
   }
 
   private static async updateMarkets() {
-    const events = Array.from(activeEvents);
+    const eventList = Array.from(activeEvents);
 
-    if (events.length === 0) {
+    if (eventList.length === 0) {
       return; // No active events
     }
 
-    for (const eventId of events) {
+    for (const eventId of eventList) {
       try {
         await this.updateSingleMarket(eventId);
       } catch (error) {
@@ -46,9 +46,8 @@ export class MarketCronService {
   }
 
   private static async updateSingleMarket(eventId: string) {
-    // Call your existing function
-    const marketsWithOdds = await SportsService.getMarketsWithOdds({ eventId });
-    // Your function already emits via WebSocket
-    console.log(`🔄 Updated ${eventId}: ${marketsWithOdds.length} markets`);
+    // Pipeline: fetch API → apply admin overrides → broadcast via WS
+    const processed = await MarketPipelineService.processEvent(eventId);
+    console.log(`🔄 Updated ${eventId}: ${processed.length} markets`);
   }
 }

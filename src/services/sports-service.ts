@@ -9,6 +9,7 @@ export const getAvailableSportsList = async () => {
     const cacheKey = "sports:list";
     const cached = await redis.get(cacheKey);
 
+    // console.log("dsfjsdfkschut")
     if (cached) {
       console.log("✅ Returning cached sports data");
       return JSON.parse(cached);

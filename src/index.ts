@@ -12,6 +12,8 @@ import { casinoAggregatorRoutes } from "./routes/casino/aggregator";
 import { casinoCallbackRoutes } from "./routes/casino/callback";
 import { casinoGamesRoutes } from "./routes/casino/games";
 import { startBetSettlementService } from "./services/bet-settlement";
+import { AdminMarketService } from "@services/admin-market-service";
+import { OddsHistoryWorker } from "@services/odds-history-worker";
 import { seriesRoutes } from "./routes/series-route";
 import "dotenv/config";
 import { initSocket } from "@services/socket-service";
@@ -21,6 +23,7 @@ import { gamesRoutes } from "@routes/dashboard/games-routes";
 import { competitions, whitelabels } from "@db/schema";
 import { db } from "./db";
 import { dynamicOrigins, addAllowedOrigin } from "./utils/cors-origins";
+import { lte } from "drizzle-orm";
 
 // On startup, load all existing whitelabel domains from DB so they survive restarts.
 async function loadWhitelabelOrigins() {
@@ -39,6 +42,10 @@ async function loadWhitelabelOrigins() {
 async function initializeServices() {
   await connectRedis();
   await loadWhitelabelOrigins();
+  // Sync admin market overrides from DB to Redis
+  await AdminMarketService.syncOverridesToRedis();
+  // Start odds history background worker
+  await OddsHistoryWorker.init();
   // Start automatic bet settlement service
   startBetSettlementService();
 }
@@ -115,9 +122,14 @@ const app = new Elysia()
 // });
 
 console.log(`🚀 Server is running on http://localhost:${port}`);
-console.log(`📡 WebSocket support enabled`);
+// console.log(`📡 WebSocket support enabled`);
 
 // startCronJobs()
+
+// let a  =async function(){
+//   let result = await db.delete(competitions).where(lte(competitions.created_at, new Date("2026-03-05 07:27:40.702")));
+// }
+// a();
 
 initSocket();
 

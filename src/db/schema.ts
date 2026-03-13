@@ -661,6 +661,105 @@ export const ledgerLimit = pgTable("ledger_limit", {
   updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()),
 });
 
+// ── Events (matches) with admin controls ─────────────────────
+export const events = pgTable("events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventId: varchar("event_id", { length: 100 }).notNull().unique(),
+  competitionId: varchar("competition_id", { length: 50 }).notNull(),
+  sportId: varchar("sport_id", { length: 50 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  openDate: timestamp("open_date"),
+  whitelabelId: uuid("whitelabel_id"),
+
+  // Admin controls
+  isActive: boolean("is_active").default(true).notNull(),
+  isVisible: boolean("is_visible").default(true).notNull(),
+  suspended: boolean("suspended").default(false).notNull(),
+  betDelay: integer("bet_delay").default(0).notNull(),
+  maxMarketProfit: decimal("max_market_profit", { precision: 15, scale: 2 }),
+
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// ── Markets with admin overrides ─────────────────────────────
+export const marketSettings = pgTable("market_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  marketId: varchar("market_id", { length: 100 }).notNull().unique(),
+  eventId: varchar("event_id", { length: 100 }).notNull(),
+  marketName: varchar("market_name", { length: 255 }).notNull(),
+  marketType: varchar("market_type", { length: 50 }).notNull(),
+  bettingType: varchar("betting_type", { length: 20 }).notNull(),
+  provider: varchar("provider", { length: 50 }).default("API"),
+  whitelabelId: uuid("whitelabel_id"),
+
+  // Admin controls
+  isCustom: boolean("is_custom").default(false).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  isVisible: boolean("is_visible").default(true).notNull(),
+  suspended: boolean("suspended").default(false).notNull(),
+  betLock: boolean("bet_lock").default(false).notNull(),
+  betDelay: integer("bet_delay"),
+  minBet: decimal("min_bet", { precision: 15, scale: 2 }),
+  maxBet: decimal("max_bet", { precision: 15, scale: 2 }),
+  maxProfit: decimal("max_profit", { precision: 15, scale: 2 }),
+  sortPriority: integer("sort_priority").default(0),
+
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// ── Runners with admin overrides ─────────────────────────────
+export const runnerSettings = pgTable("runner_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  selectionId: varchar("selection_id", { length: 100 }).notNull(),
+  marketId: varchar("market_id", { length: 100 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  sortPriority: integer("sort_priority").default(0),
+
+  // Admin controls
+  isActive: boolean("is_active").default(true).notNull(),
+  isVisible: boolean("is_visible").default(true).notNull(),
+
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// ── Custom market odds (admin-set, for custom markets) ───────
+export const customMarketOdds = pgTable("custom_market_odds", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  marketId: varchar("market_id", { length: 100 }).notNull(),
+  selectionId: varchar("selection_id", { length: 100 }).notNull(),
+  // Up to 3 back and 3 lay prices per runner: [{price: number, size: number}]
+  backPrices: jsonb("back_prices").$type<{ price: number; size: number }[]>().default([]),
+  layPrices: jsonb("lay_prices").$type<{ price: number; size: number }[]>().default([]),
+  line: decimal("line", { precision: 10, scale: 2 }),
+
+  updatedBy: uuid("updated_by"),
+  updatedAt: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// ── Market odds history (batch-inserted by background worker) ─
+export const marketOddsHistory = pgTable("market_odds_history", {
+  id: serial("id").primaryKey(),
+  marketId: varchar("market_id", { length: 100 }).notNull(),
+  eventId: varchar("event_id", { length: 100 }).notNull(),
+  snapshot: jsonb("snapshot").notNull(),
+  capturedAt: timestamp("captured_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Create indexes
 export const currencyValueHistoryIndex = { table: currencyValueHistory, columns: [currencyValueHistory.currencyId] as const };
 
@@ -668,11 +767,11 @@ export const sportsIndexes = [
   // Create index for is_active for faster filtering
   { table: sports, columns: [sports.is_active] },
   { table: sports, columns: [sports.sort_order] },
-  
+
   // Competition indexes
   { table: competitions, columns: [competitions.sport_id] },
   { table: competitions, columns: [competitions.is_active] },
   { table: competitions, columns: [competitions.competition_id] },
-  
+
   // Runner indexes
 ];

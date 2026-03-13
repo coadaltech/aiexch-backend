@@ -6,6 +6,7 @@ import { parseUserAgent } from "../utils/parse-ua";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { addResultToQueue } from "../queues/betting";
 import { app_middleware } from "../middleware/auth";
+import { redis } from "../db/redis";
 
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
   .state({ id: "" as string, role: "" })
@@ -90,6 +91,34 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       if (!canBet) {
         set.status = 403;
         return { success: false, error: "Betting is disabled for your account" };
+      }
+
+      // Server-side market status check: reject if suspended or ball running
+      try {
+        if (redis.isOpen) {
+          const liveJson = await redis.get(`live:markets:${matchId}`);
+          if (liveJson) {
+            const liveMarkets: any[] = JSON.parse(liveJson);
+            const targetMarket = liveMarkets.find((m: any) => m.marketId === marketId);
+            if (targetMarket) {
+              if (targetMarket.status === "SUSPENDED") {
+                set.status = 400;
+                return { success: false, error: "Bet rejected: market is suspended" };
+              }
+              if (targetMarket.sportingEvent) {
+                set.status = 400;
+                return { success: false, error: "Bet rejected: ball is running" };
+              }
+              if (targetMarket.marketCondition?.betLock) {
+                set.status = 400;
+                return { success: false, error: "Bet rejected: market is locked" };
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Non-critical: if Redis check fails, allow the bet through
+        // (the DB trigger will still enforce limits)
       }
 
       // Fetch whitelabelId from users table

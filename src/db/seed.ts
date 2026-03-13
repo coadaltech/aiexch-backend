@@ -166,14 +166,14 @@ const upsertCompetition = async (compData: any, sportId: string) => {
       return { operation: "skipped", reason: "missing_id" };
     }
 
-    // ✅ PEHLE CHECK KARO KI COMPETITION EXIST KARTA HAI YA NAHI
+    // Check existing competitons in db
     const existing = await db
       .select()
       .from(competitions)
       .where(eq(competitions.competition_id, String(compId)))
       .limit(1);
 
-    // ✅ AGAR PEHLE SE EXIST KARTA HAI TO SKIP KARDO
+    // skip existing competitions
     if (existing.length > 0) {
       console.log(
         `⏭️ Skipping existing competition: ${compName} (ID: ${compId})`,
@@ -186,7 +186,7 @@ const upsertCompetition = async (compData: any, sportId: string) => {
       };
     }
 
-    // ✅ SIRF NEW COMPETITIONS KE LIYE ISSE AAGE BADHO
+    // ✅ inser only new competitons
     const isActive = false; // Default false
     const metadata = competition.metadata || compData.metadata || {};
 
@@ -282,6 +282,9 @@ const syncCompetitions = async () => {
         `\n📊 Processing sport ${sportNumber}/${totalSports}: ${sport.name} (ID: ${sport.sport_id})`,
       );
 
+      // if(sport.id !== "2") continue;
+      // if (sport.sport_id !== "2") continue;
+
       try {
         const competitionsData = await getCompetitionsFromApi(sport.sport_id);
         console.log(
@@ -358,7 +361,7 @@ const syncCompetitions = async () => {
 };
 
 // Cron Jobs
-export const startCronJobs = async () => {
+export const startCronJobs = async () => {  
   console.log("⏰ Setting up cron jobs...");
 
   // Sports: हर 24 घंटे में (midnight UTC)
