@@ -1,43 +1,54 @@
-import { redis } from "@db/redis";
+import { redis, redisIsHealthy, markRedisUnhealthy } from "@db/redis";
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("Redis timeout")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+const REDIS_TIMEOUT = 3000;
 
 export const CacheService = {
   async get<T>(key: string): Promise<T | null> {
+    if (!redisIsHealthy()) return null;
     try {
-      if (!redis.isOpen) return null;
-      const data = await redis.get(key);
+      const data = await withTimeout(redis.get(key), REDIS_TIMEOUT);
       return data ? JSON.parse(data) : null;
-    } catch (error) {
-      console.error("Cache get error:");
+    } catch {
+      markRedisUnhealthy();
       return null;
     }
   },
 
   async set(key: string, value: any, ttl: number = 3600): Promise<void> {
+    if (!redisIsHealthy()) return;
     try {
-      if (!redis.isOpen) return;
-      await redis.setEx(key, ttl, JSON.stringify(value));
-    } catch (error) {
-      console.error("Cache set error:");
+      await withTimeout(redis.setEx(key, ttl, JSON.stringify(value)), REDIS_TIMEOUT);
+    } catch {
+      markRedisUnhealthy();
     }
   },
 
   async del(key: string): Promise<void> {
+    if (!redisIsHealthy()) return;
     try {
-      await redis.del(key);
-    } catch (error) {
-      console.error("Cache delete error:");
+      await withTimeout(redis.del(key), REDIS_TIMEOUT);
+    } catch {
+      markRedisUnhealthy();
     }
   },
 
   async invalidatePattern(pattern: string): Promise<void> {
+    if (!redisIsHealthy()) return;
     try {
-      if (!redis.isOpen) return;
-      const keys = await redis.keys(pattern);
+      const keys = await withTimeout(redis.keys(pattern), REDIS_TIMEOUT);
       if (keys.length > 0) {
-        await redis.del(keys);
+        await withTimeout(redis.del(keys), REDIS_TIMEOUT);
       }
-    } catch (error) {
-      console.error("Cache invalidate error:", error);
+    } catch {
+      markRedisUnhealthy();
     }
   },
 };

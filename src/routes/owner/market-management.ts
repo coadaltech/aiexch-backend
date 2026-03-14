@@ -15,6 +15,33 @@ export const marketManagementRoutes = new Elysia({
 })
 
   // ═══════════════════════════════════════════════════════════
+  //  EVENT SEARCH
+  // ═══════════════════════════════════════════════════════════
+
+  // GET /owner/market-management/events/search?q=xxx
+  .get(
+    "/events/search",
+    async ({ query, set }) => {
+      try {
+        const results = await AdminMarketService.searchEvents(
+          query.q || "",
+          Math.min(parseInt(query.limit || "20"), 50)
+        );
+        return { success: true, data: results };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to search events" };
+      }
+    },
+    {
+      query: t.Object({
+        q: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+    }
+  )
+
+  // ═══════════════════════════════════════════════════════════
   //  EVENT SETTINGS
   // ═══════════════════════════════════════════════════════════
 

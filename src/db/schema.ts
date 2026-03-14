@@ -221,7 +221,6 @@ export const vouchers = pgTable("vouchers", {
   userGroupId: integer("user_group_id"),
   type: varchar("type", { length: 20 }).notNull(), // credit | debit | limit | deposit | withdraw | bonus | settlement
   ledgerField: varchar("ledger_field", { length: 20 }), // user_balance | user_limit | both
-  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
   status: varchar("status", { length: 20 }).default("pending"), // pending | approved | rejected
   remarks: text("remarks"),
   method: varchar("method", { length: 50 }),
@@ -229,6 +228,7 @@ export const vouchers = pgTable("vouchers", {
   proofImage: text("proof_image"),
   withdrawalAddress: text("withdrawal_address"),
   transactionId: uuid("transaction_id"),
+  referenceId: varchar("reference_id", { length: 255 }),
   createdBy: uuid("created_by"),
   approvedBy: uuid("approved_by"),
   approvedAt: timestamp("approved_at"),
@@ -248,8 +248,16 @@ export const voucherDetails = pgTable("voucher_details", {
     .notNull(),
   userGroupId: integer("user_group_id"),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  drCr: varchar("dr_cr", { length: 10 }), // DEBIT | CREDIT
   commissionPercent: decimal("commission_percent", { precision: 5, scale: 2 }),
+  balanceBefore: decimal("balance_before", { precision: 15, scale: 2 }),
+  balanceAfter: decimal("balance_after", { precision: 15, scale: 2 }),
   accountType: varchar("account_type", { length: 20 }), // ledger | capital | sport_pnl
+  role: varchar("role", { length: 20 }), // owner|admin|super|master|agent|user|capital|pnl
+  eventId: varchar("event_id", { length: 100 }),
+  marketId: varchar("market_id", { length: 100 }),
+  betId: uuid("bet_id"),
+  whitelabelId: uuid("whitelabel_id"),
   description: varchar("description", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -757,6 +765,28 @@ export const marketOddsHistory = pgTable("market_odds_history", {
   eventId: varchar("event_id", { length: 100 }).notNull(),
   snapshot: jsonb("snapshot").notNull(),
   capturedAt: timestamp("captured_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Bet commission snapshot — freezes hierarchy % at bet placement time
+export const betCommissionSnapshot = pgTable("bet_commission_snapshot", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id")
+    .references(() => transactions.id, { onDelete: "cascade" })
+    .notNull(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  agentId: uuid("agent_id"),
+  agentPercent: decimal("agent_percent", { precision: 5, scale: 2 }).default("0"),
+  masterId: uuid("master_id"),
+  masterPercent: decimal("master_percent", { precision: 5, scale: 2 }).default("0"),
+  superId: uuid("super_id"),
+  superPercent: decimal("super_percent", { precision: 5, scale: 2 }).default("0"),
+  adminId: uuid("admin_id"),
+  adminPercent: decimal("admin_percent", { precision: 5, scale: 2 }).default("0"),
+  ownerId: uuid("owner_id"),
+  ownerPercent: decimal("owner_percent", { precision: 5, scale: 2 }).default("0"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

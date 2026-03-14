@@ -220,8 +220,8 @@ export const SportsService = {
           // If API supports multiple IDs as comma-separated
           const marketIds = chunk.join(",");
 
-          const response = await axios.get(
-            `${process.env.SPORTS_GAME_PROVIDER_BASE_URL}/sports/books/${marketIds}`,
+          const response = await api.get(
+            `/sports/books/${marketIds}`,
           );
 
           // console.log("oddd",JSON.stringify(response.data, null, 2));
@@ -566,16 +566,16 @@ export const SportsService = {
   }) {
     const cacheKey = `matches:${eventTypeId}:${competitionId}`;
     try {
-      // const cached = await CacheService.get<MatchItem[]>(cacheKey);
-      // if (cached) return cached;
-      const response = await axios.get(
-        `${process.env.SPORTS_GAME_PROVIDER_BASE_URL}/sports/competitions/${competitionId}`,
+      const cached = await CacheService.get<MatchItem[]>(cacheKey);
+      if (cached) return cached;
+      const response = await api.get(
+        `/sports/competitions/${competitionId}`,
       );
       // console.log("match", response)
 
       const data = validateArray<any>(response.data.events);
 
-      await CacheService.set(cacheKey, data, 2 * 60 * 60); // 2 hours
+      await CacheService.set(cacheKey, data, 2 * 60); // 2 minutes
       return data;
     } catch (error: any) {
       console.error("getMatchList error:");
@@ -591,8 +591,11 @@ export const SportsService = {
     const cacheKey = `markets:${eventId}`;
 
     try {
-      const response = await axios.get(
-        `${process.env.SPORTS_GAME_PROVIDER_BASE_URL}/sports/events/${eventId}`,
+      const cached = await CacheService.get<MarketItem[]>(cacheKey);
+      if (cached) return cached;
+
+      const response = await api.get(
+        `/sports/events/${eventId}`,
       );
 
       const catalogues = Array.isArray(response.data?.catalogues)
@@ -605,7 +608,7 @@ export const SportsService = {
 
       const data = validateArray<MarketItem>(catalogues);
 
-      await CacheService.set(cacheKey, data, 4 * 60 * 60);
+      await CacheService.set(cacheKey, data, 60); // 60 seconds
       return data;
     } catch (error) {
       // console.error("getMarkets error:", error);

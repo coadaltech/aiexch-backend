@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { users, profiles, whitelabels, ledgerLimit } from "../../db/schema";
-import { eq, and, inArray, ne, gt } from "drizzle-orm";
+import { eq, and, inArray, ne, gt, gte } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
 import { generateHashPassword, comparePassword } from "../../utils/password";
@@ -183,7 +183,8 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     let visibleUsers: { id: string; username: string; email: string;[k: string]: unknown }[];
     if (isOwnerNoScope) {
       // Owner with no whitelabel scope: sees all users except self
-      visibleUsers = await db.select().from(users).where(ne(users.id, scope.currentUserId));
+      // Filter out system accounts (groupId 0-2: capital, pnl, limit accounts)
+      visibleUsers = await db.select().from(users).where(and(ne(users.id, scope.currentUserId), gte(users.groupId, 3)));
     } else if (scope.scopeWhitelabelId == null) {
       set.status = 200;
       return { success: true, data: [] };
@@ -191,6 +192,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       const conditions = [
         eq(users.whitelabelId, scope.scopeWhitelabelId),
         ne(users.id, scope.currentUserId),
+        gte(users.groupId, 3), // Exclude system accounts (groupId 0-2: capital, pnl, limit)
       ];
       // Role-hierarchy filter:
       // - owner (with scope) / admin: see all users of the whitelabel
@@ -216,6 +218,14 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     const creatorMap = new Map(creators.map((c) => [c.id, c.username]));
     const wlMap = new Map(wls.map((w) => [w.id, w.name]));
 
+    // Fetch ledger_limit balances for all visible users
+    const userIds = visibleUsers.map((u) => u.id);
+    const ledgerRows =
+      userIds.length > 0
+        ? await db.select().from(ledgerLimit).where(inArray(ledgerLimit.userId, userIds))
+        : [];
+    const ledgerMap = new Map(ledgerRows.map((l) => [l.userId, l]));
+
     const usersWithProfiles = [];
     for (const user of visibleUsers) {
       const [profile] = await db
@@ -223,6 +233,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         .from(profiles)
         .where(eq(profiles.userId, user.id))
         .limit(1);
+      const ledger = ledgerMap.get(user.id);
       usersWithProfiles.push({
         ...user,
         membership: profile?.membership ?? "bronze",
@@ -239,6 +250,10 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         country: profile?.country || null,
         createdByUsername: user.createdBy != null ? (creatorMap.get(user.createdBy as string) ?? null) : null,
         whitelabelName: user.whitelabelId != null ? (wlMap.get(user.whitelabelId as string) ?? null) : null,
+        balance: ledger?.userBalance ?? "0.00",
+        userLimit: ledger?.userLimit ?? "0.00",
+        limitConsumed: ledger?.limitConsumed ?? "0.00",
+        finalLimit: ledger?.finalLimit ?? "0.00",
       });
     }
     set.status = 200;

@@ -8,6 +8,8 @@ import {
   users,
 } from "@db/schema";
 import { eq, and } from "drizzle-orm";
+import { SportsService } from "./sports";
+import dummysports from "../dummy/sportsevents.json";
 
 // Helper: convert runner's back/lay arrays to Redis JSON format
 function buildRunnerRedisJson(
@@ -470,6 +472,74 @@ export const AdminMarketService = {
     }
 
     return { success: true };
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  //  EVENT SEARCH
+  // ═══════════════════════════════════════════════════════════
+
+  async searchEvents(query: string, limit: number = 20) {
+    const q = query.toLowerCase().trim();
+    if (!q) return [];
+
+    const sports = dummysports as { id: string; name: string }[];
+    const results: {
+      eventId: string;
+      name: string;
+      sportId: string;
+      sportName: string;
+      seriesName: string;
+      openDate: string | null;
+      inPlay: boolean;
+    }[] = [];
+
+    // Fetch series data for all sports in parallel (uses cache if available, fetches fresh otherwise)
+    const allSportsData = await Promise.all(
+      sports.map(async (sport) => {
+        try {
+          const seriesData = await SportsService.getSeriesWithMatches(sport.id);
+          return { sport, seriesData: seriesData || [] };
+        } catch {
+          return { sport, seriesData: [] };
+        }
+      })
+    );
+
+    // Search through all sports data
+    for (const { sport, seriesData } of allSportsData) {
+      for (const series of seriesData) {
+        const seriesName = series.name || "Unknown Series";
+        const matches = series.matches || [];
+
+        for (const match of matches) {
+          const matchId = String(match.id || "");
+          const matchName = String(match.name || "");
+
+          // Match against event name, series name, or event ID
+          if (
+            matchName.toLowerCase().includes(q) ||
+            seriesName.toLowerCase().includes(q) ||
+            matchId.includes(q)
+          ) {
+            results.push({
+              eventId: matchId,
+              name: matchName,
+              sportId: sport.id,
+              sportName: sport.name,
+              seriesName,
+              openDate: match.openDate || null,
+              inPlay: match.inPlay || false,
+            });
+
+            if (results.length >= limit) break;
+          }
+        }
+        if (results.length >= limit) break;
+      }
+      if (results.length >= limit) break;
+    }
+
+    return results;
   },
 
   // ═══════════════════════════════════════════════════════════

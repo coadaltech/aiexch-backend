@@ -1,9 +1,9 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, betCommissionSnapshot } from "../db/schema";
 // Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { addResultToQueue } from "../queues/betting";
 import { app_middleware } from "../middleware/auth";
 import { redis } from "../db/redis";
@@ -192,6 +192,68 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           ipAddress,
           ...ua,
         });
+
+        // Capture commission snapshot — freeze hierarchy percentages at bet time
+        // Walk up the created_by chain to find agent → master → super → admin → owner
+        const hierarchyRows = await tx.execute(sql`
+          WITH RECURSIVE hierarchy AS (
+            SELECT
+              u.id AS ancestor_id,
+              u.role AS ancestor_role,
+              u.group_id,
+              p.upline::DECIMAL(5,2) AS upline,
+              1 AS depth
+            FROM users u
+            JOIN profiles p ON p.user_id = u.id
+            WHERE u.id = (SELECT created_by FROM users WHERE id = ${store.id})
+
+            UNION ALL
+
+            SELECT
+              u2.id,
+              u2.role,
+              u2.group_id,
+              p2.upline::DECIMAL(5,2),
+              h.depth + 1
+            FROM hierarchy h
+            JOIN users u2 ON u2.id = (SELECT created_by FROM users WHERE id = h.ancestor_id)
+            JOIN profiles p2 ON p2.user_id = u2.id
+            WHERE h.depth < 10
+              AND u2.id IS NOT NULL
+          )
+          SELECT ancestor_id, ancestor_role, group_id, upline
+          FROM hierarchy
+          ORDER BY depth ASC
+        `);
+
+        const ancestors = Array.isArray(hierarchyRows) ? hierarchyRows : (hierarchyRows as any)?.rows || [];
+        const snapshotData: typeof betCommissionSnapshot.$inferInsert = {
+          transactionId: newTxn.id,
+          userId: store.id,
+        };
+
+        for (const row of ancestors) {
+          const role = String(row.ancestor_role).toLowerCase();
+          const pct = row.upline != null ? String(row.upline) : "0";
+          if (role === "agent") {
+            snapshotData.agentId = row.ancestor_id;
+            snapshotData.agentPercent = pct;
+          } else if (role === "master") {
+            snapshotData.masterId = row.ancestor_id;
+            snapshotData.masterPercent = pct;
+          } else if (role === "super") {
+            snapshotData.superId = row.ancestor_id;
+            snapshotData.superPercent = pct;
+          } else if (role === "admin") {
+            snapshotData.adminId = row.ancestor_id;
+            snapshotData.adminPercent = pct;
+          } else if (role === "owner") {
+            snapshotData.ownerId = row.ancestor_id;
+            snapshotData.ownerPercent = pct;
+          }
+        }
+
+        await tx.insert(betCommissionSnapshot).values(snapshotData);
 
         return [newTxn];
       });
