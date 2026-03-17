@@ -19,8 +19,8 @@ export interface User {
   id: number;
   username: string;
   email: string;
-  role: string;
-  membership: string;
+  role: number;
+  membership: number;
   status: string;
 }
 
@@ -51,6 +51,6 @@ export interface RegisterRequest {
 export const CALLBACK_ACTION = ["balance", "bet", "win", "refund"] as const;
 export type CallbackAction = (typeof CALLBACK_ACTION)[number];
 
-export type RoleType = "owner" | "admin" | "super" | "master" | "agent" | "user";
+export type RoleType = number;
 
 export type WhitelabelContext = import("elysia").Context;

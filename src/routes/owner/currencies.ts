@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { db } from "../../db";
 import { currencies, currencyValueHistory } from "../../db/schema";
 import { eq, desc } from "drizzle-orm";
+import { UserRole } from "../../types/enums";
 
 // Common currencies with country name for the "Add currency" dropdown (owner-only)
 const AVAILABLE_CURRENCIES = [
@@ -40,8 +41,8 @@ const AVAILABLE_CURRENCIES = [
 export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
   .guard({
     beforeHandle({ store, set }) {
-      const role = (store as { role?: string }).role;
-      if (role !== "owner") {
+      const role = (store as { role?: number }).role;
+      if (role !== UserRole.Owner) {
         set.status = 403;
         return { success: false, message: "Only owner can manage currencies" };
       }

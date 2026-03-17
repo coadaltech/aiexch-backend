@@ -43,7 +43,7 @@ export const AdminMarketService = {
     const rows = await db
       .select()
       .from(events)
-      .where(eq(events.eventId, eventId))
+      .where(eq(events.eventId, Number(eventId)))
       .limit(1);
     return rows[0] || null;
   },
@@ -65,7 +65,7 @@ export const AdminMarketService = {
     const existing = await db
       .select()
       .from(events)
-      .where(eq(events.eventId, eventId))
+      .where(eq(events.eventId, Number(eventId)))
       .limit(1);
 
     if (existing.length > 0) {
@@ -80,15 +80,15 @@ export const AdminMarketService = {
             maxMarketProfit: String(data.maxMarketProfit),
           }),
           ...(data.name && { name: data.name }),
-          ...(data.competitionId && { competitionId: data.competitionId }),
-          ...(data.sportId && { sportId: data.sportId }),
+          ...(data.competitionId && { competitionId: Number(data.competitionId) }),
+          ...(data.sportId && { sportId: Number(data.sportId) }),
         })
-        .where(eq(events.eventId, eventId));
+        .where(eq(events.eventId, Number(eventId)));
     } else {
       await db.insert(events).values({
-        eventId,
-        competitionId: data.competitionId || "",
-        sportId: data.sportId || "",
+        eventId: Number(eventId),
+        competitionId: Number(data.competitionId || 0),
+        sportId: Number(data.sportId || 0),
         name: data.name || "",
         whitelabelId: data.whitelabelId || undefined,
         isActive: data.isActive ?? true,
@@ -132,7 +132,7 @@ export const AdminMarketService = {
     return db
       .select()
       .from(marketSettings)
-      .where(eq(marketSettings.eventId, eventId));
+      .where(eq(marketSettings.eventId, Number(eventId)));
   },
 
   async upsertMarketSettings(
@@ -182,7 +182,7 @@ export const AdminMarketService = {
     } else {
       await db.insert(marketSettings).values({
         marketId,
-        eventId: data.eventId || "",
+        eventId: Number(data.eventId || 0),
         marketName: data.marketName || "",
         marketType: data.marketType || "MATCH_ODDS",
         bettingType: data.bettingType || "ODDS",
@@ -231,7 +231,10 @@ export const AdminMarketService = {
     betDelay?: number;
     whitelabelId?: string;
   }) {
-    const marketId = `custom-${params.eventId}-${Date.now()}`;
+    // Generate a numeric marketId in Betfair-like format: "9.<eventId><timestamp>"
+    // Prefix "9." distinguishes custom markets from real Betfair markets (which use "1.")
+    const timestamp = Date.now();
+    const marketId = `9.${params.eventId}${timestamp}`;
     try {
       // Validate: at least 1 runner
       if (!params.runners || params.runners.length === 0) {
@@ -250,7 +253,7 @@ export const AdminMarketService = {
       // Insert market to DB
       await db.insert(marketSettings).values({
         marketId,
-        eventId: params.eventId,
+        eventId: Number(params.eventId),
         marketName: params.marketName,
         marketType: "CUSTOM",
         bettingType: params.bettingType,
@@ -269,7 +272,8 @@ export const AdminMarketService = {
       // Insert runners to DB + set custom odds in Redis
       for (let i = 0; i < params.runners.length; i++) {
         const r = params.runners[i];
-        const selectionId = `${marketId}-r${i + 1}`;
+        // Generate numeric selectionId: timestamp * 100 + runner index (unique per ms)
+        const selectionId = timestamp * 100 + (i + 1);
         const back = (r.back || []).slice(0, 3);
         const lay = (r.lay || []).slice(0, 3);
 
@@ -292,7 +296,7 @@ export const AdminMarketService = {
         if (redis.isOpen) {
           await redis.hSet(
             `custom:odds:${marketId}`,
-            selectionId,
+            String(selectionId),
             buildRunnerRedisJson(r.name, back, lay)
           );
         }
@@ -352,7 +356,7 @@ export const AdminMarketService = {
       .where(
         and(
           eq(customMarketOdds.marketId, marketId),
-          eq(customMarketOdds.selectionId, selectionId)
+          eq(customMarketOdds.selectionId, Number(selectionId))
         )
       )
       .limit(1);
@@ -368,13 +372,13 @@ export const AdminMarketService = {
         .where(
           and(
             eq(customMarketOdds.marketId, marketId),
-            eq(customMarketOdds.selectionId, selectionId)
+            eq(customMarketOdds.selectionId, Number(selectionId))
           )
         );
     } else {
       await db.insert(customMarketOdds).values({
         marketId,
-        selectionId,
+        selectionId: Number(selectionId),
         backPrices: odds.back || [],
         layPrices: odds.lay || [],
       });
@@ -621,8 +625,8 @@ export const AdminMarketService = {
 
       await redis.hSet(
         `custom:odds:${co.marketId}`,
-        co.selectionId,
-        buildRunnerRedisJson(runner[0]?.name || co.selectionId, back, lay)
+        String(co.selectionId),
+        buildRunnerRedisJson(runner[0]?.name || String(co.selectionId), back, lay)
       );
     }
 

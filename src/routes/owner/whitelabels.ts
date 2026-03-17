@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { uploadFile, deleteFile } from "../../services/s3";
 import { resolveOwnerScope } from "../../utils/ownerScope";
 import { addAllowedOrigin, removeAllowedOrigin } from "../../utils/cors-origins";
+import { UserRole } from "../../types/enums";
 
 export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .get("/", async ({ set, store }) => {
@@ -20,7 +21,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       })
       .from(whitelabels)
       .leftJoin(users, eq(whitelabels.userId, users.id));
-    if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId != null) {
+    if (scope.currentUserRole !== UserRole.Owner && scope.scopeWhitelabelId != null) {
       const rows = await query.where(eq(whitelabels.id, scope.scopeWhitelabelId));
       const parsedWhitelabels = rows.map((row) => ({
         ...row.whitelabel,
@@ -74,7 +75,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       try {
         const scope = await resolveOwnerScope(db, undefined, store as { id?: string; role?: string });
         console.log("Lo mai a gya...")
-        if (scope.currentUserRole !== "owner") {
+        if (scope.currentUserRole !== UserRole.Owner) {
           set.status = 403;
           return { success: false, message: "Only owner can create whitelabels." };
         }
@@ -177,7 +178,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         set.status = 404;
         return { success: false, error: "Whitelabel not found" };
       }
-      if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId !== existing.id) {
+      if (scope.currentUserRole !== UserRole.Owner && scope.scopeWhitelabelId !== existing.id) {
         set.status = 404;
         return { success: false, error: "Whitelabel not found" };
       }
@@ -290,7 +291,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       set.status = 404;
       return { success: false, error: "Whitelabel not found" };
     }
-    if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId !== existing.id) {
+    if (scope.currentUserRole !== UserRole.Owner && scope.scopeWhitelabelId !== existing.id) {
       set.status = 404;
       return { success: false, error: "Whitelabel not found" };
     }

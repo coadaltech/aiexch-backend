@@ -111,11 +111,11 @@ const upsertSport = async (sportData: any) => {
     const existing = await db
       .select()
       .from(sports)
-      .where(eq(sports.sport_id, String(sportId)))
+      .where(eq(sports.sport_id, Number(sportId)))
       .limit(1);
 
     const sportToSave = {
-      sport_id: String(sportId),
+      sport_id: Number(sportId),
       name: sportName,
       is_active:  false, // Default to false
       sort_order: sportData.sortOrder || sportData.sort_order || 0,
@@ -129,7 +129,7 @@ const upsertSport = async (sportData: any) => {
       await db
         .update(sports)
         .set(sportToSave)
-        .where(eq(sports.sport_id, String(sportId)));
+        .where(eq(sports.sport_id, Number(sportId)));
       operationType = "updated";
       console.log(`📝 Updated sport: ${sportName} (ID: ${sportId})`);
     } else {
@@ -141,7 +141,7 @@ const upsertSport = async (sportData: any) => {
       console.log(`✅ Added new sport: ${sportName} (ID: ${sportId})`);
     }
 
-    return { operation: operationType, sportId: String(sportId), sportName };
+    return { operation: operationType, sportId: Number(sportId), sportName };
   } catch (error) {
     console.error("Error upserting sport:", error, sportData);
     return { operation: "error", error: error.message };
@@ -170,7 +170,7 @@ const upsertCompetition = async (compData: any, sportId: string) => {
     const existing = await db
       .select()
       .from(competitions)
-      .where(eq(competitions.competition_id, String(compId)))
+      .where(eq(competitions.competition_id, Number(compId)))
       .limit(1);
 
     // skip existing competitions
@@ -181,7 +181,7 @@ const upsertCompetition = async (compData: any, sportId: string) => {
       return {
         operation: "skipped",
         reason: "already_exists",
-        competitionId: String(compId),
+        competitionId: Number(compId),
         competitionName: compName,
       };
     }
@@ -191,8 +191,8 @@ const upsertCompetition = async (compData: any, sportId: string) => {
     const metadata = competition.metadata || compData.metadata || {};
 
     await db.insert(competitions).values({
-      competition_id: String(compId),
-      sport_id: sportId,
+      competition_id: Number(compId),
+      sport_id: Number(sportId),
       name: compName,
       provider: provider,
       is_active: isActive,
@@ -206,7 +206,7 @@ const upsertCompetition = async (compData: any, sportId: string) => {
 
     return {
       operation: "added",
-      competitionId: String(compId),
+      competitionId: Number(compId),
       competitionName: compName,
     };
   } catch (error) {

@@ -17,9 +17,10 @@ import { uploadFile } from "../services/s3";
 import { comparePassword, generateHashPassword } from "../utils/password";
 import { whitelabel_middleware } from "../middleware/whitelabel";
 import { DbType } from "../types";
+import { MembershipType, roleToString } from "../types/enums";
 
 export const profileRoutes = new Elysia({ prefix: "/profile" })
-  .state({ id: "", role: "" })
+  .state({ id: "", role: 0 as number })
   .guard({
     beforeHandle({ cookie, set, store }) {
       const state_result = app_middleware({ cookie });
@@ -73,7 +74,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         username: user.username,
         email: user.email,
         role: user.role,
-        membership: profile?.membership ?? "bronze",
+        membership: profile?.membership ?? MembershipType.Bronze,
         upline: profile?.upline ?? "0.00",
         downline: profile?.downline ?? "0.00",
         groupId: user.groupId,
@@ -353,7 +354,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           amount: body.amount,
           drCr: "CREDIT",
           oppositeLedgerId: 0,
-          role: user?.role || "user",
+          role: user?.role != null ? roleToString(user.role) : "user",
           proofImage: proofImageUrl,
           whitelabelId: user?.whitelabelId,
           description: "deposit voucher - credit to user",
@@ -436,7 +437,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           amount: body.amount,
           drCr: "DEBIT",
           oppositeLedgerId: 0,
-          role: user?.role || "user",
+          role: user?.role != null ? roleToString(user.role) : "user",
           whitelabelId: user?.whitelabelId,
           description: "withdraw voucher - debit from user",
         });
@@ -571,7 +572,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           amount: bonusAmount.toString(),
           drCr: "CREDIT",
           oppositeLedgerId: 0,
-          role: promoUser?.role || "user",
+          role: promoUser?.role != null ? roleToString(promoUser.role) : "user",
           whitelabelId: promoUser?.whitelabelId,
           description: "bonus voucher - credit to user (promocode: " + promocode.code + ")",
         });

@@ -7,9 +7,10 @@ import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { addResultToQueue } from "../queues/betting";
 import { app_middleware } from "../middleware/auth";
 import { redis } from "../db/redis";
+import { BetType, parseBetType, UserRole } from "../types/enums";
 
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
-  .state({ id: "" as string, role: "" })
+  .state({ id: "" as string, role: 0 as number })
   .guard({
     beforeHandle({ cookie, set, store }) {
       const state_result = app_middleware({ cookie });
@@ -33,24 +34,26 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         marketName,
         marketType,
         eventTypeId,
+        competitionId,
         odds,
         stake,
         run,
         type,
         runners,
       } = body as {
-        matchId: string;
-        marketId: string;
-        selectionId: string;
+        matchId: string | number;
+        marketId: string | number;
+        selectionId: string | number;
         selectionName?: string;
         marketName?: string;
         marketType?: string;
-        eventTypeId?: string;
+        eventTypeId?: string | number;
+        competitionId?: string | number | null;
         odds: number;
         stake: number;
         run?: number | null;
         type: "back" | "lay";
-        runners: { id: string; name: string; price: number }[];
+        runners: { id: string | number; name: string; price: number }[];
       };
 
       // Validate input
@@ -141,24 +144,26 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // Insert main transaction record
         // Note: no balance deduction — the DB trigger on transaction_details
         // recalculates exposure and enforces the credit limit automatically.
+        const today = new Date().toISOString().split("T")[0];
         const [newTxn] = await tx
           .insert(transactions)
           .values({
             userId: store.id,
             whitelabelId: whitelabelId ?? undefined,
-            eventTypeId: eventTypeId || "4",
-            matchId,
-            marketId,
+            eventTypeId: Number(eventTypeId) || 4,
+            competitionId: competitionId ? Number(competitionId) : null,
+            matchId: Number(matchId),
+            marketId: String(marketId),
             marketName: marketName || null,
             marketType: marketType || "odds",
-            selectionId,
+            selectionId: Number(selectionId),
             selectionName: selectionName || null,
-            betType: type,
+            betType: parseBetType(type),
             stake: stake.toString(),
             odds: odds.toString(),
             status: "matched",
             ipAddress,
-            matchedAt: new Date(),
+            matchedAt: today,
             addedBy: store.id,
             updateBy: store.id,
           })
@@ -168,18 +173,20 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // Selected runner MUST be last so it is inserted after all other runners.
         // The DB trigger fires WHEN is_user_selection = TRUE; at that point all
         // sibling runner rows must already be visible for correct P&L calculation.
+        const numericSelectionId = Number(selectionId);
         const detailRows = runners
           .map((runner) => {
-            const isSelected = runner.id === selectionId;
+            const runnerId = Number(runner.id);
+            const isSelected = runnerId === numericSelectionId;
             const runnerReturn = isSelected ? (stake * odds).toFixed(2) : "0";
             return {
               transactionId: newTxn.id,
-              runnerId: runner.id,
+              runnerId,
               runnerName: runner.name || null,
               isUserSelection: isSelected,
-              betType: type,
+              betType: parseBetType(type),
               price: runner.price.toString(),
-              run: isSelected && run != null ? run.toString() : "0",
+              run: isSelected && run != null ? Math.round(run) : 0,
               stake: stake.toString(),
               potentialReturn: runnerReturn,
               addedBy: store.id,
@@ -241,21 +248,21 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         };
 
         for (const row of ancestors) {
-          const role = String(row.ancestor_role).toLowerCase();
+          const role = Number(row.ancestor_role);
           const pct = row.upline != null ? String(row.upline) : "0";
-          if (role === "agent") {
+          if (role === UserRole.Agent) {
             snapshotData.agentId = row.ancestor_id;
             snapshotData.agentPercent = pct;
-          } else if (role === "master") {
+          } else if (role === UserRole.Master) {
             snapshotData.masterId = row.ancestor_id;
             snapshotData.masterPercent = pct;
-          } else if (role === "super") {
+          } else if (role === UserRole.Super) {
             snapshotData.superId = row.ancestor_id;
             snapshotData.superPercent = pct;
-          } else if (role === "admin") {
+          } else if (role === UserRole.Admin) {
             snapshotData.adminId = row.ancestor_id;
             snapshotData.adminPercent = pct;
-          } else if (role === "owner") {
+          } else if (role === UserRole.Owner) {
             snapshotData.ownerId = row.ancestor_id;
             snapshotData.ownerPercent = pct;
           }
@@ -361,7 +368,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       // the next bet placement. A dedicated recalc can be triggered on demand.
       await db
         .update(transactions)
-        .set({ status: "cancelled", cancelledAt: new Date() })
+        .set({ status: "cancelled", cancelledAt: new Date().toISOString().split("T")[0] })
         .where(eq(transactions.id, params.transactionId));
 
       set.status = 200;
@@ -377,12 +384,12 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   .post("/owner/declare-result", async ({ body, set }) => {
     try {
       const { matchId, results } = body as {
-        matchId: string;
+        matchId: string | number;
         results: Record<string, "winner" | "loser">;
       };
 
       // Add to result processing queue
-      await addResultToQueue({ matchId, results });
+      await addResultToQueue({ matchId: Number(matchId), results });
 
       set.status = 200;
       return { success: true, message: "Results queued for processing" };

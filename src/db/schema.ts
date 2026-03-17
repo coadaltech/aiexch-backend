@@ -7,11 +7,14 @@ import {
   date,
   decimal,
   integer,
+  bigint,
   jsonb,
   pgEnum,
   uuid,
   serial,
+  numeric,
 } from "drizzle-orm/pg-core";
+import { RecordStatus, BetType, UserRole, MembershipType } from "../types/enums";
 
 export const whitelabelTypeEnum = pgEnum("whitelabel_type", ["B2B", "B2C"]);
 
@@ -21,7 +24,7 @@ export const users = pgTable("users", {
   username: varchar("username", { length: 50 }).notNull().unique(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   password: varchar("password", { length: 255 }).notNull(),
-  role: varchar("role", { length: 20 }).default("user"),
+  role: integer("role").default(UserRole.User).notNull(),
   groupId: integer("group_id"),
   whitelabelId: uuid("whitelabel_id"),
   accountStatus: boolean("account_status").default(true).notNull(),
@@ -32,7 +35,7 @@ export const users = pgTable("users", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Casino Games ─────────────────────────────────────────────────────────────
@@ -62,7 +65,7 @@ export const casino_games = pgTable("casino_games", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── OTPs ─────────────────────────────────────────────────────────────────────
@@ -78,7 +81,7 @@ export const otps = pgTable("otps", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Refresh Tokens ───────────────────────────────────────────────────────────
@@ -94,7 +97,7 @@ export const refreshTokens = pgTable("refresh_tokens", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Promotions ───────────────────────────────────────────────────────────────
@@ -110,7 +113,7 @@ export const promotions = pgTable("promotions", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Promo Codes ──────────────────────────────────────────────────────────────
@@ -129,7 +132,7 @@ export const promocodes = pgTable("promocodes", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Banners ──────────────────────────────────────────────────────────────────
@@ -146,7 +149,7 @@ export const banners = pgTable("banners", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Popups ───────────────────────────────────────────────────────────────────
@@ -161,7 +164,7 @@ export const popups = pgTable("popups", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Whitelabels ──────────────────────────────────────────────────────────────
@@ -242,7 +245,7 @@ export const whitelabels = pgTable("whitelabels", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Vouchers ─────────────────────────────────────────────────────────────────
@@ -257,10 +260,10 @@ export const vouchers = pgTable("vouchers", {
   method: varchar("method", { length: 50 }),
   reference: varchar("reference", { length: 255 }),
   remarks: text("remarks"),
-  eventTypeId: varchar("event_type_id", { length: 100 }),
-  competitionId: varchar("competition_id", { length: 100 }),
-  eventId: varchar("event_id", { length: 100 }),
-  marketId: varchar("market_id", { length: 100 }),
+  eventTypeId: bigint("event_type_id", { mode: "number" }),
+  competitionId: bigint("competition_id", { mode: "number" }),
+  eventId: bigint("event_id", { mode: "number" }),
+  marketId: numeric("market_id"),
   approvedBy: uuid("approved_by"),
   approvedAt: timestamp("approved_at"),
   // ── Audit ──
@@ -268,7 +271,7 @@ export const vouchers = pgTable("vouchers", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Voucher Details ──────────────────────────────────────────────────────────
@@ -298,7 +301,7 @@ export const voucherDetails = pgTable("voucher_details", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── KYC Documents ────────────────────────────────────────────────────────────
@@ -316,7 +319,7 @@ export const kycDocuments = pgTable("kyc_documents", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Profiles ─────────────────────────────────────────────────────────────────
@@ -334,7 +337,7 @@ export const profiles = pgTable("profiles", {
   address: text("address"),
   withdrawalAddress: text("withdrawal_address"),
   avatar: text("avatar"),
-  membership: varchar("membership", { length: 20 }).default("bronze"),
+  membership: integer("membership").default(MembershipType.Bronze).notNull(),
   betStatus: boolean("bet_status").default(true).notNull(),
   parentBetStatus: boolean("parent_bet_status").default(true).notNull(),
   upline: decimal("upline", { precision: 5, scale: 2 }).default("0.00"),
@@ -347,7 +350,7 @@ export const profiles = pgTable("profiles", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -398,7 +401,7 @@ export const settings = pgTable("settings", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Ledger Groups ────────────────────────────────────────────────────────────
@@ -410,7 +413,7 @@ export const ledgerGroups = pgTable("ledger_groups", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Notifications ────────────────────────────────────────────────────────────
@@ -425,7 +428,7 @@ export const notifications = pgTable("notifications", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── User Read Notifications ──────────────────────────────────────────────────
@@ -444,7 +447,7 @@ export const userReadNotifications = pgTable("user_read_notifications", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── QR Codes ─────────────────────────────────────────────────────────────────
@@ -461,7 +464,7 @@ export const qrCodes = pgTable("qr_codes", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Transactions (Bets) ─────────────────────────────────────────────────────
@@ -471,29 +474,30 @@ export const transactions = pgTable("transactions", {
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   whitelabelId: uuid("whitelabel_id"),
-  eventTypeId: varchar("event_type_id", { length: 50 }).notNull(),
-  matchId: varchar("match_id", { length: 100 }).notNull(),
-  marketId: varchar("market_id", { length: 100 }).notNull(),
+  eventTypeId: bigint("event_type_id", { mode: "number" }).notNull(),
+  competitionId: bigint("competition_id", { mode: "number" }),
+  matchId: bigint("match_id", { mode: "number" }).notNull(),
+  marketId: numeric("market_id").notNull(),
   marketName: varchar("market_name", { length: 255 }),
   marketType: varchar("market_type", { length: 20 }).default("odds"), // odds | bookmakers | sessions | fancy
-  selectionId: varchar("selection_id", { length: 100 }).notNull(),
+  selectionId: bigint("selection_id", { mode: "number" }).notNull(),
   selectionName: varchar("selection_name", { length: 255 }),
-  betType: varchar("bet_type", { length: 10 }).notNull(), // back | lay
+  betType: integer("bet_type").notNull(), // 0=back, 1=lay (BetType enum)
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   odds: decimal("odds", { precision: 10, scale: 4 }).notNull(),
   status: varchar("status", { length: 20 }).default("matched"), // matched | won | lost | cancelled | void
   settledAmount: decimal("settled_amount", { precision: 15, scale: 2 }),
   ipAddress: varchar("ip_address", { length: 45 }),
-  matchedAt: timestamp("matched_at"),
-  settledAt: timestamp("settled_at"),
-  cancelledAt: timestamp("cancelled_at"),
-  resultCheckedAt: timestamp("result_checked_at"),
+  matchedAt: date("matched_at"),
+  settledAt: date("settled_at"),
+  cancelledAt: date("cancelled_at"),
+  resultCheckedAt: date("result_checked_at"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  addedBy: uuid("added_by").notNull(),
+  addedDate: date("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").notNull(),
+  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Transaction Details ──────────────────────────────────────────────────────
@@ -502,20 +506,20 @@ export const transactionDetails = pgTable("transaction_details", {
   transactionId: uuid("transaction_id")
     .references(() => transactions.id, { onDelete: "cascade" })
     .notNull(),
-  runnerId: varchar("runner_id", { length: 100 }).notNull(),
+  runnerId: bigint("runner_id", { mode: "number" }).notNull(),
   runnerName: varchar("runner_name", { length: 255 }),
   isUserSelection: boolean("is_user_selection").default(false).notNull(),
-  betType: varchar("bet_type", { length: 10 }), // back | lay
+  betType: integer("bet_type"), // 0=back, 1=lay (BetType enum)
   price: decimal("price", { precision: 10, scale: 4 }).notNull(),
-  run: decimal("run", { precision: 10, scale: 2 }).default("0"),
+  run: integer("run").default(0),
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  addedBy: uuid("added_by").notNull(),
+  addedDate: date("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").notNull(),
+  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Account Statements ───────────────────────────────────────────────────────
@@ -541,7 +545,7 @@ export const accountStatements = pgTable("account_statements", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Sports Games ─────────────────────────────────────────────────────────────
@@ -558,7 +562,7 @@ export const sportsGames = pgTable("sports_games", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Home Sections ────────────────────────────────────────────────────────────
@@ -574,7 +578,7 @@ export const homeSections = pgTable("home_sections", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Domains ──────────────────────────────────────────────────────────────────
@@ -587,7 +591,7 @@ export const domains = pgTable("domains", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Home Section Games ───────────────────────────────────────────────────────
@@ -608,7 +612,7 @@ export const homeSectionGames = pgTable("home_section_games", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Withdrawal Methods ───────────────────────────────────────────────────────
@@ -629,13 +633,13 @@ export const withdrawalMethods = pgTable("withdrawal_methods", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Sports ───────────────────────────────────────────────────────────────────
 export const sports = pgTable("sports", {
   id: uuid("id").primaryKey().defaultRandom(),
-  sport_id: varchar("sport_id", { length: 50 }).notNull().unique(),
+  sport_id: bigint("sport_id", { mode: "number" }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull(),
   is_active: boolean("is_active").default(true),
   sort_order: integer("sort_order").default(0),
@@ -644,14 +648,14 @@ export const sports = pgTable("sports", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Competitions ─────────────────────────────────────────────────────────────
 export const competitions = pgTable("competitions", {
   id: uuid("id").primaryKey().defaultRandom(),
-  competition_id: varchar("competition_id", { length: 50 }).notNull().unique(),
-  sport_id: varchar("sport_id", { length: 50 }).notNull(),
+  competition_id: bigint("competition_id", { mode: "number" }).notNull().unique(),
+  sport_id: bigint("sport_id", { mode: "number" }).notNull(),
   name: varchar("name", { length: 200 }).notNull(),
   provider: varchar("provider", { length: 50 }),
   is_active: boolean("is_active").default(false),
@@ -662,7 +666,7 @@ export const competitions = pgTable("competitions", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Currencies ───────────────────────────────────────────────────────────────
@@ -677,7 +681,7 @@ export const currencies = pgTable("currencies", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Currency Value History ───────────────────────────────────────────────────
@@ -692,7 +696,7 @@ export const currencyValueHistory = pgTable("currency_value_history", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── User Login Logs ──────────────────────────────────────────────────────────
@@ -722,7 +726,7 @@ export const userLoginLogs = pgTable("user_login_logs", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Transaction Logs ─────────────────────────────────────────────────────────
@@ -750,7 +754,7 @@ export const transactionLogs = pgTable("transaction_logs", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Ledger Limit ─────────────────────────────────────────────────────────────
@@ -769,15 +773,15 @@ export const ledgerLimit = pgTable("ledger_limit", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Events (matches) ─────────────────────────────────────────────────────────
 export const events = pgTable("events", {
   id: uuid("id").primaryKey().defaultRandom(),
-  eventId: varchar("event_id", { length: 100 }).notNull().unique(),
-  competitionId: varchar("competition_id", { length: 50 }).notNull(),
-  sportId: varchar("sport_id", { length: 50 }).notNull(),
+  eventId: bigint("event_id", { mode: "number" }).notNull().unique(),
+  competitionId: bigint("competition_id", { mode: "number" }).notNull(),
+  sportId: bigint("sport_id", { mode: "number" }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   openDate: timestamp("open_date"),
   whitelabelId: uuid("whitelabel_id"),
@@ -792,14 +796,14 @@ export const events = pgTable("events", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Market Settings ──────────────────────────────────────────────────────────
 export const marketSettings = pgTable("market_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
-  marketId: varchar("market_id", { length: 100 }).notNull().unique(),
-  eventId: varchar("event_id", { length: 100 }).notNull(),
+  marketId: numeric("market_id").notNull().unique(),
+  eventId: bigint("event_id", { mode: "number" }).notNull(),
   marketName: varchar("market_name", { length: 255 }).notNull(),
   marketType: varchar("market_type", { length: 50 }).notNull(),
   bettingType: varchar("betting_type", { length: 20 }).notNull(),
@@ -821,14 +825,14 @@ export const marketSettings = pgTable("market_settings", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Runner Settings ──────────────────────────────────────────────────────────
 export const runnerSettings = pgTable("runner_settings", {
   id: uuid("id").primaryKey().defaultRandom(),
-  selectionId: varchar("selection_id", { length: 100 }).notNull(),
-  marketId: varchar("market_id", { length: 100 }).notNull(),
+  selectionId: bigint("selection_id", { mode: "number" }).notNull(),
+  marketId: numeric("market_id").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   sortPriority: integer("sort_priority").default(0),
   isActive: boolean("is_active").default(true).notNull(),
@@ -839,14 +843,14 @@ export const runnerSettings = pgTable("runner_settings", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Custom Market Odds ───────────────────────────────────────────────────────
 export const customMarketOdds = pgTable("custom_market_odds", {
   id: uuid("id").primaryKey().defaultRandom(),
-  marketId: varchar("market_id", { length: 100 }).notNull(),
-  selectionId: varchar("selection_id", { length: 100 }).notNull(),
+  marketId: numeric("market_id").notNull(),
+  selectionId: bigint("selection_id", { mode: "number" }).notNull(),
   backPrices: jsonb("back_prices").$type<{ price: number; size: number }[]>().default([]),
   layPrices: jsonb("lay_prices").$type<{ price: number; size: number }[]>().default([]),
   line: decimal("line", { precision: 10, scale: 2 }),
@@ -855,14 +859,14 @@ export const customMarketOdds = pgTable("custom_market_odds", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Market Odds History ──────────────────────────────────────────────────────
 export const marketOddsHistory = pgTable("market_odds_history", {
   id: serial("id").primaryKey(),
-  marketId: varchar("market_id", { length: 100 }).notNull(),
-  eventId: varchar("event_id", { length: 100 }).notNull(),
+  marketId: numeric("market_id").notNull(),
+  eventId: bigint("event_id", { mode: "number" }).notNull(),
   snapshot: jsonb("snapshot").notNull(),
   capturedAt: timestamp("captured_at").notNull(),
   // ── Audit ──
@@ -870,7 +874,7 @@ export const marketOddsHistory = pgTable("market_odds_history", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Bet Commission Snapshot ──────────────────────────────────────────────────
@@ -897,7 +901,7 @@ export const betCommissionSnapshot = pgTable("bet_commission_snapshot", {
   addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: varchar("record_status", { length: 1 }).default("A").notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
 // ── Indexes ──────────────────────────────────────────────────────────────────

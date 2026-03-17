@@ -22,7 +22,7 @@ export const getCompetitionsBySportId = async (sportId: string) => {
     const competitionData = await db
       .select()
       .from(competitions)
-      .where(eq(competitions.sport_id, sportId));
+      .where(eq(competitions.sport_id, Number(sportId)));
 
     console.log(
       `✅ Found ${competitionData.length} competitions for ${sportId}`,
@@ -63,7 +63,7 @@ export const updateCompetitionsStatus = async (
         await tx
           .update(competitions)
           .set({ is_active: update.isActive })
-          .where(eq(competitions.competition_id, update.id)); // ✅ competition_id use karo
+          .where(eq(competitions.competition_id, Number(update.id))); // ✅ competition_id use karo
       }
     });
 

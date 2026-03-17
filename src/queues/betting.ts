@@ -1,7 +1,7 @@
 import Bull from "bull";
 import { db } from "../db";
-import { transactions, users, profiles } from "../db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { transactions } from "../db/schema";
+import { eq, and } from "drizzle-orm";
 
 // Lazy initialization for Bun compatibility - queues are only created when needed
 let _bettingQueue: Bull.Queue | null = null;
@@ -42,47 +42,26 @@ const initializeBettingProcessor = () => {
 
   try {
     queue.process("place-bet", async (job) => {
-      const { betId, userId, stake } = job.data;
+      const { betId } = job.data;
 
       try {
-        const userProfile = await db
-          .select()
-          .from(profiles)
-          .where(eq(profiles.userId, userId))
-          .limit(1);
-        if (!userProfile[0] || parseFloat(userProfile[0].balance || "0") < stake) {
-          throw new Error("Insufficient balance");
-        }
-
-        await db.transaction(async (tx) => {
-          await tx
-            .update(profiles)
-            .set({
-              balance: (parseFloat(userProfile[0].balance || "0") - stake).toString(),
-            })
-            .where(eq(profiles.userId, userId));
-
-          // Update bet status to matched
-          await tx
-            .update(transactions)
-            .set({ status: "matched", matchedAt: new Date() })
-            .where(eq(transactions.id, betId));
-        });
+        // Balance/exposure is managed by the ledger_limit table.
+        // This processor just confirms the matched status.
+        await db
+          .update(transactions)
+          .set({ status: "matched", matchedAt: new Date().toISOString().split("T")[0] })
+          .where(eq(transactions.id, betId));
 
         return { success: true, betId };
       } catch (error) {
-        // Refund on error - restore balance and cancel bet
         try {
-          await db.transaction(async (tx) => {
-            await tx
-              .update(transactions)
-              .set({ status: "cancelled" })
-              .where(eq(transactions.id, betId));
-          });
+          await db
+            .update(transactions)
+            .set({ status: "cancelled" })
+            .where(eq(transactions.id, betId));
         } catch (refundError) {
           console.error("Failed to cancel bet:");
         }
-
         throw error;
       }
     });
@@ -117,7 +96,7 @@ const initializeResultProcessor = () => {
             .update(transactions)
             .set({
               status: newStatus,
-              settledAt: new Date(),
+              settledAt: new Date().toISOString().split("T")[0],
               settledAmount: isWinner
                 ? (
                     parseFloat(bet.stake || "0") * parseFloat(bet.odds || "0")
@@ -148,7 +127,7 @@ interface BetQueueData {
 }
 
 interface ResultQueueData {
-  matchId: string;
+  matchId: number;
   results: Record<string, "winner" | "loser">;
 }
 

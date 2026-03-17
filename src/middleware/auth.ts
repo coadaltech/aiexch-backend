@@ -4,7 +4,7 @@ import { RoleType } from "../types";
 
 interface ElysiaMiddlewareType {
   cookie: Record<string, Cookie<string | undefined | unknown>>;
-  allowed?: string[];
+  allowed?: number[];
 }
 
 const secretKey = process.env.JWT_SECRET!;
@@ -28,19 +28,7 @@ export const authenticate_jwt = (access_token: string) => {
 };
 
 export const app_middleware = ({ cookie, allowed }: ElysiaMiddlewareType) => {
-  // console.log("=== AUTH MIDDLEWARE DEBUG ===");
-  // console.log("Raw cookie object:", cookie);
-  // console.log("Raw allowed parameter:", allowed);
-  // console.log("Typeof allowed:", typeof allowed);
-  // console.log("Is allowed array?:", Array.isArray(allowed));
-
   let access_token = String(cookie.accessToken);
-
-  // console.log(
-  //   "Auth middleware - Access token:",
-  //   access_token ? "exists" : "missing"
-  // );
-  // console.log("Auth middleware - Allowed roles:", allowed);
 
   if (!access_token) {
     return {
@@ -64,12 +52,6 @@ export const app_middleware = ({ cookie, allowed }: ElysiaMiddlewareType) => {
   }
 
   if (allowed && !allowed.includes(middleware_response.data.role)) {
-    // console.log(
-    //   "Auth middleware - Role check failed. User role:",
-    //   middleware_response.data.role,
-    //   "Allowed:",
-    //   allowed
-    // );
     return {
       success: false,
       code: 403,
@@ -77,10 +59,6 @@ export const app_middleware = ({ cookie, allowed }: ElysiaMiddlewareType) => {
     };
   }
 
-  // console.log(
-  //   "Auth middleware - Success! User role:",
-  //   middleware_response.data.role
-  // );
   return {
     success: middleware_response.success,
     code: middleware_response.code,

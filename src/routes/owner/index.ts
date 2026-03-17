@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { app_middleware } from "../../middleware/auth";
+import { UserRole } from "../../types/enums";
 import { bannersRoutes } from "./banners";
 import { promocodesRoutes } from "./promocodes";
 import { promotionsRoutes } from "./promotions";
@@ -20,12 +21,12 @@ import { currenciesRoutes } from "./currencies";
 import { marketManagementRoutes } from "./market-management";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
-  .state({ id: "", role: "" })
+  .state({ id: "", role: 0 as number })
   .guard({
     beforeHandle({ cookie, set, store }) {
       const state_result = app_middleware({
         cookie,
-        allowed: ["owner", "admin", "super", "master", "agent"],
+        allowed: [UserRole.Owner, UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent],
       });
 
       set.status = state_result.code;

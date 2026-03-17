@@ -10,6 +10,7 @@ import { whitelabel_middleware } from "@middleware/whitelabel";
 import { cookieConfig } from "@config/cookie";
 import { DbType } from "../types";
 import { getGroupIdForRole } from "@utils/ownerScope";
+import { UserRole, MembershipType } from "../types/enums";
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any; dbError?: string }> => {
@@ -86,7 +87,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           password: hashedPassword,
           emailVerified: true,
           whitelabelId,
-          groupId: getGroupIdForRole("user"),
+          groupId: UserRole.User,
         })
         .returning();
 
@@ -94,7 +95,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         userId: user.id,
         phone,
         country,
-        membership: "bronze",
+        membership: MembershipType.Bronze,
         balance: "0",
       });
 
@@ -169,7 +170,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           return { success: false, message: "Account suspended" };
         }
 
-        if (!whitelabel && user.role !== "owner") {
+        if (!whitelabel && user.role !== UserRole.Owner) {
           set.status = 403;
           return {
             success: false,
@@ -177,7 +178,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           };
         }
 
-        if (whitelabel && user.role !== "owner") {
+        if (whitelabel && user.role !== UserRole.Owner) {
           const userWlId = user.whitelabelId ?? null;
           const wlId = whitelabel.id ?? null;
           const isAssignedAdmin = whitelabel.userId != null && whitelabel.userId === user.id;
@@ -223,7 +224,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         const { accessToken, refreshToken } = generateTokens(
           user.id,
           user.email,
-          user.role || "user"
+          user.role ?? UserRole.User
         );
 
         cookie.accessToken.set({
@@ -243,8 +244,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             id: user.id,
             username: user.username,
             email: user.email,
-            membership: profile?.membership ?? "bronze",
-            role: user.role ?? "user",
+            membership: profile?.membership ?? MembershipType.Bronze,
+            role: user.role ?? UserRole.User,
             groupId: user.groupId,
             currencyId: profile?.currencyId ?? null,
           },
@@ -395,7 +396,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const { accessToken, refreshToken: newRefreshToken } = generateTokens(
         user.id,
         user.email,
-        user.role || "user"
+        user.role ?? UserRole.User
       );
 
       // Set new tokens in cookies

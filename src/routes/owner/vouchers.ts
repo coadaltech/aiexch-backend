@@ -3,6 +3,7 @@ import { vouchers, voucherDetails, users } from "../../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
+import { UserRole, roleToString } from "../../types/enums";
 
 export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
@@ -65,7 +66,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       }
 
       // Look up creator role
-      let creatorRole: string | null = null;
+      let creatorRole: number | null = null;
       let creatorGroupId: number | null = null;
       if (adminId) {
         const [creator] = await db
@@ -80,10 +81,10 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       //   Owner → Limit Account (system account, group_id=0)
       //   Everyone else → their own account
       const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
-      const isOwner = creatorRole === "owner";
+      const isOwner = creatorRole === UserRole.Owner;
       const sourceAccountId = isOwner ? LIMIT_ACCOUNT_ID : adminId;
       const sourceGroupId = isOwner ? 0 : creatorGroupId;
-      const sourceRole = isOwner ? "limit" : (creatorRole || "owner");
+      const sourceRole = isOwner ? "limit" : roleToString(creatorRole ?? UserRole.Owner);
 
       const status = body.status || "approved";
       const isDebit = body.type === "debit" || body.type === "withdraw";
@@ -120,7 +121,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
           amount: body.amount,
           drCr: isDebit ? "DEBIT" : "CREDIT",
           oppositeLedgerId: sourceGroupId,
-          role: user.role || "user",
+          role: roleToString(user.role ?? UserRole.User),
           whitelabelId: user.whitelabelId,
           description: body.type + " voucher - " + (isDebit ? "debit from" : "credit to") + " user",
         });

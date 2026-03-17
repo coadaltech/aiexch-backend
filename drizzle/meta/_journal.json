@@ -428,6 +428,13 @@
       "when": 1773656092915,
       "tag": "0060_unique_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1773755449077,
+      "tag": "0061_certain_rattler",
+      "breakpoints": true
     }
   ]
 }

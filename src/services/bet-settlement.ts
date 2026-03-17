@@ -5,8 +5,8 @@ import { SportsService } from "./sports";
 import { addResultToQueue } from "../queues/betting";
 
 interface MatchBetGroup {
-  matchId: string;
-  eventTypeId: string;
+  matchId: number;
+  eventTypeId: number;
   marketIds: string[];
   marketTypes: Set<string>;
 }
@@ -15,11 +15,11 @@ interface MatchBetGroup {
  * Check if a match is finished based on score data
  */
 async function isMatchFinished(
-  eventTypeId: string,
-  matchId: string
+  eventTypeId: string | number,
+  matchId: string | number
 ): Promise<boolean> {
   try {
-    const score = await SportsService.getScore({ eventTypeId, matchId });
+    const score = await SportsService.getScore({ eventTypeId: String(eventTypeId), matchId: String(matchId) });
     if (!score || !score.data) {
       return false;
     }
@@ -55,16 +55,17 @@ async function isMatchFinished(
  * Fetch results from API based on market type and map to selection IDs
  */
 async function fetchAndMapResults(
-  eventTypeId: string,
+  eventTypeId: string | number,
   marketIds: string[],
   marketType: string
 ): Promise<Record<string, "winner" | "loser">> {
   const results: Record<string, "winner" | "loser"> = {};
+  const eventTypeIdStr = String(eventTypeId);
 
   try {
     if (marketType === "odds") {
       const oddsResults = await SportsService.getOddsResults({
-        eventTypeId,
+        eventTypeId: eventTypeIdStr,
         marketIds,
       });
 
@@ -90,7 +91,7 @@ async function fetchAndMapResults(
       }
     } else if (marketType === "bookmakers") {
       const bookmakerResults = await SportsService.getBookmakersResults({
-        eventTypeId,
+        eventTypeId: eventTypeIdStr,
         marketIds,
       });
 
@@ -107,7 +108,7 @@ async function fetchAndMapResults(
       }
     } else if (marketType === "sessions") {
       const sessionResults = await SportsService.getSessionResults({
-        eventTypeId,
+        eventTypeId: eventTypeIdStr,
         marketIds,
       });
 
@@ -123,7 +124,7 @@ async function fetchAndMapResults(
       }
     } else if (marketType === "fancy") {
       const fancyResults = await SportsService.getFancyResults({
-        eventTypeId,
+        eventTypeId: eventTypeIdStr,
         marketIds,
       });
 
@@ -152,8 +153,8 @@ async function fetchAndMapResults(
  * Process and settle transactions for a finished match
  */
 async function settleMatchBets(
-  matchId: string,
-  eventTypeId: string,
+  matchId: number,
+  eventTypeId: number,
   marketIds: string[],
   marketTypes: Set<string>
 ): Promise<void> {
@@ -218,8 +219,8 @@ export async function checkAndSettleBets(): Promise<void> {
     console.log("Starting bet settlement check...");
 
     // Get all matched transactions that haven't been settled
-    // Check only transactions that haven't been checked recently (within last hour)
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    // Check only transactions that haven't been checked recently (within last day)
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
     const unsettledBets = await db
       .select({
@@ -234,7 +235,7 @@ export async function checkAndSettleBets(): Promise<void> {
           eq(transactions.status, "matched"),
           or(
             isNull(transactions.resultCheckedAt),
-            lt(transactions.resultCheckedAt, oneHourAgo)
+            lt(transactions.resultCheckedAt, yesterday)
           )
         )
       )
@@ -277,13 +278,13 @@ export async function checkAndSettleBets(): Promise<void> {
     // Process each match
     for (const [key, group] of matchGroups) {
       try {
-        // Ensure eventTypeId has a value (default to "4" for cricket if null)
-        const eventTypeId = group.eventTypeId || "4";
+        // Ensure eventTypeId has a value (default to 4 for cricket if null)
+        const eventTypeId = group.eventTypeId || 4;
 
         // Update resultCheckedAt to prevent duplicate checks
         await db
           .update(transactions)
-          .set({ resultCheckedAt: new Date() })
+          .set({ resultCheckedAt: new Date().toISOString().split("T")[0] })
           .where(
             and(
               eq(transactions.matchId, group.matchId),

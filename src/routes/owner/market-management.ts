@@ -3,6 +3,7 @@ import { AdminMarketService } from "@services/admin-market-service";
 import { db } from "@db/index";
 import { marketOddsHistory, marketSettings, events } from "@db/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { UserRole } from "../../types/enums";
 
 // Price entry schema: {price, size}
 const PriceEntry = t.Object({
@@ -67,7 +68,7 @@ export const marketManagementRoutes = new Elysia({
       try {
         // Get whitelabelId for admin scoping
         let whitelabelId: string | undefined;
-        if ((store as any).role === "admin") {
+        if ((store as any).role === UserRole.Admin) {
           whitelabelId =
             (await AdminMarketService.getUserWhitelabelId(
               (store as any).id
@@ -188,7 +189,7 @@ export const marketManagementRoutes = new Elysia({
       try {
         // Get whitelabelId for admin scoping
         let whitelabelId: string | undefined;
-        if ((store as any).role === "admin") {
+        if ((store as any).role === UserRole.Admin) {
           whitelabelId =
             (await AdminMarketService.getUserWhitelabelId(
               (store as any).id
@@ -329,7 +330,7 @@ export const marketManagementRoutes = new Elysia({
         }
         if (query.eventId) {
           conditions.push(
-            eq(marketOddsHistory.eventId, query.eventId)
+            eq(marketOddsHistory.eventId, Number(query.eventId))
           );
         }
         if (query.from) {

@@ -1,26 +1,29 @@
 import { users, whitelabels } from "../db/schema";
 import { eq } from "drizzle-orm";
 import type { DbType } from "../types";
+import { UserRole } from "../types/enums";
 
-export const ROLES_CREATABLE_BY: Record<string, string[]> = {
-  owner: ["admin"],
-  admin: ["super", "master", "agent", "user"],
-  super: ["master", "agent", "user"],
-  master: ["agent", "user"],
-  agent: ["user"],
+export const ROLES_CREATABLE_BY: Record<number, number[]> = {
+  [UserRole.Owner]: [UserRole.Admin],
+  [UserRole.Admin]: [UserRole.Super, UserRole.Master, UserRole.Agent, UserRole.User],
+  [UserRole.Super]: [UserRole.Master, UserRole.Agent, UserRole.User],
+  [UserRole.Master]: [UserRole.Agent, UserRole.User],
+  [UserRole.Agent]: [UserRole.User],
 };
 
-export const ROLE_TO_GROUP_ID: Record<string, number> = {
-  owner: 0,
-  admin: 3,
-  super: 4,
-  master: 5,
-  agent: 6,
-  user: 7,
-};
-
-export function getGroupIdForRole(role: string): number {
-  return ROLE_TO_GROUP_ID[role.toLowerCase()] ?? 7;
+/** Since UserRole enum values already match group_id, this is a direct pass-through. */
+export function getGroupIdForRole(role: number | string): number {
+  if (typeof role === "number") return role;
+  // Legacy string support during transition
+  const map: Record<string, number> = {
+    owner: UserRole.Owner,
+    admin: UserRole.Admin,
+    super: UserRole.Super,
+    master: UserRole.Master,
+    agent: UserRole.Agent,
+    user: UserRole.User,
+  };
+  return map[role.toLowerCase()] ?? UserRole.User;
 }
 
 export interface OwnerScopeResult {
@@ -32,10 +35,10 @@ export interface OwnerScopeResult {
   filterUsersByCreatedBy: boolean;
   /** Current user id (for addedBy filter) */
   currentUserId: string;
-  /** Current user role */
-  currentUserRole: string;
-  /** Roles the current user is allowed to create */
-  allowedRolesToCreate: string[];
+  /** Current user role (integer enum) */
+  currentUserRole: number;
+  /** Roles the current user is allowed to create (integer enum values) */
+  allowedRolesToCreate: number[];
 }
 
 /**
@@ -48,14 +51,16 @@ export interface OwnerScopeResult {
 export async function resolveOwnerScope(
   db: DbType,
   requestWhitelabel: { id: string; whitelabelType?: string } | undefined,
-  store: { id?: string; role?: string }
+  store: { id?: string; role?: number | string }
 ): Promise<OwnerScopeResult> {
   const currentUserId = store.id ?? "";
-  const currentUserRole = String((store.role as string) || "user").toLowerCase();
+  const currentUserRole = typeof store.role === "number"
+    ? store.role
+    : (store.role != null ? getGroupIdForRole(store.role) : UserRole.User);
   const allowedRolesToCreate = ROLES_CREATABLE_BY[currentUserRole] ?? [];
 
   // Owner: use whitelabel from request (domain). Owner can open any whitelabel and see its data.
-  if (currentUserRole === "owner") {
+  if (currentUserRole === UserRole.Owner) {
     const scopeWhitelabelId = requestWhitelabel?.id ?? null;
     const whitelabelType =
       requestWhitelabel?.whitelabelType != null
@@ -105,7 +110,7 @@ export async function resolveOwnerScope(
 
   // B2C: admin sees all users of whitelabel. B2B: admin/super/master/agent see only users they created.
   const filterUsersByCreatedBy =
-    whitelabelType === "B2B" && ["admin", "super", "master", "agent"].includes(currentUserRole.toLowerCase());
+    whitelabelType === "B2B" && [UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent].includes(currentUserRole);
 
   return {
     scopeWhitelabelId,

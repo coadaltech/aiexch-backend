@@ -4,9 +4,9 @@ import { eq, and, inArray, ne, gt, gte } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
 import { generateHashPassword, comparePassword } from "../../utils/password";
-import { resolveOwnerScope, getGroupIdForRole, ROLE_TO_GROUP_ID } from "../../utils/ownerScope";
+import { resolveOwnerScope, getGroupIdForRole } from "../../utils/ownerScope";
 import { computeParentStatuses, cascadeParentStatuses } from "../../utils/userStatusCascade";
-import { notEqual } from "assert";
+import { UserRole, MembershipType, parseUserRole, parseMembership, membershipToString } from "../../types/enums";
 
 export const usersRoutes = new Elysia({ prefix: "/users" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
@@ -17,12 +17,12 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     "/",
     async ({ body, set, db, whitelabel, store }) => {
       const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
-      const requestedRole = (body.role as string) || "user";
+      const requestedRole = body.role ? parseUserRole(body.role as string) : UserRole.User;
       if (!scope.allowedRolesToCreate.includes(requestedRole)) {
         set.status = 403;
         return { success: false, message: `You cannot create users with role "${requestedRole}". Allowed: ${scope.allowedRolesToCreate.join(", ")}` };
       }
-      if (scope.scopeWhitelabelId == null && scope.currentUserRole !== "owner") {
+      if (scope.scopeWhitelabelId == null && scope.currentUserRole !== UserRole.Owner) {
         set.status = 403;
         return { success: false, message: "No whitelabel scope. You must operate from your whitelabel domain." };
       }
@@ -45,10 +45,10 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
           if (wlByAdmin) whitelabelId = wlByAdmin.id;
         }
       }
-      if (scope.currentUserRole !== "owner" && scope.scopeWhitelabelId != null) {
+      if (scope.currentUserRole !== UserRole.Owner && scope.scopeWhitelabelId != null) {
         whitelabelId = scope.scopeWhitelabelId;
       }
-      if (scope.currentUserRole === "owner" && scope.scopeWhitelabelId != null) {
+      if (scope.currentUserRole === UserRole.Owner && scope.scopeWhitelabelId != null) {
         whitelabelId = scope.scopeWhitelabelId;
       }
 
@@ -96,7 +96,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
       const toStr = (v: string | number | undefined) =>
         v === undefined ? "0.00" : typeof v === "number" ? v.toString() : v;
-      const finalRole = role || "user";
+      const finalRole = requestedRole;
       const [user] = await db
         .insert(users)
         .values({
@@ -109,13 +109,13 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
           emailVerified: true,
           whitelabelId,
           addedBy: addedBy,
-          groupId: getGroupIdForRole(finalRole),
+          groupId: finalRole,
         })
         .returning();
 
       await db.insert(profiles).values({
         userId: user.id,
-        membership: membership || "bronze",
+        membership: membership ? parseMembership(membership) : MembershipType.Bronze,
         betStatus: true,
         parentBetStatus,
         upline: toStr(upline),
@@ -179,7 +179,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
   )
   .get("/", async ({ set, db, whitelabel, store }) => {
     const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
-    const isOwnerNoScope = scope.currentUserRole === "owner" && scope.scopeWhitelabelId == null;
+    const isOwnerNoScope = scope.currentUserRole === UserRole.Owner && scope.scopeWhitelabelId == null;
     let visibleUsers: { id: string; username: string; email: string;[k: string]: unknown }[];
     if (isOwnerNoScope) {
       // Owner with no whitelabel scope: sees all users except self
@@ -199,8 +199,8 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       // - super (groupId 4): sees master, agent, user (groupId > 4)
       // - master (groupId 5): sees agent, user (groupId > 5)
       // - agent (groupId 6): sees user only (groupId > 6)
-      const currentGroupId = ROLE_TO_GROUP_ID[scope.currentUserRole] ?? 7;
-      if (scope.currentUserRole !== "owner" && scope.currentUserRole !== "admin") {
+      const currentGroupId = scope.currentUserRole;
+      if (scope.currentUserRole !== UserRole.Owner && scope.currentUserRole !== UserRole.Admin) {
         conditions.push(gt(users.groupId, currentGroupId));
       }
       visibleUsers = await db.select().from(users).where(and(...conditions));
@@ -236,7 +236,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       const ledger = ledgerMap.get(user.id);
       usersWithProfiles.push({
         ...user,
-        membership: profile?.membership ?? "bronze",
+        membership: profile?.membership ?? MembershipType.Bronze,
         betStatus: profile?.betStatus ?? true,
         parentBetStatus: profile?.parentBetStatus ?? true,
         upline: profile?.upline ?? "0.00",
@@ -338,13 +338,14 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       const profileUpdateData: Record<string, unknown> = {};
 
       if (body.role !== undefined) {
-        userUpdateData.role = body.role;
-        userUpdateData.groupId = getGroupIdForRole(body.role);
+        const newRole = parseUserRole(body.role);
+        userUpdateData.role = newRole;
+        userUpdateData.groupId = newRole;
       }
       if (body.accountStatus !== undefined && isCreator) userUpdateData.accountStatus = body.accountStatus;
       if (body.password && !isChangingStatus) userUpdateData.password = await generateHashPassword(body.password);
 
-      if (body.membership !== undefined) profileUpdateData.membership = body.membership;
+      if (body.membership !== undefined) profileUpdateData.membership = parseMembership(body.membership);
       if (body.betStatus !== undefined && isCreator) profileUpdateData.betStatus = body.betStatus;
       if (body.upline !== undefined) profileUpdateData.upline = typeof body.upline === "number" ? body.upline.toString() : body.upline;
       if (body.downline !== undefined) profileUpdateData.downline = typeof body.downline === "number" ? body.downline.toString() : body.downline;

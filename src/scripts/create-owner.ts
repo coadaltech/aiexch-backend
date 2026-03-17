@@ -17,7 +17,7 @@ import { db } from "@db/index";
 import { users, profiles } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { generateHashPassword } from "../utils/password";
-import { getGroupIdForRole } from "../utils/ownerScope";
+import { UserRole, MembershipType } from "../types/enums";
 
 async function createOwnerUser() {
   try {
@@ -49,9 +49,9 @@ async function createOwnerUser() {
         username: "owner",
         email: "admin@gmail.com",
         password: hashedPassword,
-        role: "owner",
+        role: UserRole.Owner,
         emailVerified: true,
-        groupId: getGroupIdForRole("owner"),
+        groupId: UserRole.Owner,
       })
       .returning({
         id: users.id,
@@ -62,7 +62,7 @@ async function createOwnerUser() {
 
     await db.insert(profiles).values({
       userId: result[0].id,
-      membership: "platinum",
+      membership: MembershipType.Platinum,
     });
 
 

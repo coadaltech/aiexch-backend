@@ -516,7 +516,7 @@ export const SportsService = {
         .from(competitions)
         .where(
           and(
-            eq(competitions.sport_id, eventTypeId),
+            eq(competitions.sport_id, Number(eventTypeId)),
             eq(competitions.is_active, true),
           )
         )

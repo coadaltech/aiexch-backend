@@ -78,8 +78,8 @@ export class OddsHistoryWorker {
         .map((entry: any) => {
           try {
             return {
-              marketId: entry.message.marketId,
-              eventId: entry.message.eventId,
+              marketId: String(entry.message.marketId),
+              eventId: Number(entry.message.eventId),
               snapshot: JSON.parse(entry.message.snapshot),
               capturedAt: new Date(entry.message.capturedAt),
             };
