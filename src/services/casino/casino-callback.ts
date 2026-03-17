@@ -1,5 +1,5 @@
 import { DbType } from "../../types";
-import { users, profiles, vouchers, ledgerLimit } from "@db/schema";
+import { users, profiles, vouchers, voucherDetails, ledgerLimit } from "@db/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import "dotenv/config";
@@ -192,18 +192,42 @@ export const CasinoCallbackService = {
     type: string,
     amount: string,
     status: string,
-    currency: string = "INR",
+    _currency: string = "INR",
     extra?: { method?: string; txnHash?: string }
   ) {
-    await db.insert(vouchers).values({
+    const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
+    const isDebit = type === "debit" || type === "withdraw";
+
+    const [voucher] = await db.insert(vouchers).values({
       userId: playerId,
       type,
-      amount,
       status,
       reference: txnId,
-      currency: currency || "INR",
       ...(extra?.method ? { method: extra.method } : {}),
-      ...(extra?.txnHash ? { txnHash: extra.txnHash } : {}),
+    }).returning();
+
+    // Row 1: User entry
+    await db.insert(voucherDetails).values({
+      voucherId: voucher.id,
+      userId: playerId,
+      amount,
+      drCr: isDebit ? "DEBIT" : "CREDIT",
+      oppositeLedgerId: 0,
+      role: "user",
+      referenceId: extra?.txnHash,
+      description: `Casino ${type} - ${isDebit ? "debit from" : "credit to"} user`,
+    });
+
+    // Row 2: Limit account entry
+    await db.insert(voucherDetails).values({
+      voucherId: voucher.id,
+      userId: LIMIT_ACCOUNT_ID,
+      userGroupId: 0,
+      amount,
+      drCr: isDebit ? "CREDIT" : "DEBIT",
+      role: "limit",
+      referenceId: extra?.txnHash,
+      description: `Casino ${type} - ${isDebit ? "credit to" : "debit from"} limit account`,
     });
   },
 
@@ -217,10 +241,16 @@ export const CasinoCallbackService = {
   },
 
   async getTransactionByTxnHash(db: DbType, txnHash: string) {
+    const [detail] = await db
+      .select({ voucherId: voucherDetails.voucherId })
+      .from(voucherDetails)
+      .where(eq(voucherDetails.referenceId, txnHash))
+      .limit(1);
+    if (!detail) return null;
     const [txn] = await db
       .select()
       .from(vouchers)
-      .where(eq(vouchers.txnHash, txnHash))
+      .where(eq(vouchers.id, detail.voucherId))
       .limit(1);
     return txn;
   },

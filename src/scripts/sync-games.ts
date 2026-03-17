@@ -151,15 +151,15 @@ async function processGame(game: Game): Promise<string | null> {
         has_tables: !!game.has_tables,
         tags: game.tags ?? [],
         freespin_valid_until_full_day: game.freespin_valid_until_full_day,
-        updatedAt: new Date(),
-        createdAt: new Date(),
+        updateDate: new Date(),
+        addedDate: new Date(),
         label: game.label,
       })
       .onConflictDoUpdate({
         target: casino_games.uuid,
         set: {
           image: s3Url,
-          updatedAt: new Date(),
+          updateDate: new Date(),
         },
       });
 

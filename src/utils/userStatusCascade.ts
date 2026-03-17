@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import type { DbType } from "../types";
 
 /**
- * Get all user ids that are descendants of the given user (createdBy chain).
+ * Get all user ids that are descendants of the given user (addedBy chain).
  * E.g. if A created B and B created C, getDescendantUserIds(A) => [B, C].
  */
 export async function getDescendantUserIds(
@@ -18,7 +18,7 @@ export async function getDescendantUserIds(
     const next = await db
       .select({ id: users.id })
       .from(users)
-      .where(inArray(users.createdBy, currentLevel));
+      .where(inArray(users.addedBy, currentLevel));
     const nextIds = next.map((r) => r.id).filter((id) => !seen.has(id));
     nextIds.forEach((id) => seen.add(id));
     result.push(...nextIds);
@@ -30,7 +30,7 @@ export async function getDescendantUserIds(
 
 /**
  * Compute parent_account_status and parent_bet_status for a user by walking
- * the createdBy chain (ancestors only) and AND-ing their account_status and bet_status.
+ * the addedBy chain (ancestors only) and AND-ing their account_status and bet_status.
  */
 export async function computeParentStatuses(
   db: DbType,
@@ -39,16 +39,16 @@ export async function computeParentStatuses(
   let parentAccountStatus = true;
   let parentBetStatus = true;
   const [self] = await db
-    .select({ createdBy: users.createdBy })
+    .select({ addedBy: users.addedBy })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
-  let currentId: string | null = self?.createdBy ?? null;
+  let currentId: string | null = self?.addedBy ?? null;
 
   while (currentId != null) {
     const [row] = await db
       .select({
-        createdBy: users.createdBy,
+        addedBy: users.addedBy,
         accountStatus: users.accountStatus,
       })
       .from(users)
@@ -62,7 +62,7 @@ export async function computeParentStatuses(
       .limit(1);
     parentAccountStatus = parentAccountStatus && (row.accountStatus ?? true);
     parentBetStatus = parentBetStatus && (rowProfile?.betStatus ?? true);
-    currentId = row.createdBy;
+    currentId = row.addedBy;
   }
 
   return { parentAccountStatus, parentBetStatus };

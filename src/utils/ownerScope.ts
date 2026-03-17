@@ -28,9 +28,9 @@ export interface OwnerScopeResult {
   scopeWhitelabelId: string | null;
   /** "B2B" | "B2C" for scope whitelabel */
   whitelabelType: "B2B" | "B2C" | null;
-  /** If true, filter users by createdBy = current user id (only users they created). If false, show all users of the whitelabel. */
+  /** If true, filter users by addedBy = current user id (only users they created). If false, show all users of the whitelabel. */
   filterUsersByCreatedBy: boolean;
-  /** Current user id (for createdBy filter) */
+  /** Current user id (for addedBy filter) */
   currentUserId: string;
   /** Current user role */
   currentUserRole: string;
@@ -43,7 +43,7 @@ export interface OwnerScopeResult {
  * - Owner: scope = whitelabel from request (domain). Can log in to any whitelabel; sees that whitelabel's data only.
  * - Admin/Super/Master/Agent: scope = their whitelabel (user.whitelabelId or whitelabel where they are userId).
  * - B2C admin: sees all users of that whitelabel.
- * - B2B admin/super/master/agent: see only users they created (createdBy = self).
+ * - B2B admin/super/master/agent: see only users they created (addedBy = self).
  */
 export async function resolveOwnerScope(
   db: DbType,

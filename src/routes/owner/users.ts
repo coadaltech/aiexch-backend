@@ -28,7 +28,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       }
 
       const { username, email, password, role, membership, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId } = body as any;
-      const createdBy = (store as { id?: string; role?: string })?.id || null;
+      const addedBy = (store as { id?: string; role?: string })?.id;
       let whitelabelId: string | null =
         bodyWhitelabelId != null
           ? String(bodyWhitelabelId)
@@ -37,11 +37,11 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         const [wl] = await db.select({ id: whitelabels.id }).from(whitelabels).where(eq(whitelabels.domain, String(bodyDomain).trim())).limit(1);
         if (wl) whitelabelId = wl.id;
       }
-      if (whitelabelId == null && createdBy != null) {
-        const [creator] = await db.select({ whitelabelId: users.whitelabelId }).from(users).where(eq(users.id, createdBy)).limit(1);
+      if (whitelabelId == null && addedBy != null) {
+        const [creator] = await db.select({ whitelabelId: users.whitelabelId }).from(users).where(eq(users.id, addedBy)).limit(1);
         if (creator?.whitelabelId != null) whitelabelId = creator.whitelabelId;
         else {
-          const [wlByAdmin] = await db.select({ id: whitelabels.id }).from(whitelabels).where(eq(whitelabels.userId, createdBy)).limit(1);
+          const [wlByAdmin] = await db.select({ id: whitelabels.id }).from(whitelabels).where(eq(whitelabels.userId, addedBy)).limit(1);
           if (wlByAdmin) whitelabelId = wlByAdmin.id;
         }
       }
@@ -75,16 +75,16 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
       let parentAccountStatus = true;
       let parentBetStatus = true;
-      if (createdBy != null) {
+      if (addedBy != null) {
         const [parent] = await db
           .select({ accountStatus: users.accountStatus, parentAccountStatus: users.parentAccountStatus })
           .from(users)
-          .where(eq(users.id, createdBy))
+          .where(eq(users.id, addedBy))
           .limit(1);
         const [parentProfile] = await db
           .select({ betStatus: profiles.betStatus, parentBetStatus: profiles.parentBetStatus })
           .from(profiles)
-          .where(eq(profiles.userId, createdBy))
+          .where(eq(profiles.userId, addedBy))
           .limit(1);
         parentAccountStatus = parent
           ? (parent.accountStatus ?? true) && (parent.parentAccountStatus ?? true)
@@ -108,7 +108,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
           parentAccountStatus,
           emailVerified: true,
           whitelabelId,
-          createdBy: createdBy,
+          addedBy: addedBy,
           groupId: getGroupIdForRole(finalRole),
         })
         .returning();
@@ -136,7 +136,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         limitConsumed: "0",
         limitConsumedAfterDeclare: "0",
         finalLimit: "0",
-        addedBy: createdBy ?? undefined,
+        addedBy: addedBy ?? undefined,
       });
 
       set.status = 201;
@@ -205,7 +205,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       }
       visibleUsers = await db.select().from(users).where(and(...conditions));
     }
-    const creatorIds = [...new Set(visibleUsers.map((u) => u.createdBy).filter((id): id is string => id != null))];
+    const creatorIds = [...new Set(visibleUsers.map((u) => u.addedBy).filter((id): id is string => id != null))];
     const whitelabelIds = [...new Set(visibleUsers.map((u) => u.whitelabelId).filter((id): id is string => id != null))];
     const creators =
       creatorIds.length > 0
@@ -248,7 +248,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         lastName: profile?.lastName || null,
         phone: profile?.phone || null,
         country: profile?.country || null,
-        createdByUsername: user.createdBy != null ? (creatorMap.get(user.createdBy as string) ?? null) : null,
+        addedByUsername: user.addedBy != null ? (creatorMap.get(user.addedBy as string) ?? null) : null,
         whitelabelName: user.whitelabelId != null ? (wlMap.get(user.whitelabelId as string) ?? null) : null,
         balance: ledger?.userBalance ?? "0.00",
         userLimit: ledger?.userLimit ?? "0.00",
@@ -273,7 +273,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         .select({
           id: users.id,
           whitelabelId: users.whitelabelId,
-          createdBy: users.createdBy,
+          addedBy: users.addedBy,
           accountStatus: users.accountStatus,
         })
         .from(users)
@@ -293,12 +293,12 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         set.status = 404;
         return { success: false, message: "User not found" };
       }
-      if (scope.filterUsersByCreatedBy && target.createdBy !== scope.currentUserId) {
+      if (scope.filterUsersByCreatedBy && target.addedBy !== scope.currentUserId) {
         set.status = 404;
         return { success: false, message: "User not found" };
       }
 
-      const isCreator = target.createdBy === (store as { id?: string }).id;
+      const isCreator = target.addedBy === (store as { id?: string }).id;
       const isChangingStatus =
         isCreator &&
         (body.accountStatus !== undefined || body.betStatus !== undefined);
@@ -429,7 +429,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "Invalid user ID" };
       }
       const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
-      const [target] = await db.select({ id: users.id, whitelabelId: users.whitelabelId, createdBy: users.createdBy }).from(users).where(eq(users.id, userId)).limit(1);
+      const [target] = await db.select({ id: users.id, whitelabelId: users.whitelabelId, addedBy: users.addedBy }).from(users).where(eq(users.id, userId)).limit(1);
       if (!target) {
         set.status = 404;
         return { success: false, message: "User not found" };
@@ -438,7 +438,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         set.status = 404;
         return { success: false, message: "User not found" };
       }
-      if (scope.filterUsersByCreatedBy && target.createdBy !== scope.currentUserId) {
+      if (scope.filterUsersByCreatedBy && target.addedBy !== scope.currentUserId) {
         set.status = 404;
         return { success: false, message: "User not found" };
       }

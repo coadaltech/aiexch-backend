@@ -49,7 +49,7 @@ export const withdrawalMethodsRoutes = new Elysia({
     async ({ params, body, set, db }) => {
       const [updated] = await db
         .update(withdrawalMethods)
-        .set({ ...body, updatedAt: new Date() })
+        .set({ ...body, updateDate: new Date() })
         .where(eq(withdrawalMethods.id, params.id))
         .returning();
       set.status = 200;

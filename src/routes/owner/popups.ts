@@ -106,7 +106,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
         }
 
         const updateData: any = {
-          updatedAt: new Date(),
+          updateDate: new Date(),
         };
 
         if (body.title) updateData.title = body.title;

@@ -510,8 +510,8 @@ export const SportsService = {
           provider: competitions.provider,
           is_active: competitions.is_active,
           metadata: competitions.metadata,
-          created_at: competitions.created_at,
-          updated_at: competitions.updated_at
+          addedDate: competitions.addedDate,
+          updateDate: competitions.updateDate,
         })
         .from(competitions)
         .where(
@@ -532,8 +532,8 @@ export const SportsService = {
         provider: comp.provider,
         isActive: comp.is_active,
         metadata: comp.metadata,
-        createdAt: comp.created_at,
-        updatedAt: comp.updated_at,
+        addedDate: comp.addedDate,
+        updateDate: comp.updateDate,
         // Add any other fields your frontend expects
         totalEvents: (comp.metadata as any)?.totalEvents || 0,
         // Include the database id if needed

@@ -414,6 +414,20 @@
       "when": 1773407339909,
       "tag": "0058_skinny_odin",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1773643734970,
+      "tag": "0059_regular_tarot",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1773656092915,
+      "tag": "0060_unique_freak",
+      "breakpoints": true
     }
   ]
 }

@@ -94,7 +94,7 @@ export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
         .set({
           ...body,
           qrCodeUrl,
-          updatedAt: new Date(),
+          updateDate: new Date(),
         })
         .where(eq(qrCodes.id, id))
         .returning();

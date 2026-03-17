@@ -17,10 +17,6 @@ export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
   //
   //     const { eventTypeId } = params;
   //
-  //     //  console.log("hloooo")
-  //     //  console.log("ppp",params)
-  //     //  console.log("ttt",eventTypeId)
-  //
   //     try {
   //       const { eventTypeId } = params;
   //       const data = await seriesService.getSeriesData(eventTypeId);

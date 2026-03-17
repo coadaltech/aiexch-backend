@@ -95,7 +95,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       // Server-side market status check: reject if suspended or ball running
       try {
-        if (redis.isOpen) {
+        if (redis.isReady) {
           const liveJson = await redis.get(`live:markets:${matchId}`);
           if (liveJson) {
             const liveMarkets: any[] = JSON.parse(liveJson);
@@ -159,6 +159,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             status: "matched",
             ipAddress,
             matchedAt: new Date(),
+            addedBy: store.id,
+            updateBy: store.id,
           })
           .returning();
 
@@ -180,6 +182,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
               run: isSelected && run != null ? run.toString() : "0",
               stake: stake.toString(),
               potentialReturn: runnerReturn,
+              addedBy: store.id,
+              updateBy: store.id,
             };
           })
           .sort((a, b) => (a.isUserSelection ? 1 : 0) - (b.isUserSelection ? 1 : 0));
@@ -191,10 +195,12 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           userId: store.id,
           ipAddress,
           ...ua,
+          addedBy: store.id,
+          updateBy: store.id,
         });
 
         // Capture commission snapshot — freeze hierarchy percentages at bet time
-        // Walk up the created_by chain to find agent → master → super → admin → owner
+        // Walk up the added_by chain to find agent → master → super → admin → owner
         const hierarchyRows = await tx.execute(sql`
           WITH RECURSIVE hierarchy AS (
             SELECT
@@ -205,7 +211,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
               1 AS depth
             FROM users u
             JOIN profiles p ON p.user_id = u.id
-            WHERE u.id = (SELECT created_by FROM users WHERE id = ${store.id})
+            WHERE u.id::text = (SELECT added_by FROM users WHERE id = ${store.id})
 
             UNION ALL
 
@@ -216,7 +222,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
               p2.upline::DECIMAL(5,2),
               h.depth + 1
             FROM hierarchy h
-            JOIN users u2 ON u2.id = (SELECT created_by FROM users WHERE id = h.ancestor_id)
+            JOIN users u2 ON u2.id::text = (SELECT added_by FROM users WHERE id = h.ancestor_id)
             JOIN profiles p2 ON p2.user_id = u2.id
             WHERE h.depth < 10
               AND u2.id IS NOT NULL
@@ -230,6 +236,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         const snapshotData: typeof betCommissionSnapshot.$inferInsert = {
           transactionId: newTxn.id,
           userId: store.id,
+          addedBy: store.id,
+          updateBy: store.id,
         };
 
         for (const row of ancestors) {
@@ -290,7 +298,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         .select()
         .from(transactions)
         .where(whereClause)
-        .orderBy(desc(transactions.createdAt))
+        .orderBy(desc(transactions.addedDate))
         .limit(limit)
         .offset(offset);
 

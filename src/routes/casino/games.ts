@@ -21,7 +21,7 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
           search,
           page = "1",
           per_page = "50",
-          sort_by = "createdAt",
+          sort_by = "addedDate",
           order = "desc",
         } = query;
 
@@ -51,9 +51,9 @@ export const casinoGamesRoutes = new Elysia({ prefix: "/casino/games" })
             ? casino_games.name
             : sort_by === "provider"
             ? casino_games.provider
-            : sort_by === "createdAt"
-            ? casino_games.createdAt
-            : casino_games.createdAt;
+            : sort_by === "addedDate"
+            ? casino_games.addedDate
+            : casino_games.addedDate;
 
         // Apply pagination
         const pageNum = parseInt(page);

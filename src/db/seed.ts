@@ -120,7 +120,7 @@ const upsertSport = async (sportData: any) => {
       is_active:  false, // Default to false
       sort_order: sportData.sortOrder || sportData.sort_order || 0,
       metadata: sportData.metadata || {},
-      updated_at: new Date(),
+      updateDate: new Date(),
     };
 
     let operationType = "";
@@ -135,7 +135,7 @@ const upsertSport = async (sportData: any) => {
     } else {
       await db.insert(sports).values({
         ...sportToSave,
-        created_at: new Date(),
+        addedDate: new Date(),
       });
       operationType = "added";
       console.log(`✅ Added new sport: ${sportName} (ID: ${sportId})`);
@@ -198,8 +198,8 @@ const upsertCompetition = async (compData: any, sportId: string) => {
       is_active: isActive,
       is_archived: competition.isArchived || compData.isArchived || false,
       metadata: metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      addedDate: new Date(),
+      updateDate: new Date(),
     });
 
     console.log(`✅ Added NEW competition: ${compName} (ID: ${compId})`);

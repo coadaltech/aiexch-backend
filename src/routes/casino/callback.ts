@@ -18,11 +18,6 @@ export const casinoCallbackRoutes = new Elysia({ prefix: "/casino/callback" })
       const startTime = Date.now();
       set.status = 200;
 
-      console.log(".........................................................................................")
-      console.log(".........................................................................................")
-      console.log("------------ CALLBACK -------------");
-      console.log("body :", body);
-      console.log("-----------------------------------");
       try {
         const {
           action,
@@ -200,9 +195,6 @@ export const casinoCallbackRoutes = new Elysia({ prefix: "/casino/callback" })
             if (balance === null) {
               set.status = 404;
 
-              console.log("------------ our response -------------------")
-              console.log({ success: false, error: "Player not found" });
-
               return { success: false, error: "Player not found" };
             }
 
@@ -224,8 +216,6 @@ export const casinoCallbackRoutes = new Elysia({ prefix: "/casino/callback" })
 
             if (currentBalance < betAmount) {
               set.status = 400;
-              console.log("------------ our response -------------------")
-              console.log({ success: false, error: "Insufficient balance" });
               return { success: false, error: "Insufficient balance" };
             }
 

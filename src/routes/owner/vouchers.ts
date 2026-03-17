@@ -45,7 +45,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
   .post(
     "/",
     async ({ body, set, db, store }) => {
-      const adminId = (store as { id?: string })?.id || null;
+      const adminId = (store as { id?: string })?.id;
       const amount = parseFloat(body.amount);
 
       if (isNaN(amount) || amount <= 0) {
@@ -98,12 +98,11 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
             userId: body.userId,
             userGroupId: user.groupId,
             type: body.type,
-            ledgerField: body.ledgerField,
             status,
             remarks: body.remarks,
             method: body.method,
             reference: body.reference,
-            createdBy: adminId,
+            addedBy: adminId,
             approvedBy: status === "approved" ? adminId : null,
             approvedAt: status === "approved" ? new Date() : null,
           })
@@ -120,7 +119,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
           userGroupId: user.groupId,
           amount: body.amount,
           drCr: isDebit ? "DEBIT" : "CREDIT",
-          accountType: "ledger",
+          oppositeLedgerId: sourceGroupId,
           role: user.role || "user",
           whitelabelId: user.whitelabelId,
           description: body.type + " voucher - " + (isDebit ? "debit from" : "credit to") + " user",
@@ -135,7 +134,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
             userGroupId: sourceGroupId,
             amount: body.amount,
             drCr: isDebit ? "CREDIT" : "DEBIT",
-            accountType: "ledger",
+            oppositeLedgerId: user.groupId,
             role: sourceRole,
             whitelabelId: user.whitelabelId,
             description: body.type + " voucher - " + (isDebit ? "credit to" : "debit from") + " " + sourceRole,
@@ -152,7 +151,6 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       body: t.Object({
         userId: t.String(),
         type: t.String(), // limit | credit | debit | deposit | withdraw | bonus
-        ledgerField: t.Optional(t.String()), // user_balance | user_limit | both
         amount: t.String(),
         status: t.Optional(t.String()),
         remarks: t.Optional(t.String()),
@@ -170,7 +168,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
       const updateData: Record<string, any> = {
         status: body.status,
-        updatedAt: new Date(),
+        updateDate: new Date(),
       };
 
       // Set approvedBy/approvedAt when approving or rejecting

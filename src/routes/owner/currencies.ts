@@ -137,7 +137,7 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
         .select()
         .from(currencyValueHistory)
         .where(eq(currencyValueHistory.currencyId, id))
-        .orderBy(desc(currencyValueHistory.createdAt));
+        .orderBy(desc(currencyValueHistory.addedDate));
       set.status = 200;
       return { success: true, data: list };
     } catch (err) {

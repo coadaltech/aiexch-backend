@@ -8,10 +8,7 @@
 --   - Check that parent voucher status = 'approved'
 --   - CREDIT → add amount to user_balance, user_limit, recalc final_limit
 --   - DEBIT  → subtract amount from user_balance, user_limit, recalc final_limit
---   - Record balance_before and balance_after on the row itself
---
--- Also handles: when voucher status changes to 'approved', process all
--- existing voucher_detail rows that haven't been applied yet.
+--   - Mark the row as is_processed = TRUE
 --
 -- RUN THIS MANUALLY IN THE DATABASE
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -31,14 +28,14 @@ BEGIN
 
   IF v_voucher_status <> 'approved' THEN
     -- Don't update ledger for pending/rejected vouchers
-    -- balance_before/after will be filled when voucher gets approved
+    -- Will be processed when voucher gets approved (trigger 03)
     RETURN NEW;
   END IF;
 
-  -- Skip rows that already have balance_after pre-filled.
+  -- Skip rows that are already marked as processed.
   -- This is used by the settlement trigger which inserts the USER's row
   -- as audit-only (the settle trigger already updated the user's ledger).
-  IF NEW.balance_after IS NOT NULL THEN
+  IF NEW.is_processed = TRUE THEN
     RETURN NEW;
   END IF;
 
@@ -54,19 +51,14 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- Set balance_before
-  NEW.balance_before := v_current_balance;
-
   IF NEW.dr_cr = 'CREDIT' THEN
     -- Add to balance
     UPDATE ledger_limit
        SET user_balance = user_balance + NEW.amount,
            user_limit   = user_limit + NEW.amount,
            final_limit  = (user_limit + NEW.amount) - limit_consumed,
-           updated_at   = NOW()
+           update_date  = NOW()
      WHERE user_id = NEW.user_id;
-
-    NEW.balance_after := v_current_balance + NEW.amount;
 
   ELSIF NEW.dr_cr = 'DEBIT' THEN
     -- Subtract from balance
@@ -74,11 +66,12 @@ BEGIN
        SET user_balance = user_balance - NEW.amount,
            user_limit   = user_limit - NEW.amount,
            final_limit  = (user_limit - NEW.amount) - limit_consumed,
-           updated_at   = NOW()
+           update_date  = NOW()
      WHERE user_id = NEW.user_id;
-
-    NEW.balance_after := v_current_balance - NEW.amount;
   END IF;
+
+  -- Mark as processed
+  NEW.is_processed := TRUE;
 
   RETURN NEW;
 END;

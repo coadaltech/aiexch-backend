@@ -6,12 +6,14 @@
 --
 -- The existing trg_recalc_ledger_on_settle handles the USER's ledger_limit
 -- (balance + exposure recalc). This trigger ONLY:
---   1. Creates a settlement voucher (metadata, no amount)
+--   1. Creates a settlement voucher with event_id, market_id, event_type_id,
+--      competition_id on the voucher itself
 --   2. Creates voucher_detail rows for:
 --      - User (audit trail only — ledger already updated by settle trigger)
 --      - Agent, Master, Super, Admin, Owner (commission shares)
 --      - Capital account (remainder)
 --   3. The voucher_detail trigger (02) updates ledger_limit for hierarchy
+--   4. Each voucher_detail row includes opposite_ledger_id for the other side
 --
 -- Commission flow (user loses 1000, agent=55%, master=65%, super=75%, admin=85%):
 --   User:    DEBIT  1000  (audit only — settle trigger already applied)
@@ -37,17 +39,15 @@ DECLARE
   v_user_role        VARCHAR(20);
   v_user_group_id    INTEGER;
   v_whitelabel_id    UUID;
-  v_user_balance     DECIMAL(15,2);
   v_bet_type         VARCHAR(10);
   v_snapshot         RECORD;
   v_prev_pct         DECIMAL(5,2);
   v_curr_pct         DECIMAL(5,2);
   v_share            DECIMAL(15,2);
-  v_ancestor_balance DECIMAL(15,2);
   v_total_distributed DECIMAL(15,2) := 0;
   v_capital_share    DECIMAL(15,2);
   v_capital_user_id  UUID;
-  v_capital_balance  DECIMAL(15,2);
+  v_competition_id   VARCHAR(100);
 BEGIN
   -- Only act when status moves away from 'matched'
   IF OLD.status <> 'matched' OR NEW.status = 'matched' THEN
@@ -99,45 +99,37 @@ BEGIN
     INTO v_user_role, v_user_group_id, v_whitelabel_id
     FROM users WHERE id = NEW.user_id;
 
-  -- Get user balance AFTER the settle trigger already ran.
-  -- Reverse the P&L to get the true balance_before for the audit trail.
-  SELECT COALESCE(user_balance, 0) INTO v_user_balance
-    FROM ledger_limit WHERE user_id = NEW.user_id;
+  -- Get competition_id from the events table using the match_id
+  SELECT competition_id INTO v_competition_id
+    FROM events WHERE event_id = NEW.match_id
+    LIMIT 1;
 
-  IF v_pnl > 0 THEN
-    v_user_balance := v_user_balance - v_pnl;     -- undo the credit
-  ELSIF v_pnl < 0 THEN
-    v_user_balance := v_user_balance + v_abs_pnl;  -- undo the debit
-  END IF;
-
-  -- Create settlement voucher (no amount — amounts are in voucher_details)
+  -- Create settlement voucher with event/market info on the voucher itself
   INSERT INTO vouchers (
-    user_id, user_group_id, type, status, reference_id,
-    remarks, created_at, updated_at
+    user_id, user_group_id, type, status,
+    event_id, market_id, event_type_id, competition_id,
+    remarks, added_date, update_date
   ) VALUES (
     NEW.user_id, v_user_group_id, 'settlement', 'approved',
-    NEW.market_id,
+    NEW.match_id, NEW.market_id, NEW.event_type_id, v_competition_id,
     'Bet settlement: ' || NEW.status || ' on market ' || NEW.market_id,
     NOW(), NOW()
   )
   RETURNING id INTO v_voucher_id;
 
   -- ── User voucher_detail row (AUDIT ONLY — ledger already updated by settle trigger)
-  -- We insert with balance_before/after pre-filled so the voucher_detail trigger
-  -- recognizes it's already processed (balance_after IS NOT NULL → skip).
+  -- We insert with is_processed = TRUE so the voucher_detail trigger skips it.
+  -- For settlement with multiple counterparts, user's opposite_ledger_id is NULL.
   INSERT INTO voucher_details (
     voucher_id, user_id, user_group_id, amount, dr_cr,
-    balance_before, balance_after,
-    account_type, role, event_id, market_id, bet_id, whitelabel_id,
-    description, created_at
+    role, opposite_ledger_id, transaction_id,
+    is_processed, whitelabel_id,
+    description, added_date
   ) VALUES (
     v_voucher_id, NEW.user_id, v_user_group_id, v_abs_pnl,
     CASE WHEN v_pnl > 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-    v_user_balance,
-    CASE WHEN v_pnl > 0 THEN v_user_balance + v_abs_pnl
-         ELSE v_user_balance - v_abs_pnl END,
-    'ledger', v_user_role,
-    NEW.event_type_id, NEW.market_id, NEW.id, v_whitelabel_id,
+    v_user_role, NULL, NEW.id,
+    TRUE, v_whitelabel_id,
     'User ' || CASE WHEN v_pnl > 0 THEN 'won' ELSE 'lost' END || ' ' || v_abs_pnl::TEXT,
     NOW()
   );
@@ -158,16 +150,15 @@ BEGIN
       v_curr_pct := v_snapshot.agent_percent;
       v_share := ROUND((v_curr_pct - v_prev_pct) / 100.0 * v_abs_pnl, 2);
       IF v_share > 0 THEN
-        -- Insert voucher_detail — trigger 02 will update agent's ledger_limit
         INSERT INTO voucher_details (
-          voucher_id, user_id, user_group_id, amount, dr_cr, commission_percent,
-          account_type, role, event_id, market_id, bet_id, whitelabel_id,
-          description, created_at
+          voucher_id, user_id, user_group_id, amount, dr_cr,
+          role, opposite_ledger_id, transaction_id,
+          whitelabel_id, description, added_date
         ) VALUES (
           v_voucher_id, v_snapshot.agent_id, 6, v_share,
           CASE WHEN v_pnl < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-          v_curr_pct, 'ledger', 'agent',
-          NEW.event_type_id, NEW.market_id, NEW.id, v_whitelabel_id,
+          'agent', v_user_group_id, NEW.id,
+          v_whitelabel_id,
           'Agent commission ' || v_curr_pct || '% = ' || v_share::TEXT, NOW()
         );
         v_total_distributed := v_total_distributed + v_share;
@@ -181,14 +172,14 @@ BEGIN
       v_share := ROUND((v_curr_pct - v_prev_pct) / 100.0 * v_abs_pnl, 2);
       IF v_share > 0 THEN
         INSERT INTO voucher_details (
-          voucher_id, user_id, user_group_id, amount, dr_cr, commission_percent,
-          account_type, role, event_id, market_id, bet_id, whitelabel_id,
-          description, created_at
+          voucher_id, user_id, user_group_id, amount, dr_cr,
+          role, opposite_ledger_id, transaction_id,
+          whitelabel_id, description, added_date
         ) VALUES (
           v_voucher_id, v_snapshot.master_id, 5, v_share,
           CASE WHEN v_pnl < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-          v_curr_pct, 'ledger', 'master',
-          NEW.event_type_id, NEW.market_id, NEW.id, v_whitelabel_id,
+          'master', v_user_group_id, NEW.id,
+          v_whitelabel_id,
           'Master commission ' || v_curr_pct || '% = ' || v_share::TEXT, NOW()
         );
         v_total_distributed := v_total_distributed + v_share;
@@ -202,14 +193,14 @@ BEGIN
       v_share := ROUND((v_curr_pct - v_prev_pct) / 100.0 * v_abs_pnl, 2);
       IF v_share > 0 THEN
         INSERT INTO voucher_details (
-          voucher_id, user_id, user_group_id, amount, dr_cr, commission_percent,
-          account_type, role, event_id, market_id, bet_id, whitelabel_id,
-          description, created_at
+          voucher_id, user_id, user_group_id, amount, dr_cr,
+          role, opposite_ledger_id, transaction_id,
+          whitelabel_id, description, added_date
         ) VALUES (
           v_voucher_id, v_snapshot.super_id, 4, v_share,
           CASE WHEN v_pnl < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-          v_curr_pct, 'ledger', 'super',
-          NEW.event_type_id, NEW.market_id, NEW.id, v_whitelabel_id,
+          'super', v_user_group_id, NEW.id,
+          v_whitelabel_id,
           'Super commission ' || v_curr_pct || '% = ' || v_share::TEXT, NOW()
         );
         v_total_distributed := v_total_distributed + v_share;
@@ -223,14 +214,14 @@ BEGIN
       v_share := ROUND((v_curr_pct - v_prev_pct) / 100.0 * v_abs_pnl, 2);
       IF v_share > 0 THEN
         INSERT INTO voucher_details (
-          voucher_id, user_id, user_group_id, amount, dr_cr, commission_percent,
-          account_type, role, event_id, market_id, bet_id, whitelabel_id,
-          description, created_at
+          voucher_id, user_id, user_group_id, amount, dr_cr,
+          role, opposite_ledger_id, transaction_id,
+          whitelabel_id, description, added_date
         ) VALUES (
           v_voucher_id, v_snapshot.admin_id, 3, v_share,
           CASE WHEN v_pnl < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-          v_curr_pct, 'ledger', 'admin',
-          NEW.event_type_id, NEW.market_id, NEW.id, v_whitelabel_id,
+          'admin', v_user_group_id, NEW.id,
+          v_whitelabel_id,
           'Admin commission ' || v_curr_pct || '% = ' || v_share::TEXT, NOW()
         );
         v_total_distributed := v_total_distributed + v_share;
@@ -239,8 +230,6 @@ BEGIN
     END IF;
 
     -- ─── Capital account (owner commission + remainder all go to capital) ───
-    -- Owner's final commission from settlement goes into the capital account,
-    -- NOT the owner's personal account. The remainder also goes to capital.
     v_capital_share := v_abs_pnl - v_total_distributed;
     IF v_capital_share > 0 THEN
       SELECT id INTO v_capital_user_id
@@ -248,14 +237,14 @@ BEGIN
 
       IF v_capital_user_id IS NOT NULL THEN
         INSERT INTO voucher_details (
-          voucher_id, user_id, user_group_id, amount, dr_cr, commission_percent,
-          account_type, role, event_id, market_id, bet_id, whitelabel_id,
-          description, created_at
+          voucher_id, user_id, user_group_id, amount, dr_cr,
+          role, opposite_ledger_id, transaction_id,
+          whitelabel_id, description, added_date
         ) VALUES (
           v_voucher_id, v_capital_user_id, 1, v_capital_share,
           CASE WHEN v_pnl < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-          100.00, 'capital', 'capital',
-          NEW.event_type_id, NEW.market_id, NEW.id, v_whitelabel_id,
+          'capital', v_user_group_id, NEW.id,
+          v_whitelabel_id,
           'Capital account (owner commission + remainder) = ' || v_capital_share::TEXT, NOW()
         );
       END IF;
@@ -268,14 +257,14 @@ BEGIN
 
     IF v_capital_user_id IS NOT NULL THEN
       INSERT INTO voucher_details (
-        voucher_id, user_id, user_group_id, amount, dr_cr, commission_percent,
-        account_type, role, event_id, market_id, bet_id, whitelabel_id,
-        description, created_at
+        voucher_id, user_id, user_group_id, amount, dr_cr,
+        role, opposite_ledger_id, transaction_id,
+        whitelabel_id, description, added_date
       ) VALUES (
         v_voucher_id, v_capital_user_id, 1, v_abs_pnl,
         CASE WHEN v_pnl < 0 THEN 'CREDIT' ELSE 'DEBIT' END,
-        100.00, 'capital', 'capital',
-        NEW.event_type_id, NEW.market_id, NEW.id, v_whitelabel_id,
+        'capital', v_user_group_id, NEW.id,
+        v_whitelabel_id,
         'Capital account - full amount (no snapshot)', NOW()
       );
     END IF;

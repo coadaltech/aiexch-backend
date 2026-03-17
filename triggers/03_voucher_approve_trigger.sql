@@ -1,6 +1,6 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Trigger: When voucher status changes to 'approved', process all its
--- voucher_detail rows that haven't been applied yet (balance_after IS NULL).
+-- voucher_detail rows that haven't been applied yet (is_processed = FALSE).
 --
 -- This handles the pending → approved flow:
 --   1. Admin creates voucher (pending) + voucher_details
@@ -32,9 +32,9 @@ BEGIN
     SELECT id, user_id, amount, dr_cr
       FROM voucher_details
      WHERE voucher_id = NEW.id
-       AND balance_after IS NULL  -- not yet processed
+       AND is_processed = FALSE  -- not yet processed
        AND dr_cr IS NOT NULL
-     ORDER BY created_at ASC
+     ORDER BY added_date ASC
   LOOP
     -- Get current balance (with lock)
     SELECT COALESCE(user_balance, 0)
@@ -52,27 +52,22 @@ BEGIN
          SET user_balance = user_balance + v_detail.amount,
              user_limit   = user_limit + v_detail.amount,
              final_limit  = (user_limit + v_detail.amount) - limit_consumed,
-             updated_at   = NOW()
+             update_date   = NOW()
        WHERE user_id = v_detail.user_id;
-
-      UPDATE voucher_details
-         SET balance_before = v_current_balance,
-             balance_after  = v_current_balance + v_detail.amount
-       WHERE id = v_detail.id;
 
     ELSIF v_detail.dr_cr = 'DEBIT' THEN
       UPDATE ledger_limit
          SET user_balance = user_balance - v_detail.amount,
              user_limit   = user_limit - v_detail.amount,
              final_limit  = (user_limit - v_detail.amount) - limit_consumed,
-             updated_at   = NOW()
+             update_date   = NOW()
        WHERE user_id = v_detail.user_id;
-
-      UPDATE voucher_details
-         SET balance_before = v_current_balance,
-             balance_after  = v_current_balance - v_detail.amount
-       WHERE id = v_detail.id;
     END IF;
+
+    -- Mark as processed
+    UPDATE voucher_details
+       SET is_processed = TRUE
+     WHERE id = v_detail.id;
   END LOOP;
 
   RETURN NEW;

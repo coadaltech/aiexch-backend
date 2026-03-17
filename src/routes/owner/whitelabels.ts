@@ -228,7 +228,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
         config: body.config,
         preferences: body.preferences,
         permissions: body.permissions,
-        updatedAt: new Date(),
+        updateDate: new Date(),
       };
 
       // if (body.userId !== undefined) {

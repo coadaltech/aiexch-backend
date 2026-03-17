@@ -67,7 +67,7 @@ export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
     async ({ params, body, set, db }) => {
       const [updated] = await db
         .update(promocodes)
-        .set({ ...body, updatedAt: new Date() })
+        .set({ ...body, updateDate: new Date() })
         .where(eq(promocodes.id, params.id))
         .returning();
       set.status = 200;

@@ -166,7 +166,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
             type,
             order,
             status,
-            updatedAt: new Date(),
+            updateDate: new Date(),
           })
           .where(eq(homeSections.id, id))
           .returning();
@@ -211,7 +211,7 @@ export const homeSectionsRoutes = new Elysia({ prefix: "/home-sections" })
           return { success: false, message: "Game not found" };
         }
 
-        const updateData: any = { updatedAt: new Date() };
+        const updateData: any = { updateDate: new Date() };
 
         if (body.name) updateData.name = body.name;
         if (body.link) updateData.link = body.link;

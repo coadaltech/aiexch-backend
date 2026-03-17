@@ -28,8 +28,8 @@ export const getAvailableSportsList = async () => {
       name: sport.name,
       is_active: sport.is_active,
       sort_order: sport.sort_order,
-      created_at: sport.created_at,
-      updated_at: sport.updated_at,
+      addedDate: sport.addedDate,
+      updateDate: sport.updateDate,
     }));
 
     // 4. Cache for 5 minutes

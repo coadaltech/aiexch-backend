@@ -61,7 +61,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
             linkPath: body.linkPath,
             marketCount: body.marketCount,
             status: body.status,
-            updatedAt: new Date(),
+            updateDate: new Date(),
           })
           .where(eq(sportsGames.id, params.id))
           .returning();

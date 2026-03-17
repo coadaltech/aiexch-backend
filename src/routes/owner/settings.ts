@@ -77,7 +77,7 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
         if (existing) {
           const [updated] = await db
             .update(settings)
-            .set({ ...updateData, updatedAt: new Date() })
+            .set({ ...updateData, updateDate: new Date() })
             .where(eq(settings.id, existing.id))
             .returning();
           set.status = 200;

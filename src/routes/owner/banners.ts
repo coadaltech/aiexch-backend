@@ -81,7 +81,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
         }
 
         const updateData: any = {
-          updatedAt: new Date(),
+          updateDate: new Date(),
         };
 
         if (body.title) updateData.title = body.title;

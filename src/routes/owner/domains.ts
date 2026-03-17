@@ -51,7 +51,7 @@ export const domainsRoutes = (app: Elysia) =>
           const { name, status } = body as any;
           
           const [domain] = await db.update(domainsTable)
-            .set({ name, status, updatedAt: new Date() })
+            .set({ name, status, updateDate: new Date() })
             .where(eq(domainsTable.id, domainId))
             .returning();
           

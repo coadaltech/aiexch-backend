@@ -48,6 +48,6 @@ export class MarketCronService {
   private static async updateSingleMarket(eventId: string) {
     // Pipeline: fetch API → apply admin overrides → broadcast via WS
     const processed = await MarketPipelineService.processEvent(eventId);
-    console.log(`🔄 Updated ${eventId}: ${processed.length} markets`);
+    // console.log(`🔄 Updated ${eventId}: ${processed.length} markets`);
   }
 }

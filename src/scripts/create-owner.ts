@@ -63,7 +63,6 @@ async function createOwnerUser() {
     await db.insert(profiles).values({
       userId: result[0].id,
       membership: "platinum",
-      balance: "0",
     });
 
 

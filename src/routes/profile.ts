@@ -5,6 +5,7 @@ import {
   profiles,
   promocodes,
   vouchers,
+  voucherDetails,
   userReadNotifications,
   users,
   ledgerLimit,
@@ -201,7 +202,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       .from(vouchers)
       .where(and(...whereConditions));
 
-    const userTransactions = await queryBuilder.orderBy(vouchers.createdAt);
+    const userTransactions = await queryBuilder.orderBy(vouchers.addedDate);
     set.status = 200;
     return { success: true, data: userTransactions };
   })
@@ -221,7 +222,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       .from(bets)
       .where(and(...whereConditions));
 
-    const userBets = await queryBuilder.orderBy(desc(bets.createdAt));
+    const userBets = await queryBuilder.orderBy(desc(bets.addedDate));
     set.status = 200;
     return { success: true, data: userBets };
   })
@@ -241,7 +242,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         .select()
         .from(bets)
         .where(and(...whereConditions))
-        .orderBy(desc(bets.createdAt));
+        .orderBy(desc(bets.addedDate));
 
       set.status = 200;
       return { success: true, data: userBets };
@@ -260,7 +261,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         title: notifications.title,
         message: notifications.message,
         type: notifications.type,
-        createdAt: notifications.createdAt,
+        addedDate: notifications.addedDate,
         isRead: userReadNotifications.isRead,
         readAt: userReadNotifications.readAt,
       })
@@ -322,22 +323,60 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         proofImageUrl = await uploadFile(body.proofImage);
       }
 
-      const [transaction] = await db
-        .insert(vouchers)
-        .values({
+      // Get user info for double-entry
+      const [user] = await db
+        .select({ groupId: users.groupId, role: users.role, whitelabelId: users.whitelabelId })
+        .from(users)
+        .where(eq(users.id, store.id))
+        .limit(1);
+
+      const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
+
+      const result = await db.transaction(async (tx) => {
+        const [voucher] = await tx
+          .insert(vouchers)
+          .values({
+            userId: store.id,
+            type: "deposit",
+            status: "pending",
+            method: body.method,
+            reference: body.reference,
+            addedBy: store.id,
+          })
+          .returning();
+
+        // Row 1: Credit to user
+        await tx.insert(voucherDetails).values({
+          voucherId: voucher.id,
           userId: store.id,
-          type: "deposit",
+          userGroupId: user?.groupId,
           amount: body.amount,
-          method: body.method,
-          reference: body.reference,
+          drCr: "CREDIT",
+          oppositeLedgerId: 0,
+          role: user?.role || "user",
           proofImage: proofImageUrl,
-          status: "pending",
-          createdBy: store.id,
-        })
-        .returning();
+          whitelabelId: user?.whitelabelId,
+          description: "deposit voucher - credit to user",
+        });
+
+        // Row 2: Debit from limit account
+        await tx.insert(voucherDetails).values({
+          voucherId: voucher.id,
+          userId: LIMIT_ACCOUNT_ID,
+          userGroupId: 0,
+          amount: body.amount,
+          drCr: "DEBIT",
+          oppositeLedgerId: user?.groupId,
+          role: "limit",
+          whitelabelId: user?.whitelabelId,
+          description: "deposit voucher - debit from limit account",
+        });
+
+        return voucher;
+      });
 
       set.status = 201;
-      return { success: true, data: transaction };
+      return { success: true, data: result };
     },
     {
       body: t.Object({
@@ -367,29 +406,65 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         return { success: false, message: "Insufficient balance" };
       }
 
-      const [transaction] = await db
-        .insert(vouchers)
-        .values({
+      // Get user info for double-entry
+      const [user] = await db
+        .select({ groupId: users.groupId, role: users.role, whitelabelId: users.whitelabelId })
+        .from(users)
+        .where(eq(users.id, store.id))
+        .limit(1);
+
+      const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
+
+      const result = await db.transaction(async (tx) => {
+        const [voucher] = await tx
+          .insert(vouchers)
+          .values({
+            userId: store.id,
+            type: "withdraw",
+            status: "pending",
+            method: body.method,
+            reference: body.address,
+            addedBy: store.id,
+          })
+          .returning();
+
+        // Row 1: Debit from user
+        await tx.insert(voucherDetails).values({
+          voucherId: voucher.id,
           userId: store.id,
-          type: "withdraw",
+          userGroupId: user?.groupId,
           amount: body.amount,
-          method: body.method,
-          reference: body.address,
-          withdrawalAddress: body.withdrawalAddress || body.address,
-          status: "pending",
-          createdBy: store.id,
-        })
-        .returning();
+          drCr: "DEBIT",
+          oppositeLedgerId: 0,
+          role: user?.role || "user",
+          whitelabelId: user?.whitelabelId,
+          description: "withdraw voucher - debit from user",
+        });
+
+        // Row 2: Credit to limit account
+        await tx.insert(voucherDetails).values({
+          voucherId: voucher.id,
+          userId: LIMIT_ACCOUNT_ID,
+          userGroupId: 0,
+          amount: body.amount,
+          drCr: "CREDIT",
+          oppositeLedgerId: user?.groupId,
+          role: "limit",
+          whitelabelId: user?.whitelabelId,
+          description: "withdraw voucher - credit to limit account",
+        });
+
+        return voucher;
+      });
 
       set.status = 201;
-      return { success: true, data: transaction };
+      return { success: true, data: result };
     },
     {
       body: t.Object({
         amount: t.String(),
         method: t.String(),
         address: t.String(),
-        withdrawalAddress: t.Optional(t.String()),
       }),
     }
   )
@@ -466,17 +541,53 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         bonusAmount = parseFloat(promocode.value);
       }
 
+      // Get user info for double-entry
+      const [promoUser] = await db
+        .select({ groupId: users.groupId, role: users.role, whitelabelId: users.whitelabelId })
+        .from(users)
+        .where(eq(users.id, store.id))
+        .limit(1);
+
+      const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
+
       // Auto-approved voucher — DB trigger updates ledger_limit.user_balance
-      await db.insert(vouchers).values({
-        userId: store.id,
-        type: "bonus",
-        amount: bonusAmount.toString(),
-        method: "promocode",
-        reference: promocode.code,
-        status: "approved",
-        createdBy: store.id,
-        approvedBy: store.id,
-        approvedAt: new Date(),
+      await db.transaction(async (tx) => {
+        const [voucher] = await tx.insert(vouchers).values({
+          userId: store.id,
+          type: "bonus",
+          method: "promocode",
+          reference: promocode.code,
+          status: "approved",
+          addedBy: store.id,
+          approvedBy: store.id,
+          approvedAt: new Date(),
+        }).returning();
+
+        // Row 1: Credit to user
+        await tx.insert(voucherDetails).values({
+          voucherId: voucher.id,
+          userId: store.id,
+          userGroupId: promoUser?.groupId,
+          amount: bonusAmount.toString(),
+          drCr: "CREDIT",
+          oppositeLedgerId: 0,
+          role: promoUser?.role || "user",
+          whitelabelId: promoUser?.whitelabelId,
+          description: "bonus voucher - credit to user (promocode: " + promocode.code + ")",
+        });
+
+        // Row 2: Debit from limit account
+        await tx.insert(voucherDetails).values({
+          voucherId: voucher.id,
+          userId: LIMIT_ACCOUNT_ID,
+          userGroupId: 0,
+          amount: bonusAmount.toString(),
+          drCr: "DEBIT",
+          oppositeLedgerId: promoUser?.groupId,
+          role: "limit",
+          whitelabelId: promoUser?.whitelabelId,
+          description: "bonus voucher - debit from limit account (promocode: " + promocode.code + ")",
+        });
       });
 
       await db
@@ -510,7 +621,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       .select()
       .from(promocodes)
       .where(eq(promocodes.status, "active"))
-      .orderBy(desc(promocodes.createdAt));
+      .orderBy(desc(promocodes.addedDate));
 
     set.status = 200;
     return { success: true, data: availablePromocodes };

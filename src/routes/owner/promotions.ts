@@ -87,7 +87,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
           return { success: false, error: "Promotion not found" };
         }
 
-        const updateData: Record<string, any> = { updatedAt: new Date() };
+        const updateData: Record<string, any> = { updateDate: new Date() };
 
         // Delete image if explicitly set to null
         if (body.imageUrl === null && current.imageUrl) {
