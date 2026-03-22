@@ -73,15 +73,15 @@ BEGIN
       JOIN transaction_details td ON td.transaction_id = t.id
      WHERE t.user_id     = NEW.user_id
        AND t.status       = 'matched'
-       AND t.market_type <> 'sessions'
+       AND t.market_type <> 2
     UNION
     -- Session markets: runner wins (YES)
     SELECT DISTINCT market_id, selected_runner_id AS outcome_id
-      FROM active_bets WHERE market_type = 'sessions'
+      FROM active_bets WHERE market_type = 2
     UNION
     -- Session markets: runner loses (NO)
     SELECT DISTINCT market_id, '__NO__' AS outcome_id
-      FROM active_bets WHERE market_type = 'sessions'
+      FROM active_bets WHERE market_type = 2
   ),
   market_pnl AS (
     SELECT

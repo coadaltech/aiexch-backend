@@ -3,6 +3,7 @@ import { db } from "../db";
 import { sportsGames } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { SportsService } from "../services/sports";
+import { getAvailableSportsList } from "../services/sports-service";
 
 export const sportsRoutes = new Elysia({ prefix: "/sports" })
   .get("/", async ({ set }) => {
@@ -21,7 +22,7 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
 
   .get("/games", async ({ set }) => {
     try {
-      const data = await SportsService.getSports();
+      const data = await getAvailableSportsList();
       set.status = 200;
       return { success: true, data };
     } catch {
@@ -98,9 +99,9 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
   .get("/series/:eventTypeId", async ({ params, set }) => {
     try {
 
-      const data = await SportsService.getSeriesListWithMatches({
-        eventTypeId: params.eventTypeId,
-      });
+      const data = await SportsService.getSeriesWithMatches(
+        params.eventTypeId,
+      );
       set.status = 200;
       return data;
     } catch {

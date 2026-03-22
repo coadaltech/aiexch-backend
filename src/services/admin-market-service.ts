@@ -8,6 +8,7 @@ import {
   users,
 } from "@db/schema";
 import { eq, and } from "drizzle-orm";
+import { parseMarketType, marketTypeToString } from "../types/enums";
 import { SportsService } from "./sports";
 import dummysports from "../dummy/sportsevents.json";
 
@@ -185,7 +186,7 @@ export const AdminMarketService = {
         eventId: Number(data.eventId || 0),
         marketName: data.marketName || "",
         marketType: data.marketType || "MATCH_ODDS",
-        bettingType: data.bettingType || "ODDS",
+        bettingType: parseMarketType(data.bettingType),
         isActive: data.isActive ?? true,
         isVisible: data.isVisible ?? true,
         suspended: data.suspended ?? false,
@@ -256,7 +257,7 @@ export const AdminMarketService = {
         eventId: Number(params.eventId),
         marketName: params.marketName,
         marketType: "CUSTOM",
-        bettingType: params.bettingType,
+        bettingType: parseMarketType(params.bettingType),
         provider: "CUSTOM",
         whitelabelId: params.whitelabelId || undefined,
         isCustom: true,
@@ -594,7 +595,7 @@ export const AdminMarketService = {
       if (mkt.isCustom) {
         hash.marketName = mkt.marketName;
         hash.marketType = mkt.marketType;
-        hash.bettingType = mkt.bettingType;
+        hash.bettingType = marketTypeToString(mkt.bettingType).toUpperCase();
       }
 
       await redis.hSet(`admin:market:${mkt.marketId}`, hash);

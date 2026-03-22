@@ -74,7 +74,6 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
     async ({ body, set, store }) => {
       try {
         const scope = await resolveOwnerScope(db, undefined, store as { id?: string; role?: string });
-        console.log("Lo mai a gya...")
         if (scope.currentUserRole !== UserRole.Owner) {
           set.status = 403;
           return { success: false, message: "Only owner can create whitelabels." };

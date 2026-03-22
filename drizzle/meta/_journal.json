@@ -435,6 +435,20 @@
       "when": 1773755449077,
       "tag": "0061_certain_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1773922681138,
+      "tag": "0062_certain_tiger_shark",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1773925395814,
+      "tag": "0063_friendly_lockjaw",
+      "breakpoints": true
     }
   ]
 }

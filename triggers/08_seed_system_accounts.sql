@@ -6,6 +6,9 @@
 --   - P&L      (group_id=2): Counterparty in bet settlement
 --   - Limit    (group_id=0): Debit source when owner creates vouchers
 --
+-- Schema uses integer enums:
+--   role: 0=Owner  |  record_status: 0=Active  |  membership: 0=Bronze
+--
 -- RUN THIS MANUALLY IN THE DATABASE
 -- ---------------------------------------------------------------------------
 
@@ -19,17 +22,16 @@ VALUES (
   '__CAPITAL_ACCOUNT__',
   'capital@system.internal',
   '__SYSTEM_ACCOUNT_NO_LOGIN__',
-  'owner',
-  false, false, 1, false,
-  'system', NOW(), 'system', NOW(), 'S'
+  0, false, false, 1, false,
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (username) DO NOTHING;
 
 INSERT INTO profiles (user_id, membership, bet_status, parent_bet_status, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000001',
-  'bronze', false, false,
-  'system', NOW(), 'system', NOW(), 'S'
+  0, false, false,
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (user_id) DO NOTHING;
 
@@ -37,7 +39,7 @@ INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, lim
 VALUES (
   '00000000-0000-0000-0000-000000000001',
   0, 0, 0, 0, 0,
-  'system', NOW(), 'system', NOW(), 'S'
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (user_id) DO NOTHING;
 
@@ -51,17 +53,16 @@ VALUES (
   '__PROFIT_LOSS_ACCOUNT__',
   'pnl@system.internal',
   '__SYSTEM_ACCOUNT_NO_LOGIN__',
-  'owner',
-  false, false, 2, false,
-  'system', NOW(), 'system', NOW(), 'S'
+  0, false, false, 2, false,
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (username) DO NOTHING;
 
 INSERT INTO profiles (user_id, membership, bet_status, parent_bet_status, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000002',
-  'bronze', false, false,
-  'system', NOW(), 'system', NOW(), 'S'
+  0, false, false,
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (user_id) DO NOTHING;
 
@@ -69,7 +70,7 @@ INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, lim
 VALUES (
   '00000000-0000-0000-0000-000000000002',
   0, 0, 0, 0, 0,
-  'system', NOW(), 'system', NOW(), 'S'
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (user_id) DO NOTHING;
 
@@ -85,17 +86,16 @@ VALUES (
   '__LIMIT_ACCOUNT__',
   'limit@system.internal',
   '__SYSTEM_ACCOUNT_NO_LOGIN__',
-  'owner',
-  false, false, 0, false,
-  'system', NOW(), 'system', NOW(), 'S'
+  0, false, false, 0, false,
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (username) DO NOTHING;
 
 INSERT INTO profiles (user_id, membership, bet_status, parent_bet_status, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000003',
-  'bronze', false, false,
-  'system', NOW(), 'system', NOW(), 'S'
+  0, false, false,
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (user_id) DO NOTHING;
 
@@ -103,6 +103,6 @@ INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, lim
 VALUES (
   '00000000-0000-0000-0000-000000000003',
   0, 0, 0, 0, 0,
-  'system', NOW(), 'system', NOW(), 'S'
+  'system', NOW(), 'system', NOW(), 0
 )
 ON CONFLICT (user_id) DO NOTHING;

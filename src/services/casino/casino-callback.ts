@@ -3,6 +3,7 @@ import { users, profiles, vouchers, voucherDetails, ledgerLimit } from "@db/sche
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import "dotenv/config";
+import { UserRole, DrCr, parseVoucherType, parseVoucherStatus } from "../../types/enums";
 
 export type CallbackHeaders = {
   "x-merchant-id": string;
@@ -197,11 +198,13 @@ export const CasinoCallbackService = {
   ) {
     const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
     const isDebit = type === "debit" || type === "withdraw";
+    const voucherType = parseVoucherType(type);
+    const voucherStatus = parseVoucherStatus(status);
 
     const [voucher] = await db.insert(vouchers).values({
       userId: playerId,
-      type,
-      status,
+      type: voucherType,
+      status: voucherStatus,
       reference: txnId,
       ...(extra?.method ? { method: extra.method } : {}),
     }).returning();
@@ -211,9 +214,9 @@ export const CasinoCallbackService = {
       voucherId: voucher.id,
       userId: playerId,
       amount,
-      drCr: isDebit ? "DEBIT" : "CREDIT",
-      oppositeLedgerId: 0,
-      role: "user",
+      drCr: isDebit ? DrCr.Debit : DrCr.Credit,
+      oppositeUserId: LIMIT_ACCOUNT_ID,
+      role: UserRole.User,
       referenceId: extra?.txnHash,
       description: `Casino ${type} - ${isDebit ? "debit from" : "credit to"} user`,
     });
@@ -222,10 +225,10 @@ export const CasinoCallbackService = {
     await db.insert(voucherDetails).values({
       voucherId: voucher.id,
       userId: LIMIT_ACCOUNT_ID,
-      userGroupId: 0,
       amount,
-      drCr: isDebit ? "CREDIT" : "DEBIT",
-      role: "limit",
+      drCr: isDebit ? DrCr.Credit : DrCr.Debit,
+      oppositeUserId: playerId,
+      role: UserRole.Owner,
       referenceId: extra?.txnHash,
       description: `Casino ${type} - ${isDebit ? "credit to" : "debit from"} limit account`,
     });
@@ -258,7 +261,7 @@ export const CasinoCallbackService = {
   async updateTransactionStatus(db: DbType, txnId: string, status: string) {
     await db
       .update(vouchers)
-      .set({ status })
+      .set({ status: parseVoucherStatus(status) })
       .where(eq(vouchers.reference, txnId));
   },
 };

@@ -7,7 +7,7 @@ import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { addResultToQueue } from "../queues/betting";
 import { app_middleware } from "../middleware/auth";
 import { redis } from "../db/redis";
-import { BetType, parseBetType, UserRole } from "../types/enums";
+import { parseBetType, UserRole, MarketType, parseMarketType, marketTypeToString } from "../types/enums";
 
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
   .state({ id: "" as string, role: 0 as number })
@@ -67,7 +67,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Invalid stake or odds values" };
       }
 
-      const isLineBet = marketType === "sessions";
+      const marketTypeInt = parseMarketType(marketType);
+      const isLineBet = marketTypeInt === MarketType.Line;
       if (!runners || runners.length < (isLineBet ? 1 : 2)) {
         set.status = 400;
         return {
@@ -140,11 +141,56 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       const ua = parseUserAgent(request.headers.get("user-agent"));
 
+      // ── STEP 1: Validate ledger limits ──
+      const [ledger] = await db
+        .select({ userLimit: ledgerLimit.userLimit, finalLimit: ledgerLimit.finalLimit })
+        .from(ledgerLimit)
+        .where(eq(ledgerLimit.userId, store.id))
+        .limit(1);
+
+      if (!ledger) {
+        set.status = 400;
+        return { success: false, error: "Bet rejected: ledger not found for user" };
+      }
+
+      const userLimitNum = parseFloat(ledger.userLimit ?? "0");
+      const finalLimitNum = parseFloat(ledger.finalLimit ?? "0");
+
+      if (finalLimitNum <= 0) {
+        set.status = 400;
+        return { success: false, error: "Bet rejected: no available limit" };
+      }
+
+      if (stake > finalLimitNum) {
+        set.status = 400;
+        return { success: false, error: "Bet rejected: stake " + stake + " exceeds your available limit " + finalLimitNum };
+      }
+
+      // ── STEP 2: Calculate exposure for THIS bet only ──
+      // No need to fetch all existing bets — ledger already tracks cumulative exposure.
+      // We only calculate how much NEW exposure this single bet adds.
+      const potentialReturn = stake * odds;
+      let betExposure: number;
+
+      if (type === "back") {
+        // Back bet: worst case = you lose your stake
+        betExposure = stake;
+      } else {
+        // Lay bet: worst case = you pay out (potentialReturn - stake) = liability
+        betExposure = potentialReturn - stake;
+      }
+
+      if (betExposure > finalLimitNum) {
+        set.status = 400;
+        return { success: false, error: "Bet rejected: exposure " + betExposure + " exceeds available limit " + finalLimitNum };
+      }
+
+      // ── STEP 3: Insert bet + details in a single transaction ──
+      const today = new Date().toISOString().split("T")[0];
+      const numericSelectionId = Number(selectionId);
+
       const [txn] = await db.transaction(async (tx) => {
-        // Insert main transaction record
-        // Note: no balance deduction — the DB trigger on transaction_details
-        // recalculates exposure and enforces the credit limit automatically.
-        const today = new Date().toISOString().split("T")[0];
+        // Insert into transactions
         const [newTxn] = await tx
           .insert(transactions)
           .values({
@@ -155,8 +201,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             matchId: Number(matchId),
             marketId: String(marketId),
             marketName: marketName || null,
-            marketType: marketType || "odds",
-            selectionId: Number(selectionId),
+            marketType: marketTypeInt,
+            selectionId: numericSelectionId,
             selectionName: selectionName || null,
             betType: parseBetType(type),
             stake: stake.toString(),
@@ -169,34 +215,31 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           })
           .returning();
 
-        // Insert one row per runner into transaction_details.
-        // Selected runner MUST be last so it is inserted after all other runners.
-        // The DB trigger fires WHEN is_user_selection = TRUE; at that point all
-        // sibling runner rows must already be visible for correct P&L calculation.
-        const numericSelectionId = Number(selectionId);
-        const detailRows = runners
-          .map((runner) => {
-            const runnerId = Number(runner.id);
-            const isSelected = runnerId === numericSelectionId;
-            const runnerReturn = isSelected ? (stake * odds).toFixed(2) : "0";
-            return {
-              transactionId: newTxn.id,
-              runnerId,
-              runnerName: runner.name || null,
-              isUserSelection: isSelected,
-              betType: parseBetType(type),
-              price: runner.price.toString(),
-              run: isSelected && run != null ? Math.round(run) : 0,
-              stake: stake.toString(),
-              potentialReturn: runnerReturn,
-              addedBy: store.id,
-              updateBy: store.id,
-            };
-          })
-          .sort((a, b) => (a.isUserSelection ? 1 : 0) - (b.isUserSelection ? 1 : 0));
+        // Insert one row per runner into transaction_details
+        // Odds market: 3 rows (Team A, Team B, Draw)
+        // Bookmaker market: 2 rows (Team A, Team B)
+        // Line market: 1 row (session runner with run value)
+        const detailRows = runners.map((runner) => {
+          const runnerId = Number(runner.id);
+          const isSelected = runnerId === numericSelectionId;
+          return {
+            transactionId: newTxn.id,
+            runnerId,
+            runnerName: runner.name || null,
+            isUserSelection: isSelected,
+            betType: parseBetType(type),
+            price: runner.price.toString(),
+            run: isSelected && run != null ? Math.round(run) : 0,
+            stake: stake.toString(),
+            potentialReturn: isSelected ? potentialReturn.toFixed(2) : "0",
+            addedBy: store.id,
+            updateBy: store.id,
+          };
+        });
 
         await tx.insert(transactionDetails).values(detailRows);
 
+        // Insert transaction log
         await tx.insert(transactionLogs).values({
           transactionId: newTxn.id,
           userId: store.id,
@@ -206,15 +249,18 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           updateBy: store.id,
         });
 
-        // Capture commission snapshot — freeze hierarchy percentages at bet time
-        // Walk up the added_by chain to find agent → master → super → admin → owner
+        // ── Commission snapshot ──
+        // Walk up the hierarchy: User → Agent → Master → Super → Admin → Owner
+        // Each parent's downline% is THEIR share. The remainder goes to THEIR parent.
+        // Example: Owner creates Admin with downline 85%
+        //          Admin creates User with downline 100%
+        //          → Admin gets 85%, Owner gets 15% (100 - 85)
         const hierarchyRows = await tx.execute(sql`
           WITH RECURSIVE hierarchy AS (
             SELECT
               u.id AS ancestor_id,
               u.role AS ancestor_role,
-              u.group_id,
-              p.upline::DECIMAL(5,2) AS upline,
+              p.downline::DECIMAL(5,2) AS downline,
               1 AS depth
             FROM users u
             JOIN profiles p ON p.user_id = u.id
@@ -225,8 +271,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             SELECT
               u2.id,
               u2.role,
-              u2.group_id,
-              p2.upline::DECIMAL(5,2),
+              p2.downline::DECIMAL(5,2),
               h.depth + 1
             FROM hierarchy h
             JOIN users u2 ON u2.id::text = (SELECT added_by FROM users WHERE id = h.ancestor_id)
@@ -234,12 +279,17 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             WHERE h.depth < 10
               AND u2.id IS NOT NULL
           )
-          SELECT ancestor_id, ancestor_role, group_id, upline
+          SELECT ancestor_id, ancestor_role, downline
           FROM hierarchy
           ORDER BY depth ASC
         `);
 
         const ancestors = Array.isArray(hierarchyRows) ? hierarchyRows : (hierarchyRows as any)?.rows || [];
+
+        // Calculate each level's commission share from the downline chain
+        // The first ancestor (closest to user) gets their downline%.
+        // Each subsequent ancestor gets: their_downline% - child's_downline%
+        // The topmost (Owner) gets whatever remains (100 - last_downline%).
         const snapshotData: typeof betCommissionSnapshot.$inferInsert = {
           transactionId: newTxn.id,
           userId: store.id,
@@ -247,25 +297,36 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           updateBy: store.id,
         };
 
-        for (const row of ancestors) {
+        let previousDownline = 100; // start from 100% (user's full loss/win)
+        for (let i = 0; i < ancestors.length; i++) {
+          const row = ancestors[i];
           const role = Number(row.ancestor_role);
-          const pct = row.upline != null ? String(row.upline) : "0";
+          const downline = parseFloat(row.downline ?? "0");
+
+          // This ancestor's share = previousDownline - downline they passed down
+          // For the closest ancestor: share = 100 - their downline (what they keep)
+          // Actually: each ancestor gave `downline%` to their child, so they keep (previousDownline - downline)
+          const share = previousDownline - downline;
+
           if (role === UserRole.Agent) {
             snapshotData.agentId = row.ancestor_id;
-            snapshotData.agentPercent = pct;
+            snapshotData.agentPercent = Math.max(share, 0).toFixed(2);
           } else if (role === UserRole.Master) {
             snapshotData.masterId = row.ancestor_id;
-            snapshotData.masterPercent = pct;
+            snapshotData.masterPercent = Math.max(share, 0).toFixed(2);
           } else if (role === UserRole.Super) {
             snapshotData.superId = row.ancestor_id;
-            snapshotData.superPercent = pct;
+            snapshotData.superPercent = Math.max(share, 0).toFixed(2);
           } else if (role === UserRole.Admin) {
             snapshotData.adminId = row.ancestor_id;
-            snapshotData.adminPercent = pct;
+            snapshotData.adminPercent = Math.max(share, 0).toFixed(2);
           } else if (role === UserRole.Owner) {
+            // Owner gets everything that remains
             snapshotData.ownerId = row.ancestor_id;
-            snapshotData.ownerPercent = pct;
+            snapshotData.ownerPercent = Math.max(previousDownline, 0).toFixed(2);
           }
+
+          previousDownline = downline;
         }
 
         await tx.insert(betCommissionSnapshot).values(snapshotData);
@@ -277,7 +338,6 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       return { success: true, transactionId: txn.id };
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Failed to place bet";
-      // Trigger raises an exception when exposure exceeds the user's limit
       if (msg.startsWith("Bet rejected:")) {
         set.status = 400;
         return { success: false, error: msg };
@@ -329,6 +389,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       const result = userTransactions.map((t) => ({
         ...t,
+        marketType: marketTypeToString(t.marketType),
         details: detailsMap[t.id] || [],
       }));
 

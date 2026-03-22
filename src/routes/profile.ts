@@ -17,7 +17,16 @@ import { uploadFile } from "../services/s3";
 import { comparePassword, generateHashPassword } from "../utils/password";
 import { whitelabel_middleware } from "../middleware/whitelabel";
 import { DbType } from "../types";
-import { MembershipType, roleToString } from "../types/enums";
+import {
+  MembershipType,
+  VoucherType,
+  VoucherStatus,
+  DrCr,
+  UserRole,
+  parseVoucherType,
+  voucherTypeToString,
+  voucherStatusToString,
+} from "../types/enums";
 
 export const profileRoutes = new Elysia({ prefix: "/profile" })
   .state({ id: "", role: 0 as number })
@@ -195,7 +204,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     let whereConditions = [eq(vouchers.userId, store.id)];
 
     if (query.type && query.type !== "all") {
-      whereConditions.push(eq(vouchers.type, query.type));
+      whereConditions.push(eq(vouchers.type, parseVoucherType(query.type)));
     }
 
     const queryBuilder = db
@@ -204,8 +213,13 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       .where(and(...whereConditions));
 
     const userTransactions = await queryBuilder.orderBy(vouchers.addedDate);
+    const mapped = userTransactions.map((v) => ({
+      ...v,
+      type: voucherTypeToString(v.type),
+      status: voucherStatusToString(v.status),
+    }));
     set.status = 200;
-    return { success: true, data: userTransactions };
+    return { success: true, data: mapped };
   })
 
   // Get user bet history
@@ -338,8 +352,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           .insert(vouchers)
           .values({
             userId: store.id,
-            type: "deposit",
-            status: "pending",
+            type: VoucherType.Deposit,
+            status: VoucherStatus.Pending,
             method: body.method,
             reference: body.reference,
             addedBy: store.id,
@@ -350,11 +364,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
           userId: store.id,
-          userGroupId: user?.groupId,
           amount: body.amount,
-          drCr: "CREDIT",
-          oppositeLedgerId: 0,
-          role: user?.role != null ? roleToString(user.role) : "user",
+          drCr: DrCr.Credit,
+          oppositeUserId: LIMIT_ACCOUNT_ID,
+          role: user?.role ?? UserRole.User,
           proofImage: proofImageUrl,
           whitelabelId: user?.whitelabelId,
           description: "deposit voucher - credit to user",
@@ -364,11 +377,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
           userId: LIMIT_ACCOUNT_ID,
-          userGroupId: 0,
           amount: body.amount,
-          drCr: "DEBIT",
-          oppositeLedgerId: user?.groupId,
-          role: "limit",
+          drCr: DrCr.Debit,
+          oppositeUserId: store.id,
+          role: UserRole.Owner,
           whitelabelId: user?.whitelabelId,
           description: "deposit voucher - debit from limit account",
         });
@@ -421,8 +433,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           .insert(vouchers)
           .values({
             userId: store.id,
-            type: "withdraw",
-            status: "pending",
+            type: VoucherType.Withdraw,
+            status: VoucherStatus.Pending,
             method: body.method,
             reference: body.address,
             addedBy: store.id,
@@ -433,11 +445,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
           userId: store.id,
-          userGroupId: user?.groupId,
           amount: body.amount,
-          drCr: "DEBIT",
-          oppositeLedgerId: 0,
-          role: user?.role != null ? roleToString(user.role) : "user",
+          drCr: DrCr.Debit,
+          oppositeUserId: LIMIT_ACCOUNT_ID,
+          role: user?.role ?? UserRole.User,
           whitelabelId: user?.whitelabelId,
           description: "withdraw voucher - debit from user",
         });
@@ -446,11 +457,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
           userId: LIMIT_ACCOUNT_ID,
-          userGroupId: 0,
           amount: body.amount,
-          drCr: "CREDIT",
-          oppositeLedgerId: user?.groupId,
-          role: "limit",
+          drCr: DrCr.Credit,
+          oppositeUserId: store.id,
+          role: UserRole.Owner,
           whitelabelId: user?.whitelabelId,
           description: "withdraw voucher - credit to limit account",
         });
@@ -509,7 +519,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         .where(
           and(
             eq(vouchers.userId, store.id),
-            eq(vouchers.type, "bonus"),
+            eq(vouchers.type, VoucherType.Bonus),
             eq(vouchers.reference, promocode.code)
           )
         )
@@ -555,24 +565,23 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       await db.transaction(async (tx) => {
         const [voucher] = await tx.insert(vouchers).values({
           userId: store.id,
-          type: "bonus",
+          type: VoucherType.Bonus,
           method: "promocode",
           reference: promocode.code,
-          status: "approved",
+          status: VoucherStatus.Approved,
           addedBy: store.id,
           approvedBy: store.id,
-          approvedAt: new Date(),
+          approvedDate: new Date().toISOString().split("T")[0],
         }).returning();
 
         // Row 1: Credit to user
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
           userId: store.id,
-          userGroupId: promoUser?.groupId,
           amount: bonusAmount.toString(),
-          drCr: "CREDIT",
-          oppositeLedgerId: 0,
-          role: promoUser?.role != null ? roleToString(promoUser.role) : "user",
+          drCr: DrCr.Credit,
+          oppositeUserId: LIMIT_ACCOUNT_ID,
+          role: promoUser?.role ?? UserRole.User,
           whitelabelId: promoUser?.whitelabelId,
           description: "bonus voucher - credit to user (promocode: " + promocode.code + ")",
         });
@@ -581,11 +590,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
           userId: LIMIT_ACCOUNT_ID,
-          userGroupId: 0,
           amount: bonusAmount.toString(),
-          drCr: "DEBIT",
-          oppositeLedgerId: promoUser?.groupId,
-          role: "limit",
+          drCr: DrCr.Debit,
+          oppositeUserId: store.id,
+          role: UserRole.Owner,
           whitelabelId: promoUser?.whitelabelId,
           description: "bonus voucher - debit from limit account (promocode: " + promocode.code + ")",
         });

@@ -16,7 +16,6 @@ import { AdminMarketService } from "@services/admin-market-service";
 import { OddsHistoryWorker } from "@services/odds-history-worker";
 import { seriesRoutes } from "./routes/series-route";
 import "dotenv/config";
-import { initSocket } from "@services/socket-service";
 import { websocketRoutes } from "@routes/websocket";
 import { startCronJobs } from "@db/seed";
 import { gamesRoutes } from "@routes/dashboard/games-routes";
@@ -38,28 +37,11 @@ async function loadWhitelabelOrigins() {
   }
 }
 
-// // Initialize services
-async function initializeServices() {
-  await connectRedis();
-  await loadWhitelabelOrigins();
-  // Sync admin market overrides from DB to Redis
-  await AdminMarketService.syncOverridesToRedis();
-  // Start odds history background worker
-  await OddsHistoryWorker.init();
-  // Start automatic bet settlement service
-  startBetSettlementService();
-}
-initializeServices();
-
 const port = Number(process.env.PORT || 3001);
 
 const app = new Elysia()
-  // Register WebSocket routes first — before CORS/cookie middleware
-  // so the upgrade handshake isn't intercepted
   .use(
     cors({
-      // Dynamic origin check — runs on every request against the live in-memory set.
-      // New whitelabel domains are reflected immediately without a server restart.
       origin: (request) => {
         const origin = request.headers.get("origin");
         if (!origin) return false;
@@ -78,7 +60,7 @@ const app = new Elysia()
       return {
         success: false,
         message: "Validation failed",
-        details: error.all, // array of all validation errors
+        details: error.all,
       };
     }
 
@@ -104,33 +86,54 @@ const app = new Elysia()
   .use(casinoCallbackRoutes)
   .use(casinoGamesRoutes)
   .use(websocketRoutes)
-  .listen(port)
+  .listen(port);
 
-// .all("/*", ({ request, set }) => {
-//   // console.log("=== CATCH-ALL WILDCARD ===");
-//   // console.log("Method:", request.method);
-//   // console.log("URL:", request.url);
-//   // console.log("Path:", new URL(request.url).pathname);
-//
-//   set.status = 404;
-//   return {
-//     message: "Route not found - caught by wildcard",
-//     method: request.method,
-//     url: request.url,
-//     path: new URL(request.url).pathname,
-//   };
-// });
 
-console.log(`🚀 Server is running on http://localhost:${port}`);
-// console.log(`📡 WebSocket support enabled`);
+  
+console.log(`Server is running on http://localhost:${port}`);
 
-// startCronJobs()
+// Initialize ALL services BEFORE accepting real traffic
+// This runs async but the server is already listening for health checks
+async function initializeServices() {
+  // Step 1: Connect Redis (non-blocking — app works without it via in-memory cache)
+  await connectRedis();
+  console.log("[Init] Redis connection attempted");
 
-// let a  =async function(){
-//   let result = await db.delete(competitions).where(lte(competitions.created_at, new Date("2026-03-05 07:27:40.702")));
-// }
-// a();
+  // Step 2: Load whitelabel domains (needs DB)
+  await loadWhitelabelOrigins();
+  console.log("[Init] Whitelabel origins loaded");
 
-initSocket();
+  // Step 3: Sync admin overrides from DB to Redis
+  try {
+    await AdminMarketService.syncOverridesToRedis();
+    console.log("[Init] Admin overrides synced");
+  } catch (e) {
+    console.error("[Init] Admin sync failed (non-fatal):", e);
+  }
 
-console.log(`🔌 WebSocket server initialized`);
+  // Step 4: Start odds history worker
+  try {
+    await OddsHistoryWorker.init();
+    console.log("[Init] OddsHistory worker started");
+  } catch (e) {
+    console.error("[Init] OddsHistory init failed (non-fatal):", e);
+  }
+
+  // Step 5: Start bet settlement
+  startBetSettlementService();
+  console.log("[Init] Bet settlement started");
+
+  // // Step 6: Start sports & competitions sync cron jobs
+  // try {
+  //   await startCronJobs();
+  //   console.log("[Init] Sports/competitions sync cron started");
+  // } catch (e) {
+  //   console.error("[Init] Sports sync cron failed (non-fatal):", e);
+  // }
+
+  console.log("[Init] All services ready");
+}
+
+initializeServices().catch((e) => {
+  console.error("[Init] FATAL — service initialization failed:", e);
+});

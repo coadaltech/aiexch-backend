@@ -14,7 +14,7 @@ import {
   serial,
   numeric,
 } from "drizzle-orm/pg-core";
-import { RecordStatus, BetType, UserRole, MembershipType } from "../types/enums";
+import { RecordStatus, BetType, UserRole, MembershipType, VoucherType, VoucherStatus, DrCr, MarketType } from "../types/enums";
 
 export const whitelabelTypeEnum = pgEnum("whitelabel_type", ["B2B", "B2C"]);
 
@@ -254,23 +254,25 @@ export const vouchers = pgTable("vouchers", {
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
-  userGroupId: integer("user_group_id"),
-  type: varchar("type", { length: 20 }).notNull(), // credit | debit | limit | deposit | withdraw | bonus | settlement
-  status: varchar("status", { length: 20 }).default("pending"), // pending | approved | rejected
+  type: integer("type").notNull(), // VoucherType enum: 0=credit,1=debit,2=limit,3=deposit,4=withdraw,5=bonus,6=settlement
+  status: integer("status").default(VoucherStatus.Pending).notNull(), // VoucherStatus enum: 0=pending,1=approved,2=rejected
   method: varchar("method", { length: 50 }),
   reference: varchar("reference", { length: 255 }),
-  remarks: text("remarks"),
+  remarks: varchar("remarks", { length: 200 }),
+  remarks1: varchar("remarks1", { length: 200 }),
+  remarks2: varchar("remarks2", { length: 200 }),
+  remarks3: varchar("remarks3", { length: 200 }),
   eventTypeId: bigint("event_type_id", { mode: "number" }),
   competitionId: bigint("competition_id", { mode: "number" }),
   eventId: bigint("event_id", { mode: "number" }),
   marketId: numeric("market_id"),
   approvedBy: uuid("approved_by"),
-  approvedAt: timestamp("approved_at"),
+  approvedDate: date("approved_date"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  addedBy: uuid("added_by"),
+  addedDate: date("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by"),
+  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
@@ -283,13 +285,16 @@ export const voucherDetails = pgTable("voucher_details", {
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
-  userGroupId: integer("user_group_id"),
-  oppositeLedgerId: integer("opposite_ledger_id"),
-  role: varchar("role", { length: 20 }), // owner|admin|super|master|agent|user|capital|pnl
+  oppositeUserId: uuid("opposite_user_id"), // the other party's user id
+  role: integer("role"), // UserRole enum: 0=owner,3=admin,4=super,5=master,6=agent,7=user
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
-  drCr: varchar("dr_cr", { length: 10 }), // DEBIT | CREDIT
+  drCr: integer("dr_cr"), // DrCr enum: 0=debit,1=credit
   parentVoucherDetailId: uuid("parent_voucher_detail_id"),
   mondayFinal: boolean("monday_final").default(false),
+  remarks: varchar("remarks", { length: 200 }),
+  remarks1: varchar("remarks1", { length: 200 }),
+  remarks2: varchar("remarks2", { length: 200 }),
+  remarks3: varchar("remarks3", { length: 200 }),
   proofImage: text("proof_image"),
   transactionId: uuid("transaction_id"),
   referenceId: varchar("reference_id", { length: 255 }),
@@ -297,10 +302,10 @@ export const voucherDetails = pgTable("voucher_details", {
   description: varchar("description", { length: 255 }),
   whitelabelId: uuid("whitelabel_id"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  addedBy: uuid("added_by"),
+  addedDate: date("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by"),
+  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
@@ -479,7 +484,7 @@ export const transactions = pgTable("transactions", {
   matchId: bigint("match_id", { mode: "number" }).notNull(),
   marketId: numeric("market_id").notNull(),
   marketName: varchar("market_name", { length: 255 }),
-  marketType: varchar("market_type", { length: 20 }).default("odds"), // odds | bookmakers | sessions | fancy
+  marketType: integer("market_type").default(MarketType.Odds).notNull(), // MarketType enum: 0=odds,1=bookmaker,2=line
   selectionId: bigint("selection_id", { mode: "number" }).notNull(),
   selectionName: varchar("selection_name", { length: 255 }),
   betType: integer("bet_type").notNull(), // 0=back, 1=lay (BetType enum)
@@ -806,7 +811,7 @@ export const marketSettings = pgTable("market_settings", {
   eventId: bigint("event_id", { mode: "number" }).notNull(),
   marketName: varchar("market_name", { length: 255 }).notNull(),
   marketType: varchar("market_type", { length: 50 }).notNull(),
-  bettingType: varchar("betting_type", { length: 20 }).notNull(),
+  bettingType: integer("betting_type").default(MarketType.Odds).notNull(),
   provider: varchar("provider", { length: 50 }).default("API"),
   whitelabelId: uuid("whitelabel_id"),
   isCustom: boolean("is_custom").default(false).notNull(),

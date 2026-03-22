@@ -96,7 +96,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         phone,
         country,
         membership: MembershipType.Bronze,
-        balance: "0",
       });
 
       // Mark OTP as used

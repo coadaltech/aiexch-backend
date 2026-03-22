@@ -1,28 +1,28 @@
 // src/services/sports-service.ts
 import { db } from "@db/index";
 import { sports } from "@db/schema";
-import { redis } from "@db/redis";
+import { CacheService } from "./cache";
 
 export const getAvailableSportsList = async () => {
   try {
-    // 1. Check Redis cache first (5 minutes = 300 seconds)
     const cacheKey = "sports:list";
-    const cached = await redis.get(cacheKey);
+    const cached = await CacheService.get<any[]>(cacheKey);
 
-    // console.log("dsfjsdfkschut")
     if (cached) {
-      console.log("✅ Returning cached sports data");
-      return JSON.parse(cached);
+      return cached;
     }
 
-    console.log("🔄 Fetching sports from database...");
 
-    // 2. Fetch ALL data from sports table
-    const sportsData = await db.select().from(sports);
+    // Retry once — Neon cold start may fail the first query
+    let sportsData;
+    try {
+      sportsData = await db.select().from(sports);
+    } catch (firstError) {
+      console.warn("First DB query failed (possible cold start), retrying in 3s...");
+      await new Promise(r => setTimeout(r, 3000));
+      sportsData = await db.select().from(sports);
+    }
 
-    console.log(`✅ Found ${sportsData.length} sports in database`);
-
-    // 3. Transform to match expected format
     const transformedData = sportsData.map((sport) => ({
       id: sport.sport_id,
       name: sport.name,
@@ -32,12 +32,11 @@ export const getAvailableSportsList = async () => {
       updateDate: sport.updateDate,
     }));
 
-    // 4. Cache for 5 minutes
-    await redis.set(cacheKey, JSON.stringify(transformedData), { EX: 300 });
+    await CacheService.set(cacheKey, transformedData, 300);
 
     return transformedData;
   } catch (error) {
-    console.error("❌ Error fetching sports from database:", error);
+    console.error("Error fetching sports from database:", error);
     return [];
   }
 };

@@ -1,0 +1,1 @@
+ALTER TABLE "market_settings" ALTER COLUMN "betting_type" SET DATA TYPE integer;

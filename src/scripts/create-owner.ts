@@ -22,7 +22,7 @@ import { UserRole, MembershipType } from "../types/enums";
 async function createOwnerUser() {
   try {
     console.log("Creating owner user...");
-    console.log("Creating owner user...ewrwer");
+    console.log("Creating owner user...");
 
     // Check if owner user already exists
     const existingUser = await db

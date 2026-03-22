@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { redis } from "@db/redis";
+import { redis, redisIsHealthy } from "@db/redis";
 import { db } from "@db/index";
 import { marketOddsHistory } from "@db/schema";
 import { lt } from "drizzle-orm";
@@ -18,7 +18,7 @@ export class OddsHistoryWorker {
     this.initialized = true;
 
     try {
-      if (!redis.isOpen) {
+      if (!redisIsHealthy()) {
         console.warn(
           "[OddsHistory] Redis not connected, worker will not start"
         );
@@ -58,14 +58,14 @@ export class OddsHistoryWorker {
 
   private static async processBatch() {
     try {
-      if (!redis.isOpen) return;
+      if (!redisIsHealthy()) return;
 
-      // Read up to BATCH_SIZE entries from stream
+      // Read up to BATCH_SIZE entries from stream (non-blocking to avoid holding connection)
       const entries = await redis.xReadGroup(
         CONSUMER_GROUP,
         CONSUMER_NAME,
         [{ key: STREAM_KEY, id: ">" }],
-        { COUNT: BATCH_SIZE, BLOCK: 0 }
+        { COUNT: BATCH_SIZE, BLOCK: 2000 }
       );
 
       if (!entries || entries.length === 0) return;

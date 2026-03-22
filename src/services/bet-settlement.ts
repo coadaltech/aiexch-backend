@@ -3,12 +3,13 @@ import { transactions } from "../db/schema";
 import { eq, and, inArray, isNull, or, lt } from "drizzle-orm";
 import { SportsService } from "./sports";
 import { addResultToQueue } from "../queues/betting";
+import { MarketType, marketTypeToString } from "../types/enums";
 
 interface MatchBetGroup {
   matchId: number;
   eventTypeId: number;
   marketIds: string[];
-  marketTypes: Set<string>;
+  marketTypes: Set<number>;
 }
 
 /**
@@ -57,13 +58,13 @@ async function isMatchFinished(
 async function fetchAndMapResults(
   eventTypeId: string | number,
   marketIds: string[],
-  marketType: string
+  marketType: number
 ): Promise<Record<string, "winner" | "loser">> {
   const results: Record<string, "winner" | "loser"> = {};
   const eventTypeIdStr = String(eventTypeId);
 
   try {
-    if (marketType === "odds") {
+    if (marketType === MarketType.Odds) {
       const oddsResults = await SportsService.getOddsResults({
         eventTypeId: eventTypeIdStr,
         marketIds,
@@ -89,7 +90,7 @@ async function fetchAndMapResults(
           }
         }
       }
-    } else if (marketType === "bookmakers") {
+    } else if (marketType === MarketType.Bookmaker) {
       const bookmakerResults = await SportsService.getBookmakersResults({
         eventTypeId: eventTypeIdStr,
         marketIds,
@@ -106,7 +107,7 @@ async function fetchAndMapResults(
           }
         }
       }
-    } else if (marketType === "sessions") {
+    } else if (marketType === MarketType.Line) {
       const sessionResults = await SportsService.getSessionResults({
         eventTypeId: eventTypeIdStr,
         marketIds,
@@ -122,7 +123,7 @@ async function fetchAndMapResults(
           }
         }
       }
-    } else if (marketType === "fancy") {
+    } else if (marketTypeToString(marketType) === "fancy") {
       const fancyResults = await SportsService.getFancyResults({
         eventTypeId: eventTypeIdStr,
         marketIds,
@@ -156,7 +157,7 @@ async function settleMatchBets(
   matchId: number,
   eventTypeId: number,
   marketIds: string[],
-  marketTypes: Set<string>
+  marketTypes: Set<number>
 ): Promise<void> {
   try {
     // Fetch results for each market type
@@ -164,8 +165,7 @@ async function settleMatchBets(
 
     for (const marketType of marketTypes) {
       // Get market IDs for this specific market type
-      // Use default "odds" if marketType is null/undefined
-      const effectiveMarketType = marketType || "odds";
+      const effectiveMarketType = marketType ?? MarketType.Odds;
 
       const transactionsForMarketType = await db
         .select({ marketId: transactions.marketId })
@@ -271,8 +271,7 @@ export async function checkAndSettleBets(): Promise<void> {
       if (!group.marketIds.includes(bet.marketId)) {
         group.marketIds.push(bet.marketId);
       }
-      // Use default "odds" if marketType is null/undefined
-      group.marketTypes.add(bet.marketType || "odds");
+      group.marketTypes.add(bet.marketType ?? MarketType.Odds);
     }
 
     // Process each match

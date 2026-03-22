@@ -3,7 +3,16 @@ import { vouchers, voucherDetails, users } from "../../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
-import { UserRole, roleToString } from "../../types/enums";
+import {
+  UserRole,
+  VoucherType,
+  VoucherStatus,
+  DrCr,
+  parseVoucherType,
+  parseVoucherStatus,
+  voucherTypeToString,
+  voucherStatusToString,
+} from "../../types/enums";
 
 export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
@@ -36,6 +45,8 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
     const vouchersWithAmount = allVouchers.map((v) => ({
       ...v,
+      type: voucherTypeToString(v.type),
+      status: voucherStatusToString(v.status),
       amount: amountMap.get(v.id) ?? "0",
     }));
 
@@ -83,10 +94,10 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
       const isOwner = creatorRole === UserRole.Owner;
       const sourceAccountId = isOwner ? LIMIT_ACCOUNT_ID : adminId;
-      const sourceGroupId = isOwner ? 0 : creatorGroupId;
-      const sourceRole = isOwner ? "limit" : roleToString(creatorRole ?? UserRole.Owner);
+      const sourceRoleInt = creatorRole ?? UserRole.Owner;
 
-      const status = body.status || "approved";
+      const voucherType = parseVoucherType(body.type);
+      const voucherStatus = parseVoucherStatus(body.status || "approved");
       const isDebit = body.type === "debit" || body.type === "withdraw";
 
       // Insert voucher (no amount — amounts go in voucher_details only)
@@ -97,15 +108,14 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
           .insert(vouchers)
           .values({
             userId: body.userId,
-            userGroupId: user.groupId,
-            type: body.type,
-            status,
+            type: voucherType,
+            status: voucherStatus,
             remarks: body.remarks,
             method: body.method,
             reference: body.reference,
             addedBy: adminId,
-            approvedBy: status === "approved" ? adminId : null,
-            approvedAt: status === "approved" ? new Date() : null,
+            approvedBy: voucherStatus === VoucherStatus.Approved ? adminId : null,
+            approvedDate: voucherStatus === VoucherStatus.Approved ? new Date().toISOString().split("T")[0] : null,
           })
           .returning();
 
@@ -117,11 +127,10 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
           userId: body.userId,
-          userGroupId: user.groupId,
           amount: body.amount,
-          drCr: isDebit ? "DEBIT" : "CREDIT",
-          oppositeLedgerId: sourceGroupId,
-          role: roleToString(user.role ?? UserRole.User),
+          drCr: isDebit ? DrCr.Debit : DrCr.Credit,
+          oppositeUserId: sourceAccountId,
+          role: user.role ?? UserRole.User,
           whitelabelId: user.whitelabelId,
           description: body.type + " voucher - " + (isDebit ? "debit from" : "credit to") + " user",
         });
@@ -132,13 +141,12 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
           await tx.insert(voucherDetails).values({
             voucherId: voucher.id,
             userId: sourceAccountId,
-            userGroupId: sourceGroupId,
             amount: body.amount,
-            drCr: isDebit ? "CREDIT" : "DEBIT",
-            oppositeLedgerId: user.groupId,
-            role: sourceRole,
+            drCr: isDebit ? DrCr.Credit : DrCr.Debit,
+            oppositeUserId: body.userId,
+            role: sourceRoleInt,
             whitelabelId: user.whitelabelId,
-            description: body.type + " voucher - " + (isDebit ? "credit to" : "debit from") + " " + sourceRole,
+            description: body.type + " voucher - " + (isDebit ? "credit to" : "debit from") + " source",
           });
         }
 
@@ -146,7 +154,14 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       });
 
       set.status = 201;
-      return { success: true, data: result };
+      return {
+        success: true,
+        data: {
+          ...result,
+          type: voucherTypeToString(result.type),
+          status: voucherStatusToString(result.status),
+        },
+      };
     },
     {
       body: t.Object({
@@ -167,15 +182,16 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       const adminId = (store as { id?: string })?.id || null;
       const voucherId = params.id;
 
+      const statusInt = parseVoucherStatus(body.status);
       const updateData: Record<string, any> = {
-        status: body.status,
-        updateDate: new Date(),
+        status: statusInt,
+        updateDate: new Date().toISOString().split("T")[0],
       };
 
-      // Set approvedBy/approvedAt when approving or rejecting
-      if (body.status === "approved" || body.status === "rejected") {
+      // Set approvedBy/approvedDate when approving or rejecting
+      if (statusInt === VoucherStatus.Approved || statusInt === VoucherStatus.Rejected) {
         updateData.approvedBy = adminId;
-        updateData.approvedAt = new Date();
+        updateData.approvedDate = new Date().toISOString().split("T")[0];
       }
 
       if (body.remarks) {
@@ -197,7 +213,14 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       }
 
       set.status = 200;
-      return { success: true, data: updated };
+      return {
+        success: true,
+        data: {
+          ...updated,
+          type: voucherTypeToString(updated.type),
+          status: voucherStatusToString(updated.status),
+        },
+      };
     },
     {
       body: t.Object({

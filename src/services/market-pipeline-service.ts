@@ -1,7 +1,17 @@
-import { redis } from "@db/redis";
+import { redis, redisIsHealthy } from "@db/redis";
 import { SportsService } from "./sports";
 import { broadcastMarketUpdate } from "./socket-service";
 import crypto from "crypto";
+
+/** Safe Redis helper — returns null/undefined instead of throwing when Redis is down */
+async function safeRedisOp<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    if (!redisIsHealthy()) return fallback;
+    return await op();
+  } catch {
+    return fallback;
+  }
+}
 
 const SNAPSHOT_INTERVAL_MS = 10_000; // Write to history stream every 10s max per market
 const lastSnapshotTime = new Map<string, number>();
@@ -153,17 +163,10 @@ export const MarketPipelineService = {
   /** Store in Redis live cache, push history snapshot, broadcast to WS */
   async finalize(eventId: string, markets: any[]) {
     // Store in Redis live cache (10s TTL safety net)
-    try {
-      if (redis.isOpen) {
-        await redis.setEx(
-          `live:markets:${eventId}`,
-          10,
-          JSON.stringify(markets)
-        );
-      }
-    } catch (e) {
-      /* non-critical */
-    }
+    await safeRedisOp(
+      () => redis.setEx(`live:markets:${eventId}`, 10, JSON.stringify(markets)),
+      undefined
+    );
 
     // Push odds snapshot to Redis Stream (throttled + deduped)
     await this.pushOddsSnapshot(eventId, markets);
@@ -191,19 +194,17 @@ export const MarketPipelineService = {
       suspended: false,
       betDelay: 0,
     };
-    try {
-      if (!redis.isOpen) return defaults;
-      const data = await redis.hGetAll(`admin:event:${eventId}`);
-      if (!data || Object.keys(data).length === 0) return defaults;
-      return {
-        isActive: data.isActive !== "false",
-        isVisible: data.isVisible !== "false",
-        suspended: data.suspended === "true",
-        betDelay: data.betDelay ? parseInt(data.betDelay) : 0,
-      };
-    } catch {
-      return defaults;
-    }
+    const data = await safeRedisOp(
+      () => redis.hGetAll(`admin:event:${eventId}`),
+      null
+    );
+    if (!data || Object.keys(data).length === 0) return defaults;
+    return {
+      isActive: data.isActive !== "false",
+      isVisible: data.isVisible !== "false",
+      suspended: data.suspended === "true",
+      betDelay: data.betDelay ? parseInt(data.betDelay) : 0,
+    };
   },
 
   // ── Helper: Batch-load market overrides using Redis pipeline ──
@@ -211,33 +212,29 @@ export const MarketPipelineService = {
     marketIds: string[]
   ): Promise<Map<string, Record<string, string>>> {
     const map = new Map<string, Record<string, string>>();
-    try {
-      if (!redis.isOpen || marketIds.length === 0) return map;
-
+    if (marketIds.length === 0) return map;
+    await safeRedisOp(async () => {
       const pipeline = redis.multi();
       for (const id of marketIds) {
         pipeline.hGetAll(`admin:market:${id}`);
       }
       const results = await pipeline.exec();
-
       marketIds.forEach((id, idx) => {
         const data = results[idx] as Record<string, string> | null;
         if (data && typeof data === "object" && Object.keys(data).length > 0) {
           map.set(id, data);
         }
       });
-    } catch {
-      /* fallback: no overrides applied */
-    }
+    }, undefined);
     return map;
   },
 
   // ── Helper: Load custom markets for an event from Redis ──
   async getCustomMarkets(eventId: string): Promise<any[]> {
     try {
-      if (!redis.isOpen) return [];
-      const customMarketIds = await redis.sMembers(
-        `custom:markets:${eventId}`
+      const customMarketIds = await safeRedisOp(
+        () => redis.sMembers(`custom:markets:${eventId}`),
+        [] as string[]
       );
       if (!customMarketIds || customMarketIds.length === 0) return [];
 
@@ -300,7 +297,7 @@ export const MarketPipelineService = {
   // ── Helper: Push odds to Redis Stream (throttled + deduped) ──
   async pushOddsSnapshot(eventId: string, markets: any[]) {
     try {
-      if (!redis.isOpen) return;
+      if (!redisIsHealthy()) return;
 
       for (const market of markets) {
         const marketId = market.marketId;

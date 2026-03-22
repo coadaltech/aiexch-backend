@@ -83,6 +83,154 @@ export function roleToString(value: UserRole | number): string {
   }
 }
 
+/** Market type — stored in `transactions.market_type`. */
+export enum MarketType {
+  Odds = 0,
+  Bookmaker = 1,
+  Line = 2,
+}
+
+/** Helper: convert a market type string to MarketType number. */
+export function parseMarketType(value: string | null | undefined): MarketType {
+  switch (value?.toLowerCase()) {
+    case "bookmaker":
+    case "bookmakers":
+      return MarketType.Bookmaker;
+    case "line":
+    case "sessions":
+      return MarketType.Line;
+    default:
+      return MarketType.Odds;
+  }
+}
+
+/** Helper: convert MarketType number back to display string. */
+export function marketTypeToString(value: MarketType | number | null): string {
+  switch (value) {
+    case MarketType.Odds:
+      return "odds";
+    case MarketType.Bookmaker:
+      return "bookmaker";
+    case MarketType.Line:
+      return "line";
+    default:
+      return "odds";
+  }
+}
+
+/** Voucher type — stored in `vouchers.type`. */
+export enum VoucherType {
+  Credit = 0,
+  Debit = 1,
+  Limit = 2,
+  Deposit = 3,
+  Withdraw = 4,
+  Bonus = 5,
+  Settlement = 6,
+}
+
+/** Helper: convert a voucher type string to VoucherType number. */
+export function parseVoucherType(value: string): VoucherType {
+  switch (value.toLowerCase()) {
+    case "credit":
+      return VoucherType.Credit;
+    case "debit":
+      return VoucherType.Debit;
+    case "limit":
+      return VoucherType.Limit;
+    case "deposit":
+      return VoucherType.Deposit;
+    case "withdraw":
+      return VoucherType.Withdraw;
+    case "bonus":
+      return VoucherType.Bonus;
+    case "settlement":
+      return VoucherType.Settlement;
+    default:
+      throw new Error(`Invalid voucher type: ${value}`);
+  }
+}
+
+/** Helper: convert VoucherType number back to display string. */
+export function voucherTypeToString(value: VoucherType | number): string {
+  switch (value) {
+    case VoucherType.Credit:
+      return "credit";
+    case VoucherType.Debit:
+      return "debit";
+    case VoucherType.Limit:
+      return "limit";
+    case VoucherType.Deposit:
+      return "deposit";
+    case VoucherType.Withdraw:
+      return "withdraw";
+    case VoucherType.Bonus:
+      return "bonus";
+    case VoucherType.Settlement:
+      return "settlement";
+    default:
+      return "credit";
+  }
+}
+
+/** Voucher status — stored in `vouchers.status`. */
+export enum VoucherStatus {
+  Pending = 0,
+  Approved = 1,
+  Rejected = 2,
+}
+
+/** Helper: convert a voucher status string to VoucherStatus number. */
+export function parseVoucherStatus(value: string): VoucherStatus {
+  switch (value.toLowerCase()) {
+    case "pending":
+      return VoucherStatus.Pending;
+    case "approved":
+      return VoucherStatus.Approved;
+    case "rejected":
+      return VoucherStatus.Rejected;
+    default:
+      return VoucherStatus.Pending;
+  }
+}
+
+/** Helper: convert VoucherStatus number back to display string. */
+export function voucherStatusToString(value: VoucherStatus | number): string {
+  switch (value) {
+    case VoucherStatus.Pending:
+      return "pending";
+    case VoucherStatus.Approved:
+      return "approved";
+    case VoucherStatus.Rejected:
+      return "rejected";
+    default:
+      return "pending";
+  }
+}
+
+/** Debit/Credit direction — stored in `voucher_details.dr_cr`. */
+export enum DrCr {
+  Debit = 0,
+  Credit = 1,
+}
+
+/** Helper: convert a dr/cr string to DrCr number. */
+export function parseDrCr(value: string): DrCr {
+  switch (value.toUpperCase()) {
+    case "DEBIT":
+      return DrCr.Debit;
+    case "CREDIT":
+      return DrCr.Credit;
+    default:
+      throw new Error(`Invalid DrCr value: ${value}`);
+  }
+}
+
+/** Helper: convert DrCr number back to display string. */
+export function drCrToString(value: DrCr | number): string {
+  return value === DrCr.Debit ? "DEBIT" : "CREDIT";
+}
+
 /** Profile membership tier — stored in `profiles.membership`. */
 export enum MembershipType {
   Bronze = 0,
