@@ -288,6 +288,8 @@ export const voucherDetails = pgTable("voucher_details", {
   oppositeUserId: uuid("opposite_user_id"), // the other party's user id
   role: integer("role"), // UserRole enum: 0=owner,3=admin,4=super,5=master,6=agent,7=user
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  voucherType: integer("voucher_type"), // VoucherType enum: same as voucher.type
+  voucherDetailType: integer("voucher_detail_type"), // VoucherType enum: same as voucher.type
   drCr: integer("dr_cr"), // DrCr enum: 0=debit,1=credit
   parentVoucherDetailId: uuid("parent_voucher_detail_id"),
   mondayFinal: boolean("monday_final").default(false),
@@ -919,3 +921,7 @@ export const sportsIndexes = [
   { table: competitions, columns: [competitions.is_active] },
   { table: competitions, columns: [competitions.competition_id] },
 ];
+
+
+
+// refresh token,account statement, domains, sports_games
