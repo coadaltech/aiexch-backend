@@ -189,7 +189,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       const statusInt = parseVoucherStatus(body.status);
       const updateData: Record<string, any> = {
         status: statusInt,
-        updateDate: new Date().toISOString().split("T")[0],
+        updateDate: new Date(),
       };
 
       // Set approvedBy/approvedDate when approving or rejecting

@@ -268,11 +268,12 @@ export const vouchers = pgTable("vouchers", {
   marketId: numeric("market_id"),
   approvedBy: uuid("approved_by"),
   approvedDate: date("approved_date"),
+  voucherDate: date("voucher_date").defaultNow().notNull(),
   // ── Audit ──
   addedBy: uuid("added_by"),
-  addedDate: date("added_date").defaultNow().notNull(),
+  addedDate: timestamp("added_date", { withTimezone: true }).defaultNow().notNull(),
   updateBy: uuid("update_by"),
-  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
+  updateDate: timestamp("update_date", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
@@ -303,11 +304,12 @@ export const voucherDetails = pgTable("voucher_details", {
   isProcessed: boolean("is_processed").default(false).notNull(),
   description: varchar("description", { length: 255 }),
   whitelabelId: uuid("whitelabel_id"),
+  voucherDate: date("voucher_date").defaultNow().notNull(),
   // ── Audit ──
   addedBy: uuid("added_by"),
-  addedDate: date("added_date").defaultNow().notNull(),
+  addedDate: timestamp("added_date", { withTimezone: true }).defaultNow().notNull(),
   updateBy: uuid("update_by"),
-  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
+  updateDate: timestamp("update_date", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
