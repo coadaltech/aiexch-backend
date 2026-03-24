@@ -1,0 +1,118 @@
+-- Drop existing function and procedure before recreating
+DROP FUNCTION IF EXISTS public.get_limituse_of_user_market(uuid, numeric);
+DROP PROCEDURE IF EXISTS set_limit_used_of_user(uuid);
+
+-- Procedure: Recalculates and updates limit_consumed and final_limit in ledger_limit for a user.
+-- Call after every bet placement, cancellation, or settlement.
+CREATE OR REPLACE PROCEDURE set_limit_used_of_user(varuser_id uuid)
+LANGUAGE plpgsql
+AS $a$
+BEGIN
+WITH market_profit AS
+	(SELECT
+	  t.market_id
+      ,td.runner_id
+	  ,sum((case when td.bet_type = 0 then 1 else -1 end)
+	  	*
+		  (case when market_id_runners.runner_id = td.runner_id then
+		  		(case when td.is_user_selection = TRUE then
+					td.potential_return - td.stake
+				  else
+					0
+				  end)
+			else
+				(case when td.is_user_selection = TRUE then
+					0
+				  else
+					- td.stake
+				  end)
+			end)
+	  	) as runner_profit
+    FROM transactions t
+    JOIN transaction_details td
+      ON td.transaction_id = t.id
+	  and COALESCE(t.record_status,0) = 0
+	  and COALESCE(td.record_status,0) = 0
+	left join (SELECT
+      t2.market_id
+      ,td2.runner_id
+		FROM transactions t2
+	    JOIN transaction_details td2
+	      ON td2.transaction_id = t2.id
+		  and COALESCE(t2.record_status,0) = 0
+		  and COALESCE(td2.record_status,0) = 0
+		group by t2.market_id, td2.runner_id
+	) as market_id_runners on market_id_runners.market_id = t.market_id
+    WHERE t.status = 'matched'
+      AND t.market_type <> 4
+      AND t.user_id = varuser_id
+	group by t.market_id, td.runner_id
+	),
+	minlimit_marketid AS
+    (SELECT
+	  mp.market_id
+	  ,min(mp.runner_profit) as limit_use
+      FROM market_profit mp
+      GROUP BY mp.market_id
+	)
+	update ledger_limit set limit_consumed = COALESCE((select -sum(limit_use) from minlimit_marketid),0)
+	where user_id = varuser_id
+	;
+	update ledger_limit set final_limit = COALESCE(user_limit,0) - COALESCE(limit_consumed,0)
+	where user_id = varuser_id
+	;
+END;
+$a$;
+
+
+-- Function: Returns per-runner profit/loss for each market the user has active bets in.
+-- Pass varmarket_id = 0 or NULL to get all markets.
+CREATE OR REPLACE FUNCTION public.get_limituse_of_user_market(varuser_id uuid, varmarket_id numeric)
+ RETURNS TABLE(market_id numeric, runner_id bigint, runner_profit numeric)
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+RETURN QUERY
+	SELECT
+	  t.market_id
+      ,td.runner_id
+	  ,sum((case when td.bet_type = 0 then 1 else -1 end)
+	  	*
+		  (case when market_id_runners.runner_id = td.runner_id then
+		  		(case when td.is_user_selection = TRUE then
+					td.potential_return - td.stake
+				  else
+					0
+				  end)
+			else
+				(case when td.is_user_selection = TRUE then
+					0
+				  else
+					- td.stake
+				  end)
+			end)
+	  	) as runner_profit
+    FROM transactions t
+    JOIN transaction_details td
+      ON td.transaction_id = t.id
+	  and COALESCE(t.record_status,0) = 0
+	  and COALESCE(td.record_status,0) = 0
+	left join (SELECT
+      t2.market_id
+      ,td2.runner_id
+		FROM transactions t2
+	    JOIN transaction_details td2
+	      ON td2.transaction_id = t2.id
+		  and COALESCE(t2.record_status,0) = 0
+		  and COALESCE(td2.record_status,0) = 0
+		group by t2.market_id, td2.runner_id
+	) as market_id_runners on market_id_runners.market_id = t.market_id
+    WHERE t.status = 'matched'
+      AND t.market_type <> 4
+      AND t.user_id = varuser_id
+	  and (t.market_id = varmarket_id or COALESCE(varmarket_id,0) = 0)
+	group by t.market_id, td.runner_id
+	;
+
+END;
+$function$;

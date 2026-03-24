@@ -85,36 +85,61 @@ export function roleToString(value: UserRole | number): string {
 
 /** Market type — stored in `transactions.market_type`. */
 export enum MarketType {
-  Odds = 0,
-  Bookmaker = 1,
-  Line = 2,
+  MatchOdds = 0,
+  TiedMatch = 1,
+  CompleteMatch = 2,
+  Bookmaker = 3,
+  Fancy = 4,
 }
 
-/** Helper: convert a market type string to MarketType number. */
-export function parseMarketType(value: string | null | undefined): MarketType {
-  switch (value?.toLowerCase()) {
+/**
+ * Helper: convert bettingType + marketType strings to MarketType number.
+ * bettingType comes from the external API: "ODDS", "BOOKMAKER", "LINE"
+ * marketType comes from the external API: "MATCH_ODDS", "TIED_MATCH", "COMPLETED_MATCH", etc.
+ * When bettingType is "ODDS", we use marketType to distinguish MatchOdds / TiedMatch / CompleteMatch.
+ */
+export function parseMarketType(
+  bettingType: string | null | undefined,
+  marketType?: string | null | undefined,
+): MarketType {
+  switch (bettingType?.toLowerCase()) {
     case "bookmaker":
     case "bookmakers":
       return MarketType.Bookmaker;
     case "line":
     case "sessions":
-      return MarketType.Line;
-    default:
-      return MarketType.Odds;
+    case "fancy":
+      return MarketType.Fancy;
+    default: {
+      // bettingType is "ODDS" or fallback — check marketType to distinguish
+      switch (marketType?.toUpperCase()) {
+        case "TIED_MATCH":
+          return MarketType.TiedMatch;
+        case "COMPLETED_MATCH":
+        case "COMPLETE_MATCH":
+          return MarketType.CompleteMatch;
+        default:
+          return MarketType.MatchOdds;
+      }
+    }
   }
 }
 
 /** Helper: convert MarketType number back to display string. */
 export function marketTypeToString(value: MarketType | number | null): string {
   switch (value) {
-    case MarketType.Odds:
-      return "odds";
+    case MarketType.MatchOdds:
+      return "match_odds";
+    case MarketType.TiedMatch:
+      return "tied_match";
+    case MarketType.CompleteMatch:
+      return "complete_match";
     case MarketType.Bookmaker:
       return "bookmaker";
-    case MarketType.Line:
-      return "line";
+    case MarketType.Fancy:
+      return "fancy";
     default:
-      return "odds";
+      return "match_odds";
   }
 }
 

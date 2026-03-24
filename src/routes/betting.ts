@@ -33,6 +33,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         selectionName,
         marketName,
         marketType,
+        bettingType,
         eventTypeId,
         competitionId,
         odds,
@@ -47,6 +48,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         selectionName?: string;
         marketName?: string;
         marketType?: string;
+        bettingType?: string;
         eventTypeId?: string | number;
         competitionId?: string | number | null;
         odds: number;
@@ -67,13 +69,13 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Invalid stake or odds values" };
       }
 
-      const marketTypeInt = parseMarketType(marketType);
-      const isLineBet = marketTypeInt === MarketType.Line;
-      if (!runners || runners.length < (isLineBet ? 1 : 2)) {
+      const marketTypeInt = parseMarketType(bettingType || marketType, marketType);
+      const isFancyBet = marketTypeInt === MarketType.Fancy;
+      if (!runners || runners.length < (isFancyBet ? 1 : 2)) {
         set.status = 400;
         return {
           success: false,
-          error: isLineBet ? "Runner is required" : "At least two runners are required",
+          error: isFancyBet ? "Runner is required" : "At least two runners are required",
         };
       }
 
@@ -334,6 +336,9 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return [newTxn];
       });
 
+      // Call procedure to recalculate exposure and update ledger_limit
+      await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+
       set.status = 201;
       return { success: true, transactionId: txn.id };
     } catch (error) {
@@ -425,12 +430,13 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         };
       }
 
-      // Cancel the bet — the ledger exposure will be recalculated by
-      // the next bet placement. A dedicated recalc can be triggered on demand.
       await db
         .update(transactions)
         .set({ status: "cancelled", cancelledAt: new Date().toISOString().split("T")[0] })
         .where(eq(transactions.id, params.transactionId));
+
+      // Recalculate exposure after cancellation
+      await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
 
       set.status = 200;
       return { success: true };
@@ -474,6 +480,23 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     } catch (error) {
       set.status = 500;
       return { success: false, error: "Failed to fetch ledger info" };
+    }
+  })
+
+  // Get per-market exposure for the user (from DB function)
+  // Pass marketId query param to filter by specific market, or omit for all markets
+  .get("/market-exposure", async ({ store, query, set }) => {
+    try {
+      const marketId = query?.marketId ? Number(query.marketId) : 0;
+      const rows = await db.execute(
+        sql`SELECT * FROM get_limituse_of_user_market(${store.id}::uuid, ${marketId}::numeric)`
+      );
+      const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
+      set.status = 200;
+      return { success: true, data };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch market exposure" };
     }
   })
 

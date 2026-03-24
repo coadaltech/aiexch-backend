@@ -488,7 +488,7 @@ export const transactions = pgTable("transactions", {
   matchId: bigint("match_id", { mode: "number" }).notNull(),
   marketId: numeric("market_id").notNull(),
   marketName: varchar("market_name", { length: 255 }),
-  marketType: integer("market_type").default(MarketType.Odds).notNull(), // MarketType enum: 0=odds,1=bookmaker,2=line
+  marketType: integer("market_type").default(MarketType.MatchOdds).notNull(), // MarketType enum: 0=match_odds,1=tied_match,2=complete_match,3=bookmaker,4=fancy
   selectionId: bigint("selection_id", { mode: "number" }).notNull(),
   selectionName: varchar("selection_name", { length: 255 }),
   betType: integer("bet_type").notNull(), // 0=back, 1=lay (BetType enum)
@@ -815,7 +815,7 @@ export const marketSettings = pgTable("market_settings", {
   eventId: bigint("event_id", { mode: "number" }).notNull(),
   marketName: varchar("market_name", { length: 255 }).notNull(),
   marketType: varchar("market_type", { length: 50 }).notNull(),
-  bettingType: integer("betting_type").default(MarketType.Odds).notNull(),
+  bettingType: integer("betting_type").default(MarketType.MatchOdds).notNull(),
   provider: varchar("provider", { length: 50 }).default("API"),
   whitelabelId: uuid("whitelabel_id"),
   isCustom: boolean("is_custom").default(false).notNull(),

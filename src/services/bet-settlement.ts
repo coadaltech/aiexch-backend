@@ -64,7 +64,7 @@ async function fetchAndMapResults(
   const eventTypeIdStr = String(eventTypeId);
 
   try {
-    if (marketType === MarketType.Odds) {
+    if (marketType === MarketType.MatchOdds || marketType === MarketType.TiedMatch || marketType === MarketType.CompleteMatch) {
       const oddsResults = await SportsService.getOddsResults({
         eventTypeId: eventTypeIdStr,
         marketIds,
@@ -107,7 +107,7 @@ async function fetchAndMapResults(
           }
         }
       }
-    } else if (marketType === MarketType.Line) {
+    } else if (marketType === MarketType.Fancy) {
       const sessionResults = await SportsService.getSessionResults({
         eventTypeId: eventTypeIdStr,
         marketIds,
@@ -165,7 +165,7 @@ async function settleMatchBets(
 
     for (const marketType of marketTypes) {
       // Get market IDs for this specific market type
-      const effectiveMarketType = marketType ?? MarketType.Odds;
+      const effectiveMarketType = marketType ?? MarketType.MatchOdds;
 
       const transactionsForMarketType = await db
         .select({ marketId: transactions.marketId })
@@ -271,7 +271,7 @@ export async function checkAndSettleBets(): Promise<void> {
       if (!group.marketIds.includes(bet.marketId)) {
         group.marketIds.push(bet.marketId);
       }
-      group.marketTypes.add(bet.marketType ?? MarketType.Odds);
+      group.marketTypes.add(bet.marketType ?? MarketType.MatchOdds);
     }
 
     // Process each match
