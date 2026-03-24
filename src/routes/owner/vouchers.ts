@@ -20,38 +20,59 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
     return { db: db as DbType, whitelabel };
   })
   .get("/", async ({ set, db }) => {
-    const allVouchers = await db.select().from(vouchers);
+    try {
+      const allVouchers = await db.select().from(vouchers);
 
-    // Fetch amounts from voucher_details (target user row for each voucher)
-    const voucherIds = allVouchers.map((v) => v.id);
-    const details =
-      voucherIds.length > 0
-        ? await db
-            .select({
-              voucherId: voucherDetails.voucherId,
-              amount: voucherDetails.amount,
-            })
-            .from(voucherDetails)
-            .where(inArray(voucherDetails.voucherId, voucherIds))
-        : [];
+      // Fetch amounts from voucher_details (target user row for each voucher)
+      const voucherIds = allVouchers.map((v) => v.id);
+      const details =
+        voucherIds.length > 0
+          ? await db
+              .select({
+                voucherId: voucherDetails.voucherId,
+                amount: voucherDetails.amount,
+              })
+              .from(voucherDetails)
+              .where(inArray(voucherDetails.voucherId, voucherIds))
+          : [];
 
-    // Build a map: voucherId → amount (pick first match per voucher)
-    const amountMap = new Map<string, string>();
-    for (const d of details) {
-      if (d.voucherId && !amountMap.has(d.voucherId)) {
-        amountMap.set(d.voucherId, d.amount ?? "0");
+      // Build a map: voucherId → amount (pick first match per voucher)
+      const amountMap = new Map<string, string>();
+      for (const d of details) {
+        if (d.voucherId && !amountMap.has(d.voucherId)) {
+          amountMap.set(d.voucherId, d.amount ?? "0");
+        }
       }
+
+      // Fetch usernames for all unique userIds
+      const userIds = [...new Set(allVouchers.map((v) => v.userId))];
+      const userRows =
+        userIds.length > 0
+          ? await db
+              .select({ id: users.id, username: users.username })
+              .from(users)
+              .where(inArray(users.id, userIds))
+          : [];
+      const usernameMap = new Map<string, string>();
+      for (const u of userRows) {
+        usernameMap.set(u.id, u.username);
+      }
+
+      const vouchersWithAmount = allVouchers.map((v) => ({
+        ...v,
+        type: voucherTypeToString(v.type),
+        status: voucherStatusToString(v.status),
+        amount: amountMap.get(v.id) ?? "0",
+        username: usernameMap.get(v.userId) ?? "Unknown",
+      }));
+
+      set.status = 200;
+      return { success: true, data: vouchersWithAmount };
+    } catch (err: any) {
+      console.error("Failed to fetch vouchers:", err);
+      set.status = 500;
+      return { success: false, message: "Failed to load vouchers. Please try again." };
     }
-
-    const vouchersWithAmount = allVouchers.map((v) => ({
-      ...v,
-      type: voucherTypeToString(v.type),
-      status: voucherStatusToString(v.status),
-      amount: amountMap.get(v.id) ?? "0",
-    }));
-
-    set.status = 200;
-    return { success: true, data: vouchersWithAmount };
   })
 
   .post(

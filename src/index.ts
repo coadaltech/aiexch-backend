@@ -124,12 +124,12 @@ async function initializeServices() {
   console.log("[Init] Bet settlement started");
 
   // // Step 6: Start sports & competitions sync cron jobs
-  // try {
-  //   await startCronJobs();
-  //   console.log("[Init] Sports/competitions sync cron started");
-  // } catch (e) {
-  //   console.error("[Init] Sports sync cron failed (non-fatal):", e);
-  // }
+  try {
+    await startCronJobs();
+    console.log("[Init] Sports/competitions sync cron started");
+  } catch (e) {
+    console.error("[Init] Sports sync cron failed (non-fatal):", e);
+  }
 
   console.log("[Init] All services ready");
 }

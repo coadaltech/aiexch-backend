@@ -39,6 +39,18 @@ const AVAILABLE_CURRENCIES = [
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
+  // GET endpoints are accessible to all authenticated admin users
+  .get("/", async ({ set }) => {
+    try {
+      const list = await db.select().from(currencies).orderBy(currencies.code);
+      set.status = 200;
+      return { success: true, data: list };
+    } catch (err) {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch currencies" };
+    }
+  })
+  // Owner-only guard for write operations and available list
   .guard({
     beforeHandle({ store, set }) {
       const role = (store as { role?: number }).role;
@@ -51,16 +63,6 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
   .get("/available", async ({ set }) => {
     set.status = 200;
     return { success: true, data: AVAILABLE_CURRENCIES };
-  })
-  .get("/", async ({ set }) => {
-    try {
-      const list = await db.select().from(currencies).orderBy(currencies.code);
-      set.status = 200;
-      return { success: true, data: list };
-    } catch (err) {
-      set.status = 500;
-      return { success: false, error: "Failed to fetch currencies" };
-    }
   })
   .post(
     "/",
