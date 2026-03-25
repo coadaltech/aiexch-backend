@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, betCommissionSnapshot } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions } from "../db/schema";
 // Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
@@ -292,7 +292,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // The first ancestor (closest to user) gets their downline%.
         // Each subsequent ancestor gets: their_downline% - child's_downline%
         // The topmost (Owner) gets whatever remains (100 - last_downline%).
-        const snapshotData: typeof betCommissionSnapshot.$inferInsert = {
+        const snapshotData: typeof transactionCommissions.$inferInsert = {
           transactionId: newTxn.id,
           userId: store.id,
           addedBy: store.id,
@@ -331,7 +331,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           previousDownline = downline;
         }
 
-        await tx.insert(betCommissionSnapshot).values(snapshotData);
+        await tx.insert(transactionCommissions).values(snapshotData);
 
         return [newTxn];
       });
@@ -497,6 +497,23 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     } catch (error) {
       set.status = 500;
       return { success: false, error: "Failed to fetch market exposure" };
+    }
+  })
+
+  // Get per-market exposure for fancy/session markets (market_type = 4)
+  // Returns worst-case P&L per market (not per runner)
+  .get("/market-exposure-fancy", async ({ store, query, set }) => {
+    try {
+      const marketId = query?.marketId ? Number(query.marketId) : 0;
+      const rows = await db.execute(
+        sql`SELECT * FROM get_limituse_of_user_market_fancy(${store.id}::uuid, ${marketId}::numeric)`
+      );
+      const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
+      set.status = 200;
+      return { success: true, data };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch fancy market exposure" };
     }
   })
 

@@ -50,17 +50,6 @@ export const casinoGames = pgTable("casino_games", {
 	unique("casino_games_uuid_unique").on(table.uuid),
 ]);
 
-export const domains = pgTable("domains", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().notNull(),
-	name: varchar({ length: 255 }).notNull(),
-	status: varchar({ length: 20 }).default('active'),
-	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
-}, (table) => [
-	unique("domains_name_unique").on(table.name),
-]);
-
 export const kycDocuments = pgTable("kyc_documents", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().notNull(),
@@ -112,32 +101,6 @@ export const popups = pgTable("popups", {
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 });
-
-export const accountStatements = pgTable("account_statements", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	userId: bigint("user_id", { mode: "number" }).notNull(),
-	statementType: varchar("statement_type", { length: 50 }).default('monthly'),
-	period: varchar({ length: 50 }).notNull(),
-	openingBalance: numeric("opening_balance", { precision: 10, scale:  2 }).notNull(),
-	closingBalance: numeric("closing_balance", { precision: 10, scale:  2 }).notNull(),
-	totalDeposits: numeric("total_deposits", { precision: 10, scale:  2 }).default('0'),
-	totalWithdrawals: numeric("total_withdrawals", { precision: 10, scale:  2 }).default('0'),
-	totalBets: numeric("total_bets", { precision: 10, scale:  2 }).default('0'),
-	totalWinnings: numeric("total_winnings", { precision: 10, scale:  2 }).default('0'),
-	commission: numeric({ precision: 10, scale:  2 }).default('0'),
-	netResult: numeric("net_result", { precision: 10, scale:  2 }).default('0'),
-	status: varchar({ length: 20 }).default('available'),
-	generatedAt: timestamp("generated_at", { mode: 'string' }).defaultNow(),
-	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
-}, (table) => [
-	foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "account_statements_user_id_users_id_fk"
-		}).onDelete("cascade"),
-]);
 
 export const bets = pgTable("bets", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -210,23 +173,6 @@ export const qrCodes = pgTable("qr_codes", {
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 });
-
-export const refreshTokens = pgTable("refresh_tokens", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().notNull(),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	userId: bigint("user_id", { mode: "number" }).notNull(),
-	token: varchar({ length: 255 }).notNull(),
-	expiresAt: timestamp("expires_at", { mode: 'string' }).notNull(),
-	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
-}, (table) => [
-	foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "refresh_tokens_user_id_users_id_fk"
-		}).onDelete("cascade"),
-	unique("refresh_tokens_token_unique").on(table.token),
-]);
 
 export const settings = pgTable("settings", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations

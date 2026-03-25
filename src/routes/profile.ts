@@ -1,6 +1,5 @@
 import { Elysia, t } from "elysia";
 import {
-  accountStatements,
   notifications,
   profiles,
   promocodes,
@@ -311,23 +310,6 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       }),
     }
   )
-
-  // Get user account statements
-  .get("/statements", async ({ query, store, set, db }) => {
-    const whereConditions = [eq(accountStatements.userId, store.id)];
-    if (query.period) {
-      whereConditions.push(eq(accountStatements.period, query.period));
-    }
-
-    const statements = await db
-      .select()
-      .from(accountStatements)
-      .where(and(...whereConditions))
-      .orderBy(accountStatements.generatedAt);
-
-    set.status = 200;
-    return { success: true, data: statements };
-  })
 
   // Create deposit transaction (pending — admin must approve, trigger updates ledger)
   .post(

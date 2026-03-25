@@ -160,7 +160,7 @@ export const publicRoutes = new Elysia({ prefix: "/public" })
       data.theme = JSON.parse(data.theme);
     }
     set.status = 200;
-    return { success: true, data };
+    return { success: true, data: data ?? {} };
   })
 
   .get("/promocodes", async ({ set, db }) => {

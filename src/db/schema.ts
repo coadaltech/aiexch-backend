@@ -84,22 +84,6 @@ export const otps = pgTable("otps", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
-// ── Refresh Tokens ───────────────────────────────────────────────────────────
-export const refreshTokens = pgTable("refresh_tokens", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
-    .notNull(),
-  token: varchar("token", { length: 255 }).notNull().unique(),
-  expiresAt: timestamp("expires_at").notNull(),
-  // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
-});
-
 // ── Promotions ───────────────────────────────────────────────────────────────
 export const promotions = pgTable("promotions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -531,32 +515,6 @@ export const transactionDetails = pgTable("transaction_details", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
-// ── Account Statements ───────────────────────────────────────────────────────
-export const accountStatements = pgTable("account_statements", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
-    .notNull(),
-  statementType: varchar("statement_type", { length: 50 }).default("monthly"),
-  period: varchar("period", { length: 50 }).notNull(),
-  openingBalance: decimal("opening_balance", { precision: 10, scale: 2 }).notNull(),
-  closingBalance: decimal("closing_balance", { precision: 10, scale: 2 }).notNull(),
-  totalDeposits: decimal("total_deposits", { precision: 10, scale: 2 }).default("0"),
-  totalWithdrawals: decimal("total_withdrawals", { precision: 10, scale: 2 }).default("0"),
-  totalBets: decimal("total_bets", { precision: 10, scale: 2 }).default("0"),
-  totalWinnings: decimal("total_winnings", { precision: 10, scale: 2 }).default("0"),
-  commission: decimal("commission", { precision: 10, scale: 2 }).default("0"),
-  netResult: decimal("net_result", { precision: 10, scale: 2 }).default("0"),
-  status: varchar("status", { length: 20 }).default("available"),
-  generatedAt: timestamp("generated_at").defaultNow(),
-  // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
-});
-
 // ── Sports Games ─────────────────────────────────────────────────────────────
 export const sportsGames = pgTable("sports_games", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -581,19 +539,6 @@ export const homeSections = pgTable("home_sections", {
   subtitle: varchar("subtitle", { length: 255 }),
   type: varchar("type", { length: 50 }).notNull().default("games"),
   order: integer("order").default(0),
-  status: varchar("status", { length: 20 }).default("active"),
-  // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
-});
-
-// ── Domains ──────────────────────────────────────────────────────────────────
-export const domains = pgTable("domains", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 255 }).notNull().unique(),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
   addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
@@ -886,8 +831,8 @@ export const marketOddsHistory = pgTable("market_odds_history", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
-// ── Bet Commission Snapshot ──────────────────────────────────────────────────
-export const betCommissionSnapshot = pgTable("bet_commission_snapshot", {
+// ── Transaction Commissions ──────────────────────────────────────────────────
+export const transactionCommissions = pgTable("transaction_commissions", {
   id: uuid("id").primaryKey().defaultRandom(),
   transactionId: uuid("transaction_id")
     .references(() => transactions.id, { onDelete: "cascade" })
@@ -926,4 +871,3 @@ export const sportsIndexes = [
 
 
 
-// refresh token,account statement, domains, sports_games

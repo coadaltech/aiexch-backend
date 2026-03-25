@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { users, kycDocuments, accountStatements, bets, refreshTokens, homeSections, homeSectionGames, profiles, userReadNotifications, notifications } from "./schema";
+import { users, kycDocuments, bets, homeSections, homeSectionGames, profiles, userReadNotifications, notifications } from "./schema";
 
 export const kycDocumentsRelations = relations(kycDocuments, ({one}) => ({
 	user: one(users, {
@@ -10,30 +10,14 @@ export const kycDocumentsRelations = relations(kycDocuments, ({one}) => ({
 
 export const usersRelations = relations(users, ({many}) => ({
 	kycDocuments: many(kycDocuments),
-	accountStatements: many(accountStatements),
 	bets: many(bets),
-	refreshTokens: many(refreshTokens),
 	profiles: many(profiles),
 	userReadNotifications: many(userReadNotifications),
-}));
-
-export const accountStatementsRelations = relations(accountStatements, ({one}) => ({
-	user: one(users, {
-		fields: [accountStatements.userId],
-		references: [users.id]
-	}),
 }));
 
 export const betsRelations = relations(bets, ({one}) => ({
 	user: one(users, {
 		fields: [bets.userId],
-		references: [users.id]
-	}),
-}));
-
-export const refreshTokensRelations = relations(refreshTokens, ({one}) => ({
-	user: one(users, {
-		fields: [refreshTokens.userId],
 		references: [users.id]
 	}),
 }));
