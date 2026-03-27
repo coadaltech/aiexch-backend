@@ -18,6 +18,7 @@ import { withdrawalMethodsRoutes } from "./withdrawal-methods";
 import { casinoGamesOwnerRoutes } from "./casino-games";
 import { currenciesRoutes } from "./currencies";
 import { marketManagementRoutes } from "./market-management";
+import { matkaOwnerRoutes } from "./matka";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .state({ id: "", role: 0 as number })
@@ -52,3 +53,4 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(casinoGamesOwnerRoutes)
   .use(currenciesRoutes)
   .use(marketManagementRoutes)
+  .use(matkaOwnerRoutes)

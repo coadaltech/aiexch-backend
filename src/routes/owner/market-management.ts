@@ -182,6 +182,33 @@ export const marketManagementRoutes = new Elysia({
   //  CUSTOM MARKETS
   // ═══════════════════════════════════════════════════════════
 
+  // GET /owner/market-management/custom-markets — list all custom markets with search/filter
+  .get(
+    "/custom-markets",
+    async ({ query, set }) => {
+      try {
+        const data = await AdminMarketService.listCustomMarkets({
+          search: query.search,
+          status: (query.status as "active" | "inactive" | "all") || "all",
+          limit: query.limit ? parseInt(query.limit) : 50,
+          offset: query.offset ? parseInt(query.offset) : 0,
+        });
+        return { success: true, data };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to list custom markets" };
+      }
+    },
+    {
+      query: t.Object({
+        search: t.Optional(t.String()),
+        status: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
+      }),
+    }
+  )
+
   // POST /owner/market-management/custom-markets
   .post(
     "/custom-markets",
@@ -256,6 +283,46 @@ export const marketManagementRoutes = new Elysia({
       }
     },
     { params: t.Object({ marketId: t.String() }) }
+  )
+
+  // PUT /owner/market-management/custom-markets/:marketId — edit custom market details
+  .put(
+    "/custom-markets/:marketId",
+    async ({ params, body, set }) => {
+      try {
+        const result = await AdminMarketService.updateCustomMarketDetails(
+          params.marketId,
+          body
+        );
+        if (!result.success) {
+          set.status = 400;
+          return result;
+        }
+        return { success: true, data: result };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to update custom market" };
+      }
+    },
+    {
+      params: t.Object({ marketId: t.String() }),
+      body: t.Object({
+        marketName: t.Optional(t.String()),
+        bettingType: t.Optional(t.String()),
+        minBet: t.Optional(t.Number()),
+        maxBet: t.Optional(t.Number()),
+        betDelay: t.Optional(t.Number()),
+        isActive: t.Optional(t.Boolean()),
+        runners: t.Optional(
+          t.Array(
+            t.Object({
+              selectionId: t.Optional(t.Number()),
+              name: t.String(),
+            })
+          )
+        ),
+      }),
+    }
   )
 
   // PUT /owner/market-management/custom-markets/:marketId/odds

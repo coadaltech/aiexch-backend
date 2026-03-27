@@ -7,7 +7,7 @@ import {
   customMarketOdds,
   users,
 } from "@db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
 import { parseMarketType, marketTypeToString } from "../types/enums";
 import { SportsService } from "./sports";
 import dummysports from "../dummy/sportsevents.json";
@@ -477,6 +477,233 @@ export const AdminMarketService = {
     }
 
     return { success: true };
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  //  LIST CUSTOM MARKETS (with search & filters)
+  // ═══════════════════════════════════════════════════════════
+
+  async listCustomMarkets(params: {
+    search?: string;
+    status?: "active" | "inactive" | "all";
+    limit?: number;
+    offset?: number;
+  }) {
+    const conditions = [eq(marketSettings.isCustom, true)];
+
+    if (params.status === "active") {
+      conditions.push(eq(marketSettings.isActive, true));
+    } else if (params.status === "inactive") {
+      conditions.push(eq(marketSettings.isActive, false));
+    }
+
+    const limit = Math.min(params.limit || 50, 200);
+    const offset = params.offset || 0;
+
+    // Base query for custom markets
+    let query = db
+      .select()
+      .from(marketSettings)
+      .where(and(...conditions))
+      .orderBy(desc(marketSettings.addedDate))
+      .limit(limit)
+      .offset(offset);
+
+    let markets = await query;
+
+    // If search query provided, also search by event name and runner names
+    if (params.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+
+      // Get all custom markets with their event names and runner names
+      const allCustomMarkets = await db
+        .select()
+        .from(marketSettings)
+        .where(and(...conditions))
+        .orderBy(desc(marketSettings.addedDate));
+
+      // Get event names for these markets
+      const eventIds = [...new Set(allCustomMarkets.map((m) => m.eventId))];
+      const eventRows =
+        eventIds.length > 0
+          ? await db
+              .select({ eventId: events.eventId, name: events.name })
+              .from(events)
+              .where(
+                or(...eventIds.map((eid) => eq(events.eventId, eid)))
+              )
+          : [];
+      const eventNameMap = new Map(
+        eventRows.map((e) => [e.eventId, e.name])
+      );
+
+      // Get runner names for these markets
+      const marketIds = allCustomMarkets.map((m) => m.marketId);
+      const runners =
+        marketIds.length > 0
+          ? await db
+              .select({
+                marketId: runnerSettings.marketId,
+                name: runnerSettings.name,
+              })
+              .from(runnerSettings)
+              .where(
+                or(
+                  ...marketIds.map((mid) => eq(runnerSettings.marketId, mid))
+                )
+              )
+          : [];
+      const runnerNameMap = new Map<string, string[]>();
+      for (const r of runners) {
+        const existing = runnerNameMap.get(r.marketId) || [];
+        existing.push(r.name);
+        runnerNameMap.set(r.marketId, existing);
+      }
+
+      // Filter by search across market name, event name, runner names, event ID
+      const filtered = allCustomMarkets.filter((m) => {
+        const marketName = m.marketName.toLowerCase();
+        const eventName = (eventNameMap.get(m.eventId) || "").toLowerCase();
+        const runnerNames = (runnerNameMap.get(m.marketId) || [])
+          .join(" ")
+          .toLowerCase();
+        const eventIdStr = String(m.eventId);
+
+        return (
+          marketName.includes(q) ||
+          eventName.includes(q) ||
+          runnerNames.includes(q) ||
+          eventIdStr.includes(q)
+        );
+      });
+
+      markets = filtered.slice(offset, offset + limit);
+    }
+
+    // Enrich markets with event names and runners
+    const enrichedMarkets = await Promise.all(
+      markets.map(async (m) => {
+        const eventRow = await db
+          .select({ name: events.name })
+          .from(events)
+          .where(eq(events.eventId, m.eventId))
+          .limit(1);
+
+        const runners = await db
+          .select()
+          .from(runnerSettings)
+          .where(eq(runnerSettings.marketId, m.marketId));
+
+        return {
+          ...m,
+          eventName: eventRow[0]?.name || `Event ${m.eventId}`,
+          runners,
+        };
+      })
+    );
+
+    return enrichedMarkets;
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  //  UPDATE CUSTOM MARKET DETAILS
+  // ═══════════════════════════════════════════════════════════
+
+  async updateCustomMarketDetails(
+    marketId: string,
+    data: {
+      marketName?: string;
+      bettingType?: string;
+      minBet?: number;
+      maxBet?: number;
+      betDelay?: number;
+      isActive?: boolean;
+      runners?: { selectionId?: number; name: string }[];
+    }
+  ) {
+    // Check market exists and is custom
+    const market = await db
+      .select()
+      .from(marketSettings)
+      .where(
+        and(
+          eq(marketSettings.marketId, marketId),
+          eq(marketSettings.isCustom, true)
+        )
+      )
+      .limit(1);
+
+    if (market.length === 0) {
+      return { success: false, error: "Custom market not found" };
+    }
+
+    // Update market settings
+    const updateFields: any = {};
+    if (data.marketName !== undefined) updateFields.marketName = data.marketName;
+    if (data.bettingType !== undefined)
+      updateFields.bettingType = parseMarketType(data.bettingType, "CUSTOM");
+    if (data.minBet !== undefined) updateFields.minBet = String(data.minBet);
+    if (data.maxBet !== undefined) updateFields.maxBet = String(data.maxBet);
+    if (data.betDelay !== undefined) updateFields.betDelay = data.betDelay;
+    if (data.isActive !== undefined) updateFields.isActive = data.isActive;
+
+    if (Object.keys(updateFields).length > 0) {
+      await db
+        .update(marketSettings)
+        .set(updateFields)
+        .where(eq(marketSettings.marketId, marketId));
+    }
+
+    // Update runner names if provided
+    if (data.runners) {
+      for (const runner of data.runners) {
+        if (runner.selectionId) {
+          await db
+            .update(runnerSettings)
+            .set({ name: runner.name })
+            .where(
+              and(
+                eq(runnerSettings.marketId, marketId),
+                eq(runnerSettings.selectionId, runner.selectionId)
+              )
+            );
+
+          // Update runner name in Redis too
+          if (redis.isOpen) {
+            const existingJson = await redis.hGet(
+              `custom:odds:${marketId}`,
+              String(runner.selectionId)
+            );
+            if (existingJson) {
+              const current = JSON.parse(existingJson);
+              current.name = runner.name;
+              await redis.hSet(
+                `custom:odds:${marketId}`,
+                String(runner.selectionId),
+                JSON.stringify(current)
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // Sync updated fields to Redis
+    if (redis.isOpen) {
+      const hash: Record<string, string> = {};
+      if (data.marketName) hash.marketName = data.marketName;
+      if (data.bettingType) hash.bettingType = data.bettingType;
+      if (data.minBet !== undefined) hash.minBet = String(data.minBet);
+      if (data.maxBet !== undefined) hash.maxBet = String(data.maxBet);
+      if (data.betDelay !== undefined) hash.betDelay = String(data.betDelay);
+      if (data.isActive !== undefined) hash.isActive = String(data.isActive);
+
+      if (Object.keys(hash).length > 0) {
+        await redis.hSet(`admin:market:${marketId}`, hash);
+      }
+    }
+
+    return { success: true, marketId };
   },
 
   // ═══════════════════════════════════════════════════════════

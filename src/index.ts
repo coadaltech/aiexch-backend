@@ -15,9 +15,10 @@ import { startBetSettlementService } from "./services/bet-settlement";
 import { AdminMarketService } from "@services/admin-market-service";
 import { OddsHistoryWorker } from "@services/odds-history-worker";
 import { seriesRoutes } from "./routes/series-route";
+import { matkaRoutes } from "./routes/matka";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
-import { startCronJobs } from "@db/seed";
+import { startCronJobs, ensureSystemUser } from "@db/seed";
 import { gamesRoutes } from "@routes/dashboard/games-routes";
 import { competitions, whitelabels } from "@db/schema";
 import { db } from "./db";
@@ -86,6 +87,7 @@ const app = new Elysia()
   .use(casinoCallbackRoutes)
   .use(casinoGamesRoutes)
   .use(websocketRoutes)
+  .use(matkaRoutes)
   .listen(port);
 
 
@@ -95,6 +97,10 @@ console.log(`Server is running on http://localhost:${port}`);
 // Initialize ALL services BEFORE accepting real traffic
 // This runs async but the server is already listening for health checks
 async function initializeServices() {
+  // Step 0: Ensure the "system" user exists (used as default for audit columns)
+  await ensureSystemUser();
+  console.log("[Init] System user ensured");
+
   // Step 1: Connect Redis (non-blocking — app works without it via in-memory cache)
   await connectRedis();
   console.log("[Init] Redis connection attempted");
@@ -124,12 +130,12 @@ async function initializeServices() {
   console.log("[Init] Bet settlement started");
 
   // // Step 6: Start sports & competitions sync cron jobs
-  try {
-    await startCronJobs();
-    console.log("[Init] Sports/competitions sync cron started");
-  } catch (e) {
-    console.error("[Init] Sports sync cron failed (non-fatal):", e);
-  }
+  // try {
+  //   await startCronJobs();
+  //   console.log("[Init] Sports/competitions sync cron started");
+  // } catch (e) {
+  //   console.error("[Init] Sports sync cron failed (non-fatal):", e);
+  // }
 
   console.log("[Init] All services ready");
 }

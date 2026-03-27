@@ -1,6 +1,8 @@
 import { db } from "./index";
-import { sports, competitions } from "./schema";
+import { sports, competitions, users, SYSTEM_USER_ID } from "./schema";
 import { eq } from "drizzle-orm";
+import { UserRole } from "../types/enums";
+import { generateHashPassword } from "../utils/password";
 import cron from "node-cron";
 
 // API Configuration
@@ -101,7 +103,7 @@ const upsertSport = async (sportData: any) => {
       name: sportName,
       is_active: false,
       sort_order: sportData.sortOrder || sportData.sort_order || 0,
-      updateBy: "system",
+      updateBy: SYSTEM_USER_ID,
       updateDate: new Date(),
     };
 
@@ -117,7 +119,7 @@ const upsertSport = async (sportData: any) => {
     } else {
       await db.insert(sports).values({
         ...sportToSave,
-        addedBy: "system",
+        addedBy: SYSTEM_USER_ID,
         addedDate: new Date(),
       });
       operationType = "added";
@@ -171,9 +173,9 @@ const upsertCompetition = async (compData: any, sportId: number) => {
       is_active: false,
       is_archived: competition.isArchived || compData.isArchived || false,
       metadata: competition.metadata || compData.metadata || {},
-      addedBy: "system",
+      addedBy: SYSTEM_USER_ID,
       addedDate: new Date(),
-      updateBy: "system",
+      updateBy: SYSTEM_USER_ID,
       updateDate: new Date(),
     });
 
@@ -311,6 +313,37 @@ const syncCompetitions = async () => {
       errors: 1,
     };
   }
+};
+
+// ── System User Bootstrap ────────────────────────────────────────────────────
+/** Ensures the "system" user row exists (used as default for audit columns). */
+export const ensureSystemUser = async () => {
+  const existing = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, SYSTEM_USER_ID))
+    .limit(1);
+
+  if (existing.length > 0) {
+    console.log("[Seed] System user already exists");
+    return;
+  }
+
+  const hashedPassword = await generateHashPassword("system-no-login-" + Date.now());
+  await db.insert(users).values({
+    id: SYSTEM_USER_ID,
+    username: "system",
+    email: "system@internal",
+    password: hashedPassword,
+    role: UserRole.Owner,
+    groupId: UserRole.Owner,
+    accountStatus: false, // cannot login
+    emailVerified: false,
+    addedBy: SYSTEM_USER_ID,
+    updateBy: SYSTEM_USER_ID,
+  });
+
+  console.log("[Seed] System user created with ID:", SYSTEM_USER_ID);
 };
 
 // Cron Jobs

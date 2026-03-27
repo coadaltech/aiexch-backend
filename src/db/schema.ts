@@ -16,6 +16,9 @@ import {
 } from "drizzle-orm/pg-core";
 import { RecordStatus, BetType, UserRole, MembershipType, VoucherType, VoucherStatus, DrCr, MarketType } from "../types/enums";
 
+/** Fixed UUID for the "system" user — used as default for all audit columns. */
+export const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
+
 export const whitelabelTypeEnum = pgEnum("whitelabel_type", ["B2B", "B2C"]);
 
 // ── Users ────────────────────────────────────────────────────────────────────
@@ -30,10 +33,11 @@ export const users = pgTable("users", {
   accountStatus: boolean("account_status").default(true).notNull(),
   parentAccountStatus: boolean("parent_account_status").default(true).notNull(),
   emailVerified: boolean("email_verified").default(false),
+  createdBy: uuid("created_by"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -61,9 +65,9 @@ export const casino_games = pgTable("casino_games", {
     .notNull()
     .default(0),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -77,9 +81,9 @@ export const otps = pgTable("otps", {
   expiresAt: timestamp("expires_at").notNull(),
   used: boolean("used").default(false),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -93,9 +97,9 @@ export const promotions = pgTable("promotions", {
   imageUrl: text("image_url"),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -112,9 +116,9 @@ export const promocodes = pgTable("promocodes", {
   validTo: timestamp("valid_to"),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -129,9 +133,9 @@ export const banners = pgTable("banners", {
   order: integer("order").default(0),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -144,9 +148,9 @@ export const popups = pgTable("popups", {
   targetPage: varchar("target_page", { length: 100 }).notNull(),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -225,9 +229,9 @@ export const whitelabels = pgTable("whitelabels", {
     })
   ),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -308,9 +312,9 @@ export const kycDocuments = pgTable("kyc_documents", {
   status: varchar("status", { length: 20 }).default("pending"),
   reviewNotes: text("review_notes"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -339,9 +343,9 @@ export const profiles = pgTable("profiles", {
   lastLoginIp: varchar("last_login_ip", { length: 45 }),
   lastLoginAt: timestamp("last_login_at"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -390,9 +394,9 @@ export const settings = pgTable("settings", {
     "We are currently performing scheduled maintenance. Please check back soon."
   ),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -402,9 +406,9 @@ export const ledgerGroups = pgTable("ledger_groups", {
   ledgerGroupsid: serial("ledger_group_id").primaryKey().notNull(),
   ledgerGroupsname: varchar("ledger_group_name", { length: 100 }).notNull(),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -417,9 +421,9 @@ export const notifications = pgTable("notifications", {
   type: varchar("type", { length: 50 }).default("info"),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -436,9 +440,9 @@ export const userReadNotifications = pgTable("user_read_notifications", {
   isRead: boolean("is_read").default(true),
   readAt: timestamp("read_at").defaultNow(),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -453,9 +457,9 @@ export const qrCodes = pgTable("qr_codes", {
   instructions: text("instructions"),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -525,9 +529,9 @@ export const sportsGames = pgTable("sports_games", {
   marketCount: integer("market_count").default(0),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -541,9 +545,9 @@ export const homeSections = pgTable("home_sections", {
   order: integer("order").default(0),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -562,9 +566,9 @@ export const homeSectionGames = pgTable("home_section_games", {
   order: integer("order").default(0),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -583,9 +587,9 @@ export const withdrawalMethods = pgTable("withdrawal_methods", {
   instructions: text("instructions"),
   status: varchar("status", { length: 20 }).default("active"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -598,9 +602,9 @@ export const sports = pgTable("sports", {
   is_active: boolean("is_active").default(true),
   sort_order: integer("sort_order").default(0),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -616,9 +620,9 @@ export const competitions = pgTable("competitions", {
   is_archived: boolean("is_archived").default(false),
   metadata: jsonb("metadata").default({}),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -631,9 +635,9 @@ export const currencies = pgTable("currencies", {
   countryName: varchar("country_name", { length: 100 }).notNull(),
   value: decimal("value", { precision: 18, scale: 6 }).notNull().default("1"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -646,9 +650,9 @@ export const currencyValueHistory = pgTable("currency_value_history", {
     .notNull(),
   value: decimal("value", { precision: 18, scale: 6 }).notNull(),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -676,9 +680,9 @@ export const userLoginLogs = pgTable("user_login_logs", {
   logoutAt: timestamp("logout_at"),
   sessionDurationSeconds: integer("session_duration_seconds"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -704,9 +708,9 @@ export const transactionLogs = pgTable("transaction_logs", {
   country: varchar("country", { length: 100 }),
   city: varchar("city", { length: 100 }),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -723,9 +727,9 @@ export const ledgerLimit = pgTable("ledger_limit", {
   limitConsumedAfterDeclare: decimal("limit_consumed_after_declare", { precision: 15, scale: 2 }).default("0").notNull(),
   finalLimit: decimal("final_limit", { precision: 15, scale: 2 }).default("0").notNull(),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -746,9 +750,9 @@ export const events = pgTable("events", {
   maxMarketProfit: decimal("max_market_profit", { precision: 15, scale: 2 }),
   metadata: jsonb("metadata").default({}),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -775,9 +779,9 @@ export const marketSettings = pgTable("market_settings", {
   sortPriority: integer("sort_priority").default(0),
   metadata: jsonb("metadata").default({}),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -793,9 +797,9 @@ export const runnerSettings = pgTable("runner_settings", {
   isVisible: boolean("is_visible").default(true).notNull(),
   metadata: jsonb("metadata").default({}),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -809,9 +813,9 @@ export const customMarketOdds = pgTable("custom_market_odds", {
   layPrices: jsonb("lay_prices").$type<{ price: number; size: number }[]>().default([]),
   line: decimal("line", { precision: 10, scale: 2 }),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -824,9 +828,9 @@ export const marketOddsHistory = pgTable("market_odds_history", {
   snapshot: jsonb("snapshot").notNull(),
   capturedAt: timestamp("captured_at").notNull(),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
@@ -851,9 +855,78 @@ export const transactionCommissions = pgTable("transaction_commissions", {
   ownerId: uuid("owner_id"),
   ownerPercent: decimal("owner_percent", { precision: 5, scale: 2 }).default("0"),
   // ── Audit ──
-  addedBy: varchar("added_by", { length: 50 }).default("system").notNull(),
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: varchar("update_by", { length: 50 }).default("system").notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Matka Shifts ────────────────────────────────────────────────────────────
+export const matkaShifts = pgTable("matka_shifts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 100 }).notNull(),
+  shiftDate: date("shift_date").notNull(),
+  endTime: varchar("end_time", { length: 30 }).notNull(),        // e.g. "14:00"
+  shiftOrder: integer("shift_order").default(0).notNull(),
+  daraRate: decimal("dara_rate", { precision: 10, scale: 2 }).default("0").notNull(),
+  daraCommission: decimal("dara_commission", { precision: 10, scale: 2 }).default("0").notNull(),
+  akharRate: decimal("akhar_rate", { precision: 10, scale: 2 }).default("0").notNull(),
+  akharCommission: decimal("akhar_commission", { precision: 10, scale: 2 }).default("0").notNull(),
+  mainJantriTime: varchar("main_jantri_time", { length: 30 }),
+  result: integer("result"),                                      // winning number (null = not declared)
+  isActive: boolean("is_active").default(true).notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Matka Transactions (header) ─────────────────────────────────────────────
+export const matkaTransactions = pgTable("matka_transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  shiftId: uuid("shift_id")
+    .references(() => matkaShifts.id, { onDelete: "cascade" })
+    .notNull(),
+  transactionDate: date("transaction_date").notNull(),
+  daraRate: decimal("dara_rate", { precision: 10, scale: 2 }).notNull(),
+  daraCommission: decimal("dara_commission", { precision: 10, scale: 2 }).notNull(),
+  akharRate: decimal("akhar_rate", { precision: 10, scale: 2 }).notNull(),
+  akharCommission: decimal("akhar_commission", { precision: 10, scale: 2 }).notNull(),
+  totalAmount: decimal("total_amount", { precision: 15, scale: 2 }).default("0").notNull(),
+  totalCommission: decimal("total_commission", { precision: 15, scale: 2 }).default("0").notNull(),
+  finalAmount: decimal("final_amount", { precision: 15, scale: 2 }).default("0").notNull(),
+  deviceType: varchar("device_type", { length: 10 }).default("WEB").notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Matka Transaction Details (individual number bets) ──────────────────────
+export const matkaTransactionDetails = pgTable("matka_transaction_details", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id")
+    .references(() => matkaTransactions.id, { onDelete: "cascade" })
+    .notNull(),
+  numberType: integer("number_type").notNull(),                   // 1=main(1-100), 2=akhar(A0-A9), 3=akhar(B0-B9)
+  number: varchar("number", { length: 4 }).notNull(),             // "1"-"100" or "A0"-"A9" or "B0"-"B9"
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  rate: decimal("rate", { precision: 10, scale: 2 }).notNull(),
+  commission: decimal("commission", { precision: 10, scale: 2 }).default("0").notNull(),
+  finalAmount: decimal("final_amount", { precision: 15, scale: 2 }).notNull(),
+  orderNumber: integer("order_number").default(0).notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
