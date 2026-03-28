@@ -18,7 +18,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     try {
       const dateFilter = query?.date || new Date().toISOString().split("T")[0];
 
-      const shifts = await db
+      // Get shifts for the requested date
+      const todayShifts = await db
         .select()
         .from(matkaShifts)
         .where(
@@ -30,7 +31,36 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         )
         .orderBy(matkaShifts.shiftOrder);
 
-      return { success: true, data: shifts };
+      // Also get yesterday's shifts that have nextDayAllow enabled
+      // (they extend into today, e.g. end time 3 AM means tomorrow 3 AM)
+      const yesterday = new Date(dateFilter);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+      const carryOverShifts = await db
+        .select()
+        .from(matkaShifts)
+        .where(
+          and(
+            eq(matkaShifts.isActive, true),
+            eq(matkaShifts.recordStatus, RecordStatus.Active),
+            eq(matkaShifts.shiftDate, yesterdayStr),
+            eq(matkaShifts.nextDayAllow, true)
+          )
+        )
+        .orderBy(matkaShifts.shiftOrder);
+
+      // Filter carry-over shifts: only include if the end time hasn't passed yet today
+      const now = new Date();
+      const activeCarryOvers = carryOverShifts.filter((s) => {
+        if (!s.endTime) return false;
+        const [h, m] = s.endTime.split(":").map(Number);
+        const endToday = new Date(dateFilter);
+        endToday.setHours(h, m, 0, 0);
+        return now < endToday;
+      });
+
+      return { success: true, data: [...activeCarryOvers, ...todayShifts] };
     } catch (error) {
       set.status = 500;
       return {
@@ -152,9 +182,43 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
           const shiftTime = new Date(shift.shiftDate);
           shiftTime.setHours(hours, minutes, 0, 0);
+          // If nextDayAllow is true, the cutoff extends to the next day
+          if (shift.nextDayAllow) {
+            shiftTime.setDate(shiftTime.getDate() + 1);
+          }
           if (now > shiftTime) {
             set.status = 400;
             return { success: false, error: "Shift betting time has closed" };
+          }
+        }
+
+        // Check capping (user bet limit per shift)
+        const cappingLimit = Number(shift.capping);
+        if (cappingLimit > 0) {
+          // Get total amount already bet by this user on this shift
+          const [existing] = await db
+            .select({
+              total: sql<string>`COALESCE(SUM(CAST(${matkaTransactions.totalAmount} AS NUMERIC)), 0)`,
+            })
+            .from(matkaTransactions)
+            .where(
+              and(
+                eq(matkaTransactions.userId, store.id),
+                eq(matkaTransactions.shiftId, shiftId),
+                eq(matkaTransactions.recordStatus, RecordStatus.Active)
+              )
+            );
+
+          const alreadyBet = Number(existing?.total ?? 0);
+          const newBetTotal = bets.reduce((sum, b) => sum + b.amount, 0);
+
+          if (alreadyBet + newBetTotal > cappingLimit) {
+            set.status = 400;
+            const remaining = Math.max(0, cappingLimit - alreadyBet);
+            return {
+              success: false,
+              error: `Bet limit exceeded. Shift cap: ${cappingLimit}, already bet: ${alreadyBet}, remaining: ${remaining}`,
+            };
           }
         }
 

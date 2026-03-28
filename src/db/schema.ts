@@ -876,6 +876,8 @@ export const matkaShifts = pgTable("matka_shifts", {
   mainJantriTime: varchar("main_jantri_time", { length: 30 }),
   result: integer("result"),                                      // winning number (null = not declared)
   isActive: boolean("is_active").default(true).notNull(),
+  nextDayAllow: boolean("next_day_allow").default(false).notNull(),
+  capping: decimal("capping", { precision: 15, scale: 2 }).default("0").notNull(),  // 0 = no limit
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

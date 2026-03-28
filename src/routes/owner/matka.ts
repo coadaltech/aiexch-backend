@@ -36,19 +36,29 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
     "/shifts",
     async ({ body, set, store }) => {
       try {
+        // Auto-increment order: get the max shiftOrder for active shifts
+        const [maxOrder] = await db
+          .select({ max: sql<number>`COALESCE(MAX(${matkaShifts.shiftOrder}), 0)` })
+          .from(matkaShifts)
+          .where(eq(matkaShifts.recordStatus, RecordStatus.Active));
+
+        const nextOrder = (maxOrder?.max ?? 0) + 1;
+
         const [shift] = await db
           .insert(matkaShifts)
           .values({
             name: body.name,
             shiftDate: body.shiftDate,
             endTime: body.endTime,
-            shiftOrder: body.shiftOrder ?? 0,
-            daraRate: String(body.daraRate ?? 0),
+            shiftOrder: nextOrder,
+            daraRate: String(body.daraRate ?? 100),
             daraCommission: String(body.daraCommission ?? 0),
-            akharRate: String(body.akharRate ?? 0),
+            akharRate: String(body.akharRate ?? 10),
             akharCommission: String(body.akharCommission ?? 0),
             mainJantriTime: body.mainJantriTime || null,
             isActive: body.isActive ?? true,
+            nextDayAllow: body.nextDayAllow ?? false,
+            capping: String(body.capping ?? 0),
             addedBy: (store as any).id || SYSTEM_USER_ID,
             updateBy: (store as any).id || SYSTEM_USER_ID,
           })
@@ -69,13 +79,53 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         name: t.String({ minLength: 1, maxLength: 100 }),
         shiftDate: t.String(),
         endTime: t.String(),
-        shiftOrder: t.Optional(t.Number()),
         daraRate: t.Optional(t.Number()),
         daraCommission: t.Optional(t.Number()),
         akharRate: t.Optional(t.Number()),
         akharCommission: t.Optional(t.Number()),
         mainJantriTime: t.Optional(t.String()),
         isActive: t.Optional(t.Boolean()),
+        nextDayAllow: t.Optional(t.Boolean()),
+        capping: t.Optional(t.Number()),
+      }),
+    }
+  )
+
+  // ── Reorder shifts (bulk update order) ──────────────────────────────────
+  // NOTE: must be before /shifts/:id to avoid path conflict
+  .put(
+    "/shifts/reorder",
+    async ({ body, set, store }) => {
+      try {
+        const updates = body.orders.map((item) =>
+          db
+            .update(matkaShifts)
+            .set({
+              shiftOrder: item.shiftOrder,
+              updateBy: (store as any).id || SYSTEM_USER_ID,
+            })
+            .where(eq(matkaShifts.id, item.id))
+        );
+
+        await Promise.all(updates);
+
+        return { success: true };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to reorder shifts",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        orders: t.Array(
+          t.Object({
+            id: t.String(),
+            shiftOrder: t.Number(),
+          })
+        ),
       }),
     }
   )
@@ -109,6 +159,8 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         if (body.akharCommission !== undefined) updateData.akharCommission = String(body.akharCommission);
         if (body.mainJantriTime !== undefined) updateData.mainJantriTime = body.mainJantriTime;
         if (body.isActive !== undefined) updateData.isActive = body.isActive;
+        if (body.nextDayAllow !== undefined) updateData.nextDayAllow = body.nextDayAllow;
+        if (body.capping !== undefined) updateData.capping = String(body.capping);
 
         const [updated] = await db
           .update(matkaShifts)
@@ -137,6 +189,8 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         akharCommission: t.Optional(t.Number()),
         mainJantriTime: t.Optional(t.String()),
         isActive: t.Optional(t.Boolean()),
+        nextDayAllow: t.Optional(t.Boolean()),
+        capping: t.Optional(t.Number()),
       }),
     }
   )

@@ -31,6 +31,13 @@ export function addAllowedOrigin(domain: string) {
   dynamicOrigins.add(`https://${bare}`);
   dynamicOrigins.add(`http://${bare}`);
   console.log(`[CORS] Added origin: https://${bare}`);
+
+  // Also add www variant if not already prefixed with www
+  if (!bare.startsWith("www.")) {
+    dynamicOrigins.add(`https://www.${bare}`);
+    dynamicOrigins.add(`http://www.${bare}`);
+    console.log(`[CORS] Added origin: https://www.${bare}`);
+  }
 }
 
 /**
@@ -43,4 +50,9 @@ export function removeAllowedOrigin(domain: string) {
   dynamicOrigins.delete(`https://${bare}`);
   dynamicOrigins.delete(`http://${bare}`);
   console.log(`[CORS] Removed origin: https://${bare}`);
+
+  if (!bare.startsWith("www.")) {
+    dynamicOrigins.delete(`https://www.${bare}`);
+    dynamicOrigins.delete(`http://www.${bare}`);
+  }
 }
