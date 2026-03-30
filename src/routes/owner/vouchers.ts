@@ -119,7 +119,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
       const voucherType = parseVoucherType(body.type);
       const voucherStatus = parseVoucherStatus(body.status || "approved");
-      const isDebit = body.amountType === "withdraw" || body.type === "debit" || body.type === "withdraw";
+      const isDebit = body.method === "admin_deposit" || body.type === "debit" || body.type === "withdraw";
       const isLimitVoucher = body.type === "limit";
 
       // For limit voucher withdrawals, validate user has enough finalLimit
@@ -223,7 +223,6 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
         userId: t.String(),
         type: t.String(), // limit | credit | debit | deposit | withdraw | bonus
         amount: t.String(),
-        amountType: t.Optional(t.String()), // "deposit" | "withdraw" — overrides dr/cr direction
         status: t.Optional(t.String()),
         remarks: t.Optional(t.String()),
         method: t.Optional(t.String()),
