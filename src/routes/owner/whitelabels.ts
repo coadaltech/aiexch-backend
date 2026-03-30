@@ -91,7 +91,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
           faviconUrl = await uploadFile(body.favicon, key);
         }
 
-        const config = body.config ? JSON.parse(body.config) : {};
+        const config = body.config && body.config !== "undefined" ? JSON.parse(body.config) : {};
         if (!config.dbName) {
           config.dbName = body.name.toLowerCase().replace(/\s+/g, "_");
         }

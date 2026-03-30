@@ -119,7 +119,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
       const voucherType = parseVoucherType(body.type);
       const voucherStatus = parseVoucherStatus(body.status || "approved");
-      const isDebit = body.type === "debit" || body.type === "withdraw";
+      const isDebit = body.amountType === "withdraw" || body.type === "debit" || body.type === "withdraw";
 
       // Insert voucher (no amount — amounts go in voucher_details only)
       // If status is 'approved' and voucher_details are inserted,
@@ -193,6 +193,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
         userId: t.String(),
         type: t.String(), // limit | credit | debit | deposit | withdraw | bonus
         amount: t.String(),
+        amountType: t.Optional(t.String()), // "deposit" | "withdraw" — overrides dr/cr direction
         status: t.Optional(t.String()),
         remarks: t.Optional(t.String()),
         method: t.Optional(t.String()),
