@@ -137,7 +137,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         userBalance: "0",
         userLimit: "0",
         limitConsumed: "0",
-        limitConsumedAfterDeclare: "0",
+        fixLimit: "0",
         finalLimit: "0",
         addedBy: addedBy || SYSTEM_USER_ID,
         updateBy: addedBy || SYSTEM_USER_ID,
@@ -260,6 +260,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         balance: ledger?.userBalance ?? "0.00",
         userLimit: ledger?.userLimit ?? "0.00",
         limitConsumed: ledger?.limitConsumed ?? "0.00",
+        fixLimit: ledger?.fixLimit ?? "0.00",
         finalLimit: ledger?.finalLimit ?? "0.00",
       });
     }
@@ -320,6 +321,8 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         betStatus: profile?.betStatus ?? true,
         parentBetStatus: profile?.parentBetStatus ?? true,
         balance: ledger?.userBalance ?? "0.00",
+        fixLimit: ledger?.fixLimit ?? "0.00",
+        finalLimit: ledger?.finalLimit ?? "0.00",
         firstName: profile?.firstName || null,
         lastName: profile?.lastName || null,
         phone: profile?.phone || null,
@@ -329,6 +332,27 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     }
     set.status = 200;
     return { success: true, data: result };
+  }, {
+    params: t.Object({ id: t.String() }),
+  })
+
+  .get("/:id/ledger", async ({ params, set, db }) => {
+    const [ledger] = await db
+      .select({
+        fixLimit: ledgerLimit.fixLimit,
+        finalLimit: ledgerLimit.finalLimit,
+        userLimit: ledgerLimit.userLimit,
+        limitConsumed: ledgerLimit.limitConsumed,
+        userBalance: ledgerLimit.userBalance,
+      })
+      .from(ledgerLimit)
+      .where(eq(ledgerLimit.userId, params.id));
+    if (!ledger) {
+      set.status = 404;
+      return { success: false, message: "Ledger not found" };
+    }
+    set.status = 200;
+    return { success: true, data: ledger };
   }, {
     params: t.Object({ id: t.String() }),
   })

@@ -1,0 +1,1 @@
+ALTER TABLE "ledger_limit" RENAME COLUMN "limit_consumed_after_declare" TO "fix_limit";

@@ -724,7 +724,7 @@ export const ledgerLimit = pgTable("ledger_limit", {
   userBalance: decimal("user_balance", { precision: 15, scale: 2 }).default("0").notNull(),
   userLimit: decimal("user_limit", { precision: 15, scale: 2 }).default("0").notNull(),
   limitConsumed: decimal("limit_consumed", { precision: 15, scale: 2 }).default("0").notNull(),
-  limitConsumedAfterDeclare: decimal("limit_consumed_after_declare", { precision: 15, scale: 2 }).default("0").notNull(),
+  fixLimit: decimal("fix_limit", { precision: 15, scale: 2 }).default("0").notNull(),
   finalLimit: decimal("final_limit", { precision: 15, scale: 2 }).default("0").notNull(),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),

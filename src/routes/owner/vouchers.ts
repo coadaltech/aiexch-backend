@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
-import { vouchers, voucherDetails, users } from "../../db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { vouchers, voucherDetails, users, ledgerLimit } from "../../db/schema";
+import { eq, inArray, sql } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import {
@@ -120,6 +120,23 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       const voucherType = parseVoucherType(body.type);
       const voucherStatus = parseVoucherStatus(body.status || "approved");
       const isDebit = body.amountType === "withdraw" || body.type === "debit" || body.type === "withdraw";
+      const isLimitVoucher = body.type === "limit";
+
+      // For limit voucher withdrawals, validate user has enough finalLimit
+      if (isLimitVoucher && isDebit) {
+        const [ledger] = await db
+          .select({ finalLimit: ledgerLimit.finalLimit })
+          .from(ledgerLimit)
+          .where(eq(ledgerLimit.userId, body.userId));
+        const currentFinalLimit = parseFloat(ledger?.finalLimit ?? "0");
+        if (currentFinalLimit < amount) {
+          set.status = 400;
+          return {
+            success: false,
+            message: `Insufficient final limit. User's final limit is ${currentFinalLimit.toFixed(2)} but requested ${amount.toFixed(2)}`,
+          };
+        }
+      }
 
       // Insert voucher (no amount — amounts go in voucher_details only)
       // If status is 'approved' and voucher_details are inserted,
@@ -173,6 +190,19 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
             whitelabelId: user.whitelabelId,
             description: body.type + " voucher - " + (isDebit ? "credit to" : "debit from") + " source",
           });
+        }
+
+        // Update fixLimit for limit vouchers
+        if (isLimitVoucher) {
+          if (isDebit) {
+            await tx.update(ledgerLimit)
+              .set({ fixLimit: sql`${ledgerLimit.fixLimit} - ${body.amount}::numeric` })
+              .where(eq(ledgerLimit.userId, body.userId));
+          } else {
+            await tx.update(ledgerLimit)
+              .set({ fixLimit: sql`${ledgerLimit.fixLimit} + ${body.amount}::numeric` })
+              .where(eq(ledgerLimit.userId, body.userId));
+          }
         }
 
         return voucher;
