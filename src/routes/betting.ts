@@ -266,7 +266,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
               1 AS depth
             FROM users u
             JOIN profiles p ON p.user_id = u.id
-            WHERE u.id::text = (SELECT added_by FROM users WHERE id = ${store.id})
+            WHERE u.id = (SELECT added_by FROM users WHERE id = ${store.id})
 
             UNION ALL
 
@@ -276,7 +276,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
               p2.downline::DECIMAL(5,2),
               h.depth + 1
             FROM hierarchy h
-            JOIN users u2 ON u2.id::text = (SELECT added_by FROM users WHERE id = h.ancestor_id)
+            JOIN users u2 ON u2.id = (SELECT added_by FROM users WHERE id = h.ancestor_id)
             JOIN profiles p2 ON p2.user_id = u2.id
             WHERE h.depth < 10
               AND u2.id IS NOT NULL
