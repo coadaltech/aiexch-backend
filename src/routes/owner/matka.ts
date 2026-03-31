@@ -2,9 +2,17 @@ import { Elysia, t } from "elysia";
 import { db } from "../../db";
 import { matkaShifts, matkaTransactions, matkaTransactionDetails, SYSTEM_USER_ID } from "../../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { RecordStatus } from "../../types/enums";
+import { RecordStatus, UserRole } from "../../types/enums";
 
 export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
+  .guard({
+    beforeHandle({ store, set }) {
+      if ((store as any).role !== UserRole.Owner) {
+        set.status = 403;
+        return { success: false, message: "Owner access only" };
+      }
+    },
+  })
 
   // ── List all shifts (with optional date filter) ───────────────────────────
   .get("/shifts", async ({ set, query }) => {

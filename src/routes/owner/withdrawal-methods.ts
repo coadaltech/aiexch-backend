@@ -4,6 +4,7 @@ import { withdrawalMethods } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
+import { UserRole } from "../../types/enums";
 
 export const withdrawalMethodsRoutes = new Elysia({
   prefix: "/withdrawal-methods",
@@ -11,6 +12,21 @@ export const withdrawalMethodsRoutes = new Elysia({
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
+  })
+  .guard({
+    beforeHandle({ store, set, whitelabel }: any) {
+      if (store.role === UserRole.Owner) {
+        set.status = 403;
+        return { success: false, message: "Withdrawal Methods are managed by whitelabel admins, not the owner" };
+      }
+      const wlType = whitelabel?.whitelabelType
+        ? String(whitelabel.whitelabelType).toUpperCase()
+        : null;
+      if (wlType !== "B2C") {
+        set.status = 403;
+        return { success: false, message: "Withdrawal Methods are only available for B2C whitelabels" };
+      }
+    },
   })
   .get("/", async ({ set, db }) => {
     const methods = await db.select().from(withdrawalMethods);

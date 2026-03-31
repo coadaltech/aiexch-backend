@@ -4,11 +4,28 @@ import { eq } from "drizzle-orm";
 import { uploadFile, deleteFile } from "../../services/s3";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
+import { UserRole } from "../../types/enums";
 
 export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
+  })
+  // QR Codes: only for non-owner users on B2C whitelabels
+  .guard({
+    beforeHandle({ store, set, whitelabel }: any) {
+      if (store.role === UserRole.Owner) {
+        set.status = 403;
+        return { success: false, message: "QR Codes are managed by whitelabel admins, not the owner" };
+      }
+      const wlType = whitelabel?.whitelabelType
+        ? String(whitelabel.whitelabelType).toUpperCase()
+        : null;
+      if (wlType !== "B2C") {
+        set.status = 403;
+        return { success: false, message: "QR Codes are only available for B2C whitelabels" };
+      }
+    },
   })
   // 🟢 Get all QR Codes
   .get("/", async ({ set, db }) => {

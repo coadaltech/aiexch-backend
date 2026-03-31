@@ -13,6 +13,7 @@ import {
   uuid,
   serial,
   numeric,
+  unique,
 } from "drizzle-orm/pg-core";
 import { RecordStatus, BetType, UserRole, MembershipType, VoucherType, VoucherStatus, DrCr, MarketType } from "../types/enums";
 
@@ -626,6 +627,24 @@ export const competitions = pgTable("competitions", {
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
+
+// ── Competition Whitelabel Overrides ─────────────────────────────────────────
+// Per-whitelabel visibility override for competitions.
+// When a row exists with is_active=false, that competition is hidden for that whitelabel.
+export const competitionWhitelabelOverrides = pgTable("competition_whitelabel_overrides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  competitionId: bigint("competition_id", { mode: "number" }).notNull(),
+  whitelabelId: uuid("whitelabel_id").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+}, (table) => [
+  unique("uq_competition_whitelabel").on(table.competitionId, table.whitelabelId),
+]);
 
 // ── Currencies ───────────────────────────────────────────────────────────────
 export const currencies = pgTable("currencies", {

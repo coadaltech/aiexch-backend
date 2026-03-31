@@ -172,7 +172,15 @@ export const publicRoutes = new Elysia({ prefix: "/public" })
     return { success: true, data };
   })
 
-  .get("/qrcodes", async ({ set, db }) => {
+  .get("/qrcodes", async ({ set, db, whitelabel }) => {
+    // QR codes are only available for B2C whitelabels
+    const wlType = whitelabel?.whitelabelType
+      ? String(whitelabel.whitelabelType).toUpperCase()
+      : null;
+    if (wlType !== "B2C") {
+      set.status = 200;
+      return { success: true, data: [] };
+    }
     const data = await db
       .select()
       .from(qrCodes)
@@ -215,7 +223,15 @@ export const publicRoutes = new Elysia({ prefix: "/public" })
     return { success: true, data };
   })
 
-  .get("/withdrawal-methods", async ({ set, db }) => {
+  .get("/withdrawal-methods", async ({ set, db, whitelabel }) => {
+    // Withdrawal methods are only available for B2C whitelabels
+    const wlType = whitelabel?.whitelabelType
+      ? String(whitelabel.whitelabelType).toUpperCase()
+      : null;
+    if (wlType !== "B2C") {
+      set.status = 200;
+      return { success: true, data: [] };
+    }
     const data = await db
       .select()
       .from(withdrawalMethods)

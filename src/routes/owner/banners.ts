@@ -4,8 +4,17 @@ import { eq } from "drizzle-orm";
 import { uploadFile, deleteFile } from "../../services/s3";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
+import { UserRole } from "../../types/enums";
 
 export const bannersRoutes = new Elysia({ prefix: "/banners" })
+  .guard({
+    beforeHandle({ store, set }) {
+      if ((store as any).role !== UserRole.Owner) {
+        set.status = 403;
+        return { success: false, message: "Owner access only" };
+      }
+    },
+  })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
