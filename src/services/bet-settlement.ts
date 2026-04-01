@@ -220,7 +220,7 @@ export async function checkAndSettleBets(): Promise<void> {
 
     // Get all matched transactions that haven't been settled
     // Check only transactions that haven't been checked recently (within last day)
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const unsettledBets = await db
       .select({
@@ -283,7 +283,7 @@ export async function checkAndSettleBets(): Promise<void> {
         // Update resultCheckedAt to prevent duplicate checks
         await db
           .update(transactions)
-          .set({ resultCheckedAt: new Date().toISOString().split("T")[0] })
+          .set({ resultCheckedAt: new Date() })
           .where(
             and(
               eq(transactions.matchId, group.matchId),

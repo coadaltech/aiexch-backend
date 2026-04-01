@@ -486,15 +486,15 @@ export const transactions = pgTable("transactions", {
   status: varchar("status", { length: 20 }).default("matched"), // matched | won | lost | cancelled | void
   settledAmount: decimal("settled_amount", { precision: 15, scale: 2 }),
   ipAddress: varchar("ip_address", { length: 45 }),
-  matchedAt: date("matched_at"),
-  settledAt: date("settled_at"),
-  cancelledAt: date("cancelled_at"),
-  resultCheckedAt: date("result_checked_at"),
+  matchedAt: timestamp("matched_at"),
+  settledAt: timestamp("settled_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  resultCheckedAt: timestamp("result_checked_at"),
   // ── Audit ──
   addedBy: uuid("added_by").notNull(),
-  addedDate: date("added_date").defaultNow().notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: uuid("update_by").notNull(),
-  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
@@ -514,9 +514,9 @@ export const transactionDetails = pgTable("transaction_details", {
   potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
   // ── Audit ──
   addedBy: uuid("added_by").notNull(),
-  addedDate: date("added_date").defaultNow().notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
   updateBy: uuid("update_by").notNull(),
-  updateDate: date("update_date").defaultNow().$onUpdate(() => new Date().toISOString().split("T")[0]).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 

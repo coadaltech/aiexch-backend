@@ -49,7 +49,7 @@ const initializeBettingProcessor = () => {
         // This processor just confirms the matched status.
         await db
           .update(transactions)
-          .set({ status: "matched", matchedAt: new Date().toISOString().split("T")[0] })
+          .set({ status: "matched", matchedAt: new Date() })
           .where(eq(transactions.id, betId));
 
         return { success: true, betId };
@@ -96,7 +96,7 @@ const initializeResultProcessor = () => {
             .update(transactions)
             .set({
               status: newStatus,
-              settledAt: new Date().toISOString().split("T")[0],
+              settledAt: new Date(),
               settledAmount: isWinner
                 ? (
                     parseFloat(bet.stake || "0") * parseFloat(bet.odds || "0")

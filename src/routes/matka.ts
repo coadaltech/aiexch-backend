@@ -135,8 +135,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   // ── Protected routes ──────────────────────────────────────────────────────
   .state({ id: "" as string, role: 0 as number })
   .guard({
-    beforeHandle({ cookie, set, store }) {
-      const state_result = app_middleware({ cookie });
+    beforeHandle({ cookie, headers, set, store }) {
+      const state_result = app_middleware({ cookie, headers });
       set.status = state_result.code;
       if (!state_result.data) return state_result;
       store.id = state_result.data.id;

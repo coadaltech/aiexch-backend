@@ -239,6 +239,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         set.status = 200;
         return {
           success: true,
+          accessToken,
+          refreshToken,
           user: {
             id: user.id,
             username: user.username,
@@ -361,8 +363,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
   )
 
-  .post("/refresh", async ({ cookie, set, db }) => {
-    const refreshToken = cookie.refreshToken?.value as string;
+  .post("/refresh", async ({ cookie, body, set, db }) => {
+    // Accept refreshToken from body (cross-domain/Safari) or fall back to cookie
+    const refreshToken = (body as any)?.refreshToken || cookie.refreshToken?.value as string;
 
     if (!refreshToken) {
       set.status = 401;
@@ -412,7 +415,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       });
 
       set.status = 200;
-      return { success: true };
+      // Return tokens in body so frontend can set them as first-party cookies
+      return { success: true, accessToken, refreshToken: newRefreshToken };
     } catch (error) {
       set.status = 401;
       return { success: false, message: "Invalid refresh token" };

@@ -4,6 +4,7 @@ import { RoleType } from "../types";
 
 interface ElysiaMiddlewareType {
   cookie: Record<string, Cookie<string | undefined | unknown>>;
+  headers?: Record<string, string | undefined>;
   allowed?: number[];
 }
 
@@ -27,8 +28,12 @@ export const authenticate_jwt = (access_token: string) => {
   }
 };
 
-export const app_middleware = ({ cookie, allowed }: ElysiaMiddlewareType) => {
-  let access_token = String(cookie.accessToken);
+export const app_middleware = ({ cookie, headers, allowed }: ElysiaMiddlewareType) => {
+  // Prefer Authorization header (works cross-domain on Safari), fall back to cookie
+  const authHeader = headers?.authorization;
+  const tokenFromHeader = authHeader?.replace(/^Bearer\s+/i, "").trim();
+  const tokenFromCookie = String(cookie.accessToken ?? "");
+  const access_token = tokenFromHeader || tokenFromCookie;
 
   if (!access_token) {
     return {

@@ -12,8 +12,8 @@ import { parseBetType, UserRole, MarketType, parseMarketType, marketTypeToString
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
   .state({ id: "" as string, role: 0 as number })
   .guard({
-    beforeHandle({ cookie, set, store }) {
-      const state_result = app_middleware({ cookie });
+    beforeHandle({ cookie, headers, set, store }) {
+      const state_result = app_middleware({ cookie, headers });
 
       set.status = state_result.code;
       if (!state_result.data) return state_result;
@@ -188,7 +188,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       }
 
       // ── STEP 3: Insert bet + details in a single transaction ──
-      const today = new Date().toISOString().split("T")[0];
+      const today = new Date();
       const numericSelectionId = Number(selectionId);
 
       const [txn] = await db.transaction(async (tx) => {
@@ -288,10 +288,19 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
         const ancestors = Array.isArray(hierarchyRows) ? hierarchyRows : (hierarchyRows as any)?.rows || [];
 
-        // Calculate each level's commission share from the downline chain
-        // The first ancestor (closest to user) gets their downline%.
-        // Each subsequent ancestor gets: their_downline% - child's_downline%
-        // The topmost (Owner) gets whatever remains (100 - last_downline%).
+        // Calculate each level's commission share from the downline chain.
+        // Each person's downline% is the CUMULATIVE share flowing to that level and below.
+        // So each level keeps: their_downline% - their_child's_downline%
+        // Owner keeps: 100% - the highest non-owner downline%
+        //
+        // Example: Owner → Admin(downline=85) → User
+        //   Admin gets: 85 - 0 = 85%
+        //   Owner gets: 100 - 85 = 15%
+        //
+        // Example: Owner → Admin(85) → Agent(70) → User
+        //   Agent gets: 70 - 0 = 70%
+        //   Admin gets: 85 - 70 = 15%
+        //   Owner gets: 100 - 85 = 15%
         const snapshotData: typeof transactionCommissions.$inferInsert = {
           transactionId: newTxn.id,
           userId: store.id,
@@ -299,16 +308,14 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           updateBy: store.id,
         };
 
-        let previousDownline = 100; // start from 100% (user's full loss/win)
+        let previousDownline = 0; // start from 0 (bottom of chain, below the first ancestor)
         for (let i = 0; i < ancestors.length; i++) {
           const row = ancestors[i];
           const role = Number(row.ancestor_role);
           const downline = parseFloat(row.downline ?? "0");
 
-          // This ancestor's share = previousDownline - downline they passed down
-          // For the closest ancestor: share = 100 - their downline (what they keep)
-          // Actually: each ancestor gave `downline%` to their child, so they keep (previousDownline - downline)
-          const share = previousDownline - downline;
+          // Each non-Owner level keeps: their downline% - child's downline%
+          const share = downline - previousDownline;
 
           if (role === UserRole.Agent) {
             snapshotData.agentId = row.ancestor_id;
@@ -323,9 +330,9 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             snapshotData.adminId = row.ancestor_id;
             snapshotData.adminPercent = Math.max(share, 0).toFixed(2);
           } else if (role === UserRole.Owner) {
-            // Owner gets everything that remains
+            // Owner gets whatever remains above the last non-owner downline
             snapshotData.ownerId = row.ancestor_id;
-            snapshotData.ownerPercent = Math.max(previousDownline, 0).toFixed(2);
+            snapshotData.ownerPercent = Math.max(100 - previousDownline, 0).toFixed(2);
           }
 
           previousDownline = downline;
@@ -432,7 +439,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       await db
         .update(transactions)
-        .set({ status: "cancelled", cancelledAt: new Date().toISOString().split("T")[0] })
+        .set({ status: "cancelled", cancelledAt: new Date() })
         .where(eq(transactions.id, params.transactionId));
 
       // Recalculate exposure after cancellation

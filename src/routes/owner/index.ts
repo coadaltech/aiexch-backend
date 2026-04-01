@@ -19,13 +19,15 @@ import { casinoGamesOwnerRoutes } from "./casino-games";
 import { currenciesRoutes } from "./currencies";
 import { marketManagementRoutes } from "./market-management";
 import { matkaOwnerRoutes } from "./matka";
+import { liveMarketsRoutes } from "./live-markets";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .state({ id: "", role: 0 as number })
   .guard({
-    beforeHandle({ cookie, set, store }) {
+    beforeHandle({ cookie, headers, set, store }) {
       const state_result = app_middleware({
         cookie,
+        headers,
         allowed: [UserRole.Owner, UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent],
       });
 
@@ -54,3 +56,4 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(currenciesRoutes)
   .use(marketManagementRoutes)
   .use(matkaOwnerRoutes)
+  .use(liveMarketsRoutes)
