@@ -60,19 +60,21 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
       const userRole = (store as { role: number }).role;
 
       const result = await db.execute(sql`
-        WITH non_fancy AS (
-          SELECT h.market_id, MIN(h.runner_profit) AS pnl
+        WITH
+        -- All non-fancy runner rows (per runner, no aggregation)
+        non_fancy_pnl AS (
+          SELECT h.market_id, h.runner_id, h.runner_profit AS pnl
           FROM public.get_hissa_of_group(${userId}::uuid, NULL::numeric, ${userRole}::int) h
-          GROUP BY h.market_id
         ),
-        fancy AS (
-          SELECT h.market_id, h.runner_profit AS pnl
+        -- Fancy markets
+        fancy_pnl AS (
+          SELECT h.market_id, NULL::bigint AS runner_id, h.runner_profit AS pnl
           FROM public.get_hissa_of_group_fancy(${userId}::uuid, NULL::numeric, ${userRole}::int) h
         ),
         all_pnl AS (
-          SELECT market_id, pnl FROM non_fancy
+          SELECT market_id, runner_id, pnl FROM non_fancy_pnl
           UNION ALL
-          SELECT market_id, pnl FROM fancy
+          SELECT market_id, runner_id, pnl FROM fancy_pnl
         ),
         market_meta AS (
           SELECT DISTINCT ON (t.market_id)
@@ -91,7 +93,6 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
             AND COALESCE(t.record_status, 0) = 0
           ORDER BY t.market_id
         ),
-        -- Aggregate all distinct team names from selection_name on Match Odds markets
         match_teams AS (
           SELECT
             match_id,
@@ -102,10 +103,25 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
             AND selection_name <> ''
             AND COALESCE(record_status, 0) = 0
           GROUP BY match_id
+        ),
+        -- Runner names from transaction_details (joined to transactions for market_id)
+        runner_names AS (
+          SELECT DISTINCT ON (t.market_id, td.runner_id)
+            t.market_id, td.runner_id, td.runner_name
+          FROM transaction_details td
+          JOIN transactions t ON t.id = td.transaction_id
+          WHERE t.status = 'matched'
+            AND COALESCE(t.record_status, 0) = 0
+            AND COALESCE(td.record_status, 0) = 0
+            AND td.runner_name IS NOT NULL
+            AND td.runner_name <> ''
+          ORDER BY t.market_id, td.runner_id
         )
         SELECT
           p.market_id,
+          p.runner_id,
           p.pnl,
+          r.runner_name,
           m.event_type_id,
           m.match_id,
           m.market_name,
@@ -115,8 +131,10 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
           m.competition_name
         FROM all_pnl p
         LEFT JOIN market_meta  m  ON m.market_id  = p.market_id
+        LEFT JOIN runner_names r  ON r.market_id  = p.market_id
+                                 AND r.runner_id  = p.runner_id
         LEFT JOIN match_teams  mt ON mt.match_id  = m.match_id
-        ORDER BY m.match_id NULLS LAST, p.market_id
+        ORDER BY m.match_id NULLS LAST, p.market_id, p.runner_id NULLS LAST
       `);
 
       const rows = Array.isArray(result) ? result : (result as any)?.rows ?? [];
