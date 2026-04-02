@@ -343,6 +343,7 @@ export const profiles = pgTable("profiles", {
   currencyId: uuid("currency_id"),
   lastLoginIp: varchar("last_login_ip", { length: 45 }),
   lastLoginAt: timestamp("last_login_at"),
+  stakeSettings: jsonb("stake_settings"), // Array of { label: string, value: number }
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

@@ -196,26 +196,95 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }
   )
 
+  // Get stake settings
+  .get("/stake-settings", async ({ store, set, db }) => {
+    const DEFAULT_STAKES = [
+      { label: "100",       value: 100     },
+      { label: "500",       value: 500     },
+      { label: "1,000",     value: 1000    },
+      { label: "5,000",     value: 5000    },
+      { label: "10,000",    value: 10000   },
+      { label: "50,000",    value: 50000   },
+      { label: "1,00,000",  value: 100000  },
+      { label: "5,00,000",  value: 500000  },
+      { label: "10,00,000", value: 1000000 },
+    ];
+    try {
+      const [profile] = await db
+        .select({ stakeSettings: profiles.stakeSettings })
+        .from(profiles)
+        .where(eq(profiles.userId, store.id))
+        .limit(1);
+      const stakes = profile?.stakeSettings as any[] | null;
+      set.status = 200;
+      return { success: true, data: stakes && stakes.length > 0 ? stakes : DEFAULT_STAKES };
+    } catch {
+      set.status = 200;
+      return { success: true, data: DEFAULT_STAKES };
+    }
+  })
+
+  // Save stake settings
+  .put("/stake-settings", async ({ store, set, db, body }) => {
+    const stakes = (body as any)?.stakes;
+    if (!Array.isArray(stakes) || stakes.length === 0) {
+      set.status = 400;
+      return { success: false, error: "Invalid stakes array" };
+    }
+    // Validate each entry
+    const validated = stakes.slice(0, 9).map((s: any) => ({
+      label: String(s.label ?? "").slice(0, 20),
+      value: Math.max(0, Math.floor(Number(s.value) || 0)),
+    }));
+    await db
+      .update(profiles)
+      .set({ stakeSettings: validated, updateBy: store.id, updateDate: new Date() })
+      .where(eq(profiles.userId, store.id));
+    set.status = 200;
+    return { success: true, data: validated };
+  })
+
   // Get user transactions (queries vouchers table but endpoint name remains "transactions" for user-facing API)
   .get("/transactions", async ({ query, store, set, db }) => {
-    const { vouchers } = await import("../db/schema");
-
     let whereConditions = [eq(vouchers.userId, store.id)];
 
     if (query.type && query.type !== "all") {
       whereConditions.push(eq(vouchers.type, parseVoucherType(query.type)));
     }
 
-    const queryBuilder = db
-      .select()
+    const rows = await db
+      .select({
+        id: vouchers.id,
+        type: vouchers.type,
+        status: vouchers.status,
+        method: vouchers.method,
+        reference: vouchers.reference,
+        remarks: vouchers.remarks,
+        remarks1: vouchers.remarks1,
+        approvedDate: vouchers.approvedDate,
+        voucherDate: vouchers.voucherDate,
+        addedDate: vouchers.addedDate,
+        amount: voucherDetails.amount,
+        drCr: voucherDetails.drCr,
+        proofImage: voucherDetails.proofImage,
+      })
       .from(vouchers)
-      .where(and(...whereConditions));
+      .leftJoin(
+        voucherDetails,
+        and(
+          eq(voucherDetails.voucherId, vouchers.id),
+          eq(voucherDetails.userId, store.id),
+        )
+      )
+      .where(and(...whereConditions))
+      .orderBy(desc(vouchers.addedDate));
 
-    const userTransactions = await queryBuilder.orderBy(vouchers.addedDate);
-    const mapped = userTransactions.map((v) => ({
+    const mapped = rows.map((v) => ({
       ...v,
       type: voucherTypeToString(v.type),
       status: voucherStatusToString(v.status),
+      amount: v.amount ?? "0",
+      isCredit: v.drCr === DrCr.Credit,
     }));
     set.status = 200;
     return { success: true, data: mapped };

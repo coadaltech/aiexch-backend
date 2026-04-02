@@ -16,7 +16,7 @@ interface EventState {
 
 const activeEvents = new Map<string, EventState>();
 
-const POLL_INTERVAL_MS = 250; // 250ms (4x per second)
+const POLL_INTERVAL_MS = 330; // 250ms (4x per second)
 
 export const LiveDataService = {
   subscribe(clientId: string, send: SendFn, eventId: string, eventTypeId: string) {

@@ -519,6 +519,13 @@
       "when": 1775033003194,
       "tag": "0073_awesome_young_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1775123300054,
+      "tag": "0074_steady_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }

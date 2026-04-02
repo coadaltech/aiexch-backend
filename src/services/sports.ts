@@ -525,6 +525,8 @@ export const SportsService = {
         `/sports/events/${eventId}`,
       );
 
+      console.log("markets from api",response.data.catalogues)
+
       const catalogues = Array.isArray(response.data?.catalogues)
         ? response.data.catalogues
         : [];
