@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { UserRole } from "../types/enums";
 import { generateHashPassword } from "../utils/password";
 import cron from "node-cron";
+import { syncAllActiveCompetitionEvents } from "../services/event-sync-service";
 
 // API Configuration
 const API_BASE_URL = "https://api.aiexch.com/sports-proxy/sports";
@@ -370,12 +371,23 @@ export const startCronJobs = async () => {
     { timezone: "UTC" },
   );
 
-  console.log("[Seed] Cron jobs started: Sports daily 00:00 UTC, Competitions every 12h");
+  // Events: every 30 minutes — sync events for all active competitions
+  cron.schedule(
+    "*/30 * * * *",
+    () => {
+      console.log("[Seed] Running scheduled events sync...");
+      syncAllActiveCompetitionEvents();
+    },
+    { timezone: "UTC" },
+  );
+
+  console.log("[Seed] Cron jobs started: Sports daily 00:00 UTC, Competitions every 12h, Events every 30m");
 
   // Run initial sync immediately
   console.log("[Seed] Running initial sync...");
   await syncSports();
   await syncCompetitions();
+  await syncAllActiveCompetitionEvents();
   console.log("[Seed] Initial sync completed!");
 };
 

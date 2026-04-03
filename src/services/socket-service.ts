@@ -8,8 +8,9 @@ const eventSubscriptions = new Map<string, Set<any>>();
 const socketSubscriptions = new Map<any, Set<string>>();
 
 export const initSocket = () => {
-  // Start cron job
-  MarketCronService.init();
+  // NOTE: MarketCronService is no longer started here.
+  // LiveDataService handles polling per-event at 330ms when subscribers are present.
+  // Running both caused duplicate external API calls and doubled Redis writes.
   console.log("✅ WebSocket service initialized");
 };
 

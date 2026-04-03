@@ -4,6 +4,7 @@ import { sportsGames } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { SportsService } from "../services/sports";
 import { getAvailableSportsList } from "../services/sports-service";
+import { whitelabel_middleware } from "../middleware/whitelabel";
 
 export const sportsRoutes = new Elysia({ prefix: "/sports" })
   .get("/", async ({ set }) => {
@@ -96,11 +97,14 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
       return { success: false, error: "Failed to fetch score" };
     }
   })
-  .get("/series/:eventTypeId", async ({ params, set }) => {
+  .get("/series/:eventTypeId", async ({ params, set, request }) => {
     try {
+      const { whitelabel } = await whitelabel_middleware(request);
+      const whitelabelId = whitelabel?.id || undefined;
 
       const data = await SportsService.getSeriesWithMatches(
         params.eventTypeId,
+        whitelabelId,
       );
       set.status = 200;
       return data;
@@ -109,11 +113,14 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
       return { success: false, error: "Failed to fetch series" };
     }
   })
-  .get("/matches/:eventTypeId/:competitionId", async ({ params, set }) => {
+  .get("/matches/:eventTypeId/:competitionId", async ({ params, set, request }) => {
     try {
-      const data = await SportsService.getMatchList({
-        eventTypeId: params.eventTypeId,
+      const { whitelabel } = await whitelabel_middleware(request);
+      const whitelabelId = whitelabel?.id || undefined;
+
+      const data = await SportsService.getEventsFromDb({
         competitionId: params.competitionId,
+        whitelabelId,
       });
       set.status = 200;
       return data;

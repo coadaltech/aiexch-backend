@@ -162,16 +162,14 @@ export const MarketPipelineService = {
 
   /** Store in Redis live cache, push history snapshot, broadcast to WS */
   async finalize(eventId: string, markets: any[]) {
-    // Store in Redis live cache (10s TTL safety net)
-    await safeRedisOp(
+    // Store in Redis live cache + push snapshot — fire-and-forget (don't block broadcast)
+    safeRedisOp(
       () => redis.setEx(`live:markets:${eventId}`, 10, JSON.stringify(markets)),
       undefined
     );
+    this.pushOddsSnapshot(eventId, markets);
 
-    // Push odds snapshot to Redis Stream (throttled + deduped)
-    await this.pushOddsSnapshot(eventId, markets);
-
-    // Broadcast to WebSocket (same format as before)
+    // Broadcast to WebSocket (same format as before) — this is the hot path
     broadcastMarketUpdate(eventId, {
       eventId,
       markets,
@@ -294,11 +292,15 @@ export const MarketPipelineService = {
     }
   },
 
+  // In-memory dedup cache: marketId -> last snapshot hash
+  _lastHashCache: new Map<string, string>(),
+
   // ── Helper: Push odds to Redis Stream (throttled + deduped) ──
   async pushOddsSnapshot(eventId: string, markets: any[]) {
     try {
       if (!redisIsHealthy()) return;
 
+      let wrote = false;
       for (const market of markets) {
         const marketId = market.marketId;
 
@@ -319,16 +321,15 @@ export const MarketPipelineService = {
           })),
         };
 
-        // Dedup: hash current odds, skip if unchanged
+        // Dedup: hash current odds in-memory (no Redis GET needed)
         const snapshotHash = crypto
           .createHash("md5")
           .update(JSON.stringify(snapshot))
           .digest("hex");
 
-        const lastHash = await redis.get(`lastsnapshot:${marketId}`);
-        if (lastHash === snapshotHash) continue;
+        if (this._lastHashCache.get(marketId) === snapshotHash) continue;
 
-        // Write to Redis Stream
+        // Write to Redis Stream with approximate trimming inline
         await redis.xAdd("stream:odds:history", "*", {
           eventId,
           marketId,
@@ -336,13 +337,16 @@ export const MarketPipelineService = {
           capturedAt: new Date().toISOString(),
         });
 
-        // Update dedup hash + timestamp
-        await redis.setEx(`lastsnapshot:${marketId}`, 60, snapshotHash);
+        // Update in-memory dedup hash + timestamp
+        this._lastHashCache.set(marketId, snapshotHash);
         lastSnapshotTime.set(marketId, Date.now());
+        wrote = true;
       }
 
-      // Trim stream to prevent unbounded growth (keep last 100K entries)
-      await redis.xTrim("stream:odds:history", "MAXLEN", 100_000);
+      // Trim stream once per cycle (not per market), keep max 10K entries
+      if (wrote) {
+        await redis.xTrim("stream:odds:history", "MAXLEN", 10_000);
+      }
     } catch (e) {
       console.error("[Pipeline] pushOddsSnapshot error:", e);
     }

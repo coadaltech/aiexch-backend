@@ -768,6 +768,7 @@ export const events = pgTable("events", {
   suspended: boolean("suspended").default(false).notNull(),
   betDelay: integer("bet_delay").default(0).notNull(),
   maxMarketProfit: decimal("max_market_profit", { precision: 15, scale: 2 }),
+  defaultMarketId: varchar("default_market_id", { length: 50 }),
   metadata: jsonb("metadata").default({}),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
@@ -776,6 +777,23 @@ export const events = pgTable("events", {
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
+
+// ── Event Whitelabel Overrides ──────────────────────────────────────────────
+// Per-whitelabel visibility override for events (matches).
+export const eventWhitelabelOverrides = pgTable("event_whitelabel_overrides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventId: bigint("event_id", { mode: "number" }).notNull(),
+  whitelabelId: uuid("whitelabel_id").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+}, (table) => [
+  unique("uq_event_whitelabel").on(table.eventId, table.whitelabelId),
+]);
 
 // ── Market Settings ──────────────────────────────────────────────────────────
 export const marketSettings = pgTable("market_settings", {

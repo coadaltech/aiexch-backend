@@ -94,10 +94,11 @@ export class OddsHistoryWorker {
         await db.insert(marketOddsHistory).values(rows as any);
       }
 
-      // ACK all processed entries
+      // ACK and DELETE processed entries to free memory
       const ids = streamEntries.map((e: any) => e.id);
       if (ids.length > 0) {
         await redis.xAck(STREAM_KEY, CONSUMER_GROUP, ids);
+        await redis.xDel(STREAM_KEY, ids);
       }
 
       if (rows.length > 0) {

@@ -526,6 +526,13 @@
       "when": 1775123300054,
       "tag": "0074_steady_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1775210861347,
+      "tag": "0075_previous_psynapse",
+      "breakpoints": true
     }
   ]
 }

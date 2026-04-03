@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { db } from "../../db";
-import { sports, sportsGames } from "../../db/schema";
+import { sports, sportsGames, competitions } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { resolveOwnerScope } from "../../utils/ownerScope";
@@ -10,6 +10,9 @@ import {
   getCompetitionsWithOverrides,
   updateCompetitionsStatus,
   upsertCompetitionWhitelabelOverrides,
+  getEventsWithOverrides,
+  updateEventsStatus,
+  upsertEventWhitelabelOverrides,
 } from "../../services/dashboard/games-service";
 
 export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
@@ -198,4 +201,91 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     }
   }, {
     params: t.Object({ sportId: t.String() }),
+  })
+
+  // ── Event endpoints (per-competition, role + whitelabel aware) ─────────────
+
+  .get("/events/:competitionId", async ({ params, set, store, whitelabel }) => {
+    try {
+      const scope = await resolveOwnerScope(
+        db as DbType,
+        whitelabel ?? undefined,
+        store as { id?: string; role?: string },
+      );
+
+      const data = await getEventsWithOverrides(
+        params.competitionId,
+        scope.currentUserRole,
+        scope.scopeWhitelabelId,
+      );
+
+      // Get competition name
+      const [comp] = await db
+        .select({ name: competitions.name, sport_id: competitions.sport_id })
+        .from(competitions)
+        .where(eq(competitions.competition_id, Number(params.competitionId)))
+        .limit(1);
+
+      return {
+        success: true,
+        data,
+        competitionName: comp?.name ?? "",
+        sportId: comp?.sport_id ?? 0,
+        role: scope.currentUserRole,
+        count: data.length,
+      };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch events" };
+    }
+  }, {
+    params: t.Object({ competitionId: t.String() }),
+  })
+
+  .post("/events/:competitionId/update-status", async ({ params, body, set, store, whitelabel }) => {
+    try {
+      const scope = await resolveOwnerScope(
+        db as DbType,
+        whitelabel ?? undefined,
+        store as { id?: string; role?: string },
+      );
+
+      const { events: updates } = body as {
+        events: Array<{ id: string; isActive: boolean }>;
+      };
+
+      if (!updates || !Array.isArray(updates) || updates.length === 0) {
+        return { success: true, message: "No updates needed" };
+      }
+
+      // Owner: update global isActive
+      if (scope.currentUserRole === UserRole.Owner) {
+        const result = await updateEventsStatus(params.competitionId, updates);
+        return result;
+      }
+
+      // Admin: upsert per-whitelabel overrides
+      if (scope.currentUserRole === UserRole.Admin) {
+        if (!scope.scopeWhitelabelId) {
+          set.status = 400;
+          return { success: false, message: "No whitelabel associated with your account" };
+        }
+        const result = await upsertEventWhitelabelOverrides(
+          params.competitionId,
+          scope.scopeWhitelabelId,
+          updates,
+          scope.currentUserId,
+        );
+        return result;
+      }
+
+      // Super/Master/Agent: read-only
+      set.status = 403;
+      return { success: false, message: "You do not have permission to update events" };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to update events" };
+    }
+  }, {
+    params: t.Object({ competitionId: t.String() }),
   });

@@ -2,6 +2,7 @@
 import { Elysia, t } from "elysia";
 import { SportsService } from "@services/sports";
 import { getAvailableSportsList } from "@services/sports-service";
+import { whitelabel_middleware } from "../middleware/whitelabel";
 
 export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
 
@@ -24,13 +25,14 @@ export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
     }
   })
 
-  .get("/getAllSeries/:eventTypeId", async ({ params }) => {
+  .get("/getAllSeries/:eventTypeId", async ({ params, request }) => {
     const { eventTypeId } = params;
     try {
-      // getSeriesWithMatches already has its own caching + deduplication
-      // No need for a separate route-level cache (that caused stale data + double fetching)
-      const allSeriesData = await SportsService.getSeriesWithMatches(eventTypeId);
+      // Resolve whitelabel from request domain header
+      const { whitelabel } = await whitelabel_middleware(request);
+      const whitelabelId = whitelabel?.id || undefined;
 
+      const allSeriesData = await SportsService.getSeriesWithMatches(eventTypeId, whitelabelId);
 
       return {
         success: true,

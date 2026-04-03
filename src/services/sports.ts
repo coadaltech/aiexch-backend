@@ -10,12 +10,12 @@ import {
 import { MatchResult } from "../types/sports/results";
 import { CacheService } from "./cache";
 import { and, eq } from "drizzle-orm";
-import { competitions } from "@db/schema";
+import { competitions, competitionWhitelabelOverrides, events, eventWhitelabelOverrides } from "@db/schema";
 import { db } from "@db/index";
 
 const api = axios.create({
   baseURL: process.env.SPORTS_GAME_PROVIDER_BASE_URL || "http://100.30.62.142",
-  timeout: 10000,
+  timeout: 3000, // 3s — must be fast for 330ms poll cycle; slow responses are stale anyway
 });
 
 function validateArray<T>(data: unknown, defaultValue: T[] = []): T[] {
@@ -27,25 +27,28 @@ function validateArray<T>(data: unknown, defaultValue: T[] = []): T[] {
 const inFlightSeriesFetches = new Map<string, Promise<any[]>>();
 
 export const SportsService = {
-  async getSeriesWithMatches(eventTypeId: string): Promise<any[]> {
-    // Deduplication — if this eventTypeId is already being fetched, reuse the promise
-    const existing = inFlightSeriesFetches.get(eventTypeId);
+  async getSeriesWithMatches(eventTypeId: string, whitelabelId?: string): Promise<any[]> {
+    // Deduplication — if this eventTypeId+whitelabel is already being fetched, reuse the promise
+    const dedupeKey = whitelabelId ? `${eventTypeId}:${whitelabelId}` : eventTypeId;
+    const existing = inFlightSeriesFetches.get(dedupeKey);
     if (existing) {
       return existing;
     }
 
-    const promise = this._fetchSeriesWithMatches(eventTypeId);
-    inFlightSeriesFetches.set(eventTypeId, promise);
+    const promise = this._fetchSeriesWithMatches(eventTypeId, whitelabelId);
+    inFlightSeriesFetches.set(dedupeKey, promise);
 
     try {
       return await promise;
     } finally {
-      inFlightSeriesFetches.delete(eventTypeId);
+      inFlightSeriesFetches.delete(dedupeKey);
     }
   },
 
-  async _fetchSeriesWithMatches(eventTypeId: string): Promise<any[]> {
-    const cacheKey = `sports:seriesWithMatches:${eventTypeId}`;
+  async _fetchSeriesWithMatches(eventTypeId: string, whitelabelId?: string): Promise<any[]> {
+    const cacheKey = whitelabelId
+      ? `sports:seriesWithMatches:${eventTypeId}:${whitelabelId}`
+      : `sports:seriesWithMatches:${eventTypeId}`;
 
     try {
       // Step 1: MAIN CACHE CHECK
@@ -54,9 +57,10 @@ export const SportsService = {
         return mainCachedData;
       }
 
-      // Step 2: Fetch Series List
+      // Step 2: Fetch Series List (competitions from DB, with whitelabel filtering)
       const seriesList = await SportsService.getSeriesList({
         eventTypeId: eventTypeId,
+        whitelabelId,
       });
 
       if (!seriesList || seriesList.length === 0) {
@@ -64,42 +68,30 @@ export const SportsService = {
         return [];
       }
 
-      console.log(`[Series] Fetching matches for ${seriesList.length} series (eventType ${eventTypeId})`);
+      console.log(`[Series] Fetching events from DB for ${seriesList.length} series (eventType ${eventTypeId})`);
 
-      // Step 3: Fetch matches for ALL series in parallel
+      // Step 3: Fetch events from DB for ALL series in parallel
       const seriesPromises = seriesList.map(async (series) => {
         const seriesId = series.id || series.competition_id;
         const seriesName = series.name || series.competition?.name || "Unknown Series";
 
         try {
-          const matchData = await SportsService.getMatchList({
-            eventTypeId: eventTypeId,
-            competitionId: seriesId,
+          const dbEvents = await SportsService.getEventsFromDb({
+            competitionId: String(seriesId),
+            whitelabelId,
           });
 
-          const matches = matchData && Array.isArray(matchData) ? matchData : [];
-          const filteredMatches = matches.filter((match: any) => match && match.id);
-
-          // Build match list directly from match data — no extra API calls needed
-          const validMatches = filteredMatches.map((match: any) => ({
-            id: match.id || match.event?.id,
-            name: match.name || match.event?.name || "Unknown Match",
-            openDate: match.openDate || match.event?.openDate || null,
-            status: match.status || "UNKNOWN",
-            inPlay: match.inPlay ?? match.event?.inPlay ?? false,
-          }));
-
-          if (validMatches.length > 0) {
+          if (dbEvents.length > 0) {
             return {
               id: seriesId,
               name: seriesName,
               eventTypeId: eventTypeId,
-              matches: validMatches,
+              matches: dbEvents,
             };
           }
           return null;
         } catch (error) {
-          console.error(`[Series] Error fetching matches for series ${seriesId}:`, error);
+          console.error(`[Series] Error fetching events for series ${seriesId}:`, error);
           return null;
         }
       });
@@ -107,7 +99,7 @@ export const SportsService = {
       const results = await Promise.all(seriesPromises);
       const allSeriesResults = results.filter((r): r is NonNullable<typeof r> => r !== null);
 
-      console.log(`[Series] Got ${allSeriesResults.length}/${seriesList.length} series with matches for eventType ${eventTypeId}`);
+      console.log(`[Series] Got ${allSeriesResults.length}/${seriesList.length} series with events for eventType ${eventTypeId}`);
 
       // Cache final result
       await CacheService.set(cacheKey, allSeriesResults, 45);
@@ -404,55 +396,99 @@ export const SportsService = {
     }
   },
 
-  async getSeriesList({ eventTypeId }: { eventTypeId: string }) {
-    const cacheKey = `series:${eventTypeId}`;
+  async getSeriesList({ eventTypeId, whitelabelId }: { eventTypeId: string; whitelabelId?: string }) {
+    const cacheKey = whitelabelId
+      ? `series:${eventTypeId}:${whitelabelId}`
+      : `series:${eventTypeId}`;
     try {
-      // Fetching series list
-
       // Try to get from cache first
       const cached = await CacheService.get<any[]>(cacheKey);
       if (Array.isArray(cached) && cached.length > 0) {
-        // cached series data
-
         return cached;
       }
 
-      // Get active competitions from database — retry once for Neon cold start
-      const dbQuery = () => db
-        .select({
-          id: competitions.id,
-          competition_id: competitions.competition_id,
-          name: competitions.name,
-          sport_id: competitions.sport_id,
-          provider: competitions.provider,
-          is_active: competitions.is_active,
-          metadata: competitions.metadata,
-          addedDate: competitions.addedDate,
-          updateDate: competitions.updateDate,
-        })
-        .from(competitions)
-        .where(
-          and(
-            eq(competitions.sport_id, Number(eventTypeId)),
-            eq(competitions.is_active, true),
+      let activeCompetitions: any[];
+
+      if (whitelabelId) {
+        // Whitelabel-aware: get globally active competitions, exclude those overridden inactive
+        const dbQuery = () => db
+          .select({
+            id: competitions.id,
+            competition_id: competitions.competition_id,
+            name: competitions.name,
+            sport_id: competitions.sport_id,
+            provider: competitions.provider,
+            is_active: competitions.is_active,
+            metadata: competitions.metadata,
+            addedDate: competitions.addedDate,
+            updateDate: competitions.updateDate,
+            whitelabelActive: competitionWhitelabelOverrides.isActive,
+          })
+          .from(competitions)
+          .leftJoin(
+            competitionWhitelabelOverrides,
+            and(
+              eq(competitionWhitelabelOverrides.competitionId, competitions.competition_id),
+              eq(competitionWhitelabelOverrides.whitelabelId, whitelabelId),
+            ),
           )
-        )
-        .orderBy(competitions.name);
+          .where(
+            and(
+              eq(competitions.sport_id, Number(eventTypeId)),
+              eq(competitions.is_active, true),
+            )
+          )
+          .orderBy(competitions.name);
 
-      let activeCompetitions;
-      try {
-        activeCompetitions = await dbQuery();
-      } catch {
-        console.warn(`[getSeriesList] DB query failed for sport ${eventTypeId}, retrying in 3s...`);
-        await new Promise(r => setTimeout(r, 3000));
-        activeCompetitions = await dbQuery();
+        try {
+          const rows = await dbQuery();
+          // Filter out competitions overridden to inactive for this whitelabel
+          activeCompetitions = rows.filter(
+            (r) => r.whitelabelActive === null || r.whitelabelActive === true,
+          );
+        } catch {
+          console.warn(`[getSeriesList] DB query failed for sport ${eventTypeId}, retrying in 3s...`);
+          await new Promise(r => setTimeout(r, 3000));
+          const rows = await dbQuery();
+          activeCompetitions = rows.filter(
+            (r) => r.whitelabelActive === null || r.whitelabelActive === true,
+          );
+        }
+      } else {
+        // No whitelabel: get all globally active competitions
+        const dbQuery = () => db
+          .select({
+            id: competitions.id,
+            competition_id: competitions.competition_id,
+            name: competitions.name,
+            sport_id: competitions.sport_id,
+            provider: competitions.provider,
+            is_active: competitions.is_active,
+            metadata: competitions.metadata,
+            addedDate: competitions.addedDate,
+            updateDate: competitions.updateDate,
+          })
+          .from(competitions)
+          .where(
+            and(
+              eq(competitions.sport_id, Number(eventTypeId)),
+              eq(competitions.is_active, true),
+            )
+          )
+          .orderBy(competitions.name);
+
+        try {
+          activeCompetitions = await dbQuery();
+        } catch {
+          console.warn(`[getSeriesList] DB query failed for sport ${eventTypeId}, retrying in 3s...`);
+          await new Promise(r => setTimeout(r, 3000));
+          activeCompetitions = await dbQuery();
+        }
       }
-
-      // Found activeCompetitions for sport
 
       // Transform the data to match the expected format
       const formattedData = activeCompetitions.map(comp => ({
-        id: comp.competition_id, // Use competition_id as the ID for external compatibility
+        id: comp.competition_id,
         name: comp.name,
         sportId: comp.sport_id,
         provider: comp.provider,
@@ -460,30 +496,91 @@ export const SportsService = {
         metadata: comp.metadata,
         addedDate: comp.addedDate,
         updateDate: comp.updateDate,
-        // Add any other fields your frontend expects
         totalEvents: (comp.metadata as any)?.totalEvents || 0,
-        // Include the database id if needed
-        dbId: comp.id
+        dbId: comp.id,
       }));
 
-      // Cache the results
       if (formattedData.length > 0) {
-        // Caching series data
         await CacheService.set(cacheKey, formattedData, 5 * 60); // 5 minutes
-      } else {
-        // No active competitions
       }
 
       return formattedData || [];
     } catch (error: any) {
       console.error("[Series] getSeriesList error:", (error as Error)?.message);
-
-      // Fallback: Try to get data from cache if available
-
       return [];
     }
   },
-  
+
+  /**
+   * Fetch events from DB for a competition, with optional whitelabel override filtering.
+   * Returns events in the same shape as the old external API getMatchList response.
+   */
+  async getEventsFromDb({ competitionId, whitelabelId }: { competitionId: string; whitelabelId?: string }) {
+    try {
+      let rows: any[];
+
+      if (whitelabelId) {
+        const result = await db
+          .select({
+            eventId: events.eventId,
+            name: events.name,
+            openDate: events.openDate,
+            isActive: events.isActive,
+            defaultMarketId: events.defaultMarketId,
+            whitelabelActive: eventWhitelabelOverrides.isActive,
+          })
+          .from(events)
+          .leftJoin(
+            eventWhitelabelOverrides,
+            and(
+              eq(eventWhitelabelOverrides.eventId, events.eventId),
+              eq(eventWhitelabelOverrides.whitelabelId, whitelabelId),
+            ),
+          )
+          .where(
+            and(
+              eq(events.competitionId, Number(competitionId)),
+              eq(events.isActive, true),
+            ),
+          );
+
+        // Filter out events overridden to inactive for this whitelabel
+        rows = result.filter(
+          (r) => r.whitelabelActive === null || r.whitelabelActive === true,
+        );
+      } else {
+        rows = await db
+          .select({
+            eventId: events.eventId,
+            name: events.name,
+            openDate: events.openDate,
+            isActive: events.isActive,
+            defaultMarketId: events.defaultMarketId,
+          })
+          .from(events)
+          .where(
+            and(
+              eq(events.competitionId, Number(competitionId)),
+              eq(events.isActive, true),
+            ),
+          );
+      }
+
+      // Transform to match the shape the frontend expects (same as old external API)
+      return rows.map((r) => ({
+        id: r.eventId,
+        name: r.name,
+        openDate: r.openDate ? r.openDate.toISOString() : null,
+        status: "OPEN",
+        inPlay: false, // Will be updated by live data / WebSocket
+        defaultMarketId: r.defaultMarketId || null,
+      }));
+    } catch (error) {
+      console.error(`[getEventsFromDb] Error for competition ${competitionId}:`, error);
+      return [];
+    }
+  },
+
   async getMatchList({
     eventTypeId,
     competitionId,
@@ -525,7 +622,7 @@ export const SportsService = {
         `/sports/events/${eventId}`,
       );
 
-      console.log("markets from api",response.data.catalogues)
+      // console.log("markets from api",response.data.catalogues)
 
       const catalogues = Array.isArray(response.data?.catalogues)
         ? response.data.catalogues

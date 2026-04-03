@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { cookie } from "@elysiajs/cookie";
-import { connectRedis } from "./db/redis";
+import { connectRedis, redis, redisIsHealthy } from "./db/redis";
 import { authRoutes } from "./routes/auth";
 import { profileRoutes } from "./routes/profile";
 import { ownerRoutes } from "./routes/owner";
@@ -126,7 +126,7 @@ async function initializeServices() {
   }
 
   // Step 5: Start bet settlement
-  startBetSettlementService();
+  // startBetSettlementService();
   console.log("[Init] Bet settlement started");
 
   // // Step 6: Start sports & competitions sync cron jobs
@@ -137,7 +137,44 @@ async function initializeServices() {
   //   console.error("[Init] Sports sync cron failed (non-fatal):", e);
   // }
 
+  // Step 6: Clean up stale Redis keys and trim bloated streams
+  await cleanupRedis();
+
   console.log("[Init] All services ready");
+}
+
+/** One-time Redis cleanup on startup: remove stale keys and trim streams */
+async function cleanupRedis() {
+  try {
+    if (!redisIsHealthy()) return;
+
+    // Trim the odds history stream aggressively (keep 10K max)
+    const streamLen = await redis.xLen("stream:odds:history");
+    if (streamLen > 10_000) {
+      await redis.xTrim("stream:odds:history", "MAXLEN", 10_000);
+      console.log(`[Redis Cleanup] Trimmed stream:odds:history from ${streamLen} to ~10K entries`);
+    }
+
+    // Delete stale lastsnapshot:* keys (no longer needed, dedup is in-memory now)
+    let cursor = 0;
+    let deletedCount = 0;
+    do {
+      const result = await redis.scan(cursor, { MATCH: "lastsnapshot:*", COUNT: 200 });
+      cursor = result.cursor;
+      if (result.keys.length > 0) {
+        await redis.del(result.keys);
+        deletedCount += result.keys.length;
+      }
+    } while (cursor !== 0);
+
+    if (deletedCount > 0) {
+      console.log(`[Redis Cleanup] Deleted ${deletedCount} stale lastsnapshot:* keys`);
+    }
+
+    console.log("[Redis Cleanup] Done");
+  } catch (e) {
+    console.error("[Redis Cleanup] Error (non-fatal):", e);
+  }
 }
 
 initializeServices().catch((e) => {
