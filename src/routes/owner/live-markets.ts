@@ -127,7 +127,7 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
           m.market_name,
           m.market_type,
           m.competition_id,
-          COALESCE(mt.team_names, m.event_name) AS event_name,
+          COALESCE(m.event_name, mt.team_names) AS event_name,
           m.competition_name
         FROM all_pnl p
         LEFT JOIN market_meta  m  ON m.market_id  = p.market_id
