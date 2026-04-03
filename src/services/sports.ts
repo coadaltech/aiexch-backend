@@ -15,7 +15,7 @@ import { db } from "@db/index";
 
 const api = axios.create({
   baseURL: process.env.SPORTS_GAME_PROVIDER_BASE_URL || "http://100.30.62.142",
-  timeout: 3000, // 3s — must be fast for 330ms poll cycle; slow responses are stale anyway
+  timeout: 10000,
 });
 
 function validateArray<T>(data: unknown, defaultValue: T[] = []): T[] {
@@ -662,12 +662,8 @@ export const SportsService = {
         await CacheService.set(cacheKey, data, 30 * 60);
       }
       return data;
-    } catch (error) {
-      // Only log non-404 errors (404 = no bookmakers for this event, which is normal)
-      const status = (error as any)?.response?.status;
-      if (status !== 404) {
-        console.error("getBookmakersList error:", status || (error as Error)?.message);
-      }
+    } catch {
+      // Timeouts and network errors are expected when external API is slow — don't spam logs
       return [];
     }
   },

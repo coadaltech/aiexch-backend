@@ -347,8 +347,8 @@ export const MarketPipelineService = {
       if (wrote) {
         await redis.xTrim("stream:odds:history", "MAXLEN", 10_000);
       }
-    } catch (e) {
-      console.error("[Pipeline] pushOddsSnapshot error:", e);
+    } catch {
+      // Redis down — silently skip, odds history is non-critical
     }
   },
 };
