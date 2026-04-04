@@ -524,6 +524,26 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
+  // Get detailed run-by-run exposure chart for a single fancy market
+  .get("/fancy-exposure-chart", async ({ store, query, set }) => {
+    try {
+      const marketId = query?.marketId ? Number(query.marketId) : 0;
+      if (!marketId) {
+        set.status = 400;
+        return { success: false, error: "marketId is required" };
+      }
+      const rows = await db.execute(
+        sql`SELECT * FROM get_user_market_detail_of_fancy(${store.id}::uuid, ${marketId}::numeric)`
+      );
+      const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
+      set.status = 200;
+      return { success: true, data };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch fancy exposure chart" };
+    }
+  })
+
   .get("/balance", async ({ store, set }) => {
     try {
       const ledgerData = await db

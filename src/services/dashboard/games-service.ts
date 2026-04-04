@@ -4,6 +4,7 @@ import { redis } from "@db/redis";
 import { eq, and, sql } from "drizzle-orm";
 import { UserRole } from "../../types/enums";
 import { syncEventsForCompetition, deactivateEventsForCompetition } from "../event-sync-service";
+import { CacheService } from "../cache";
 
 export const getCompetitionsBySportId = async (sportId: string) => {
   try {
@@ -87,12 +88,11 @@ export const updateCompetitionsStatus = async (
 
     // Clear cache (best-effort — don't fail the whole operation if Redis is down)
     try {
-      const seriesCacheKey = `series:${sportId}`;
-      const competitionsCacheKey = `dashboard-competitions:${sportId}`;
-      const seriesWithMatchesCacheKey = `series:withMatches:${sportId}`;
-      await redis.del(seriesCacheKey);
-      await redis.del(competitionsCacheKey);
-      await redis.del(seriesWithMatchesCacheKey);
+      await redis.del(`series:${sportId}`);
+      await redis.del(`dashboard-competitions:${sportId}`);
+      await redis.del(`series:withMatches:${sportId}`);
+      // Also clear whitelabel-specific series cache keys (series:{sportId}:{whitelabelId})
+      await CacheService.invalidatePattern(`series:${sportId}:*`);
       console.log(`✅ Cleared cache for sport: ${sportId}`);
     } catch (cacheError) {
       console.error("⚠️ Failed to clear cache (non-fatal):", cacheError);
@@ -232,6 +232,7 @@ export const upsertCompetitionWhitelabelOverrides = async (
       await redis.del(`series:${sportId}`);
       await redis.del(`dashboard-competitions:${sportId}`);
       await redis.del(`series:withMatches:${sportId}`);
+      await CacheService.invalidatePattern(`series:${sportId}:*`);
     } catch (_) { /* non-fatal */ }
 
     return { success: true, message: `Updated ${updates.length} override(s) successfully` };
@@ -344,6 +345,7 @@ export const updateEventsStatus = async (
         await redis.del(`series:${sportId}`);
         await redis.del(`dashboard-competitions:${sportId}`);
         await redis.del(`series:withMatches:${sportId}`);
+        await CacheService.invalidatePattern(`series:${sportId}:*`);
       }
     } catch (_) { /* non-fatal */ }
 
@@ -412,6 +414,7 @@ export const upsertEventWhitelabelOverrides = async (
         await redis.del(`series:${sportId}`);
         await redis.del(`dashboard-competitions:${sportId}`);
         await redis.del(`series:withMatches:${sportId}`);
+        await CacheService.invalidatePattern(`series:${sportId}:*`);
       }
     } catch (_) { /* non-fatal */ }
 

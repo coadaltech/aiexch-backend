@@ -533,6 +533,13 @@
       "when": 1775210861347,
       "tag": "0075_previous_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1775294380092,
+      "tag": "0076_nice_supreme_intelligence",
+      "breakpoints": true
     }
   ]
 }

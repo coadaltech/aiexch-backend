@@ -84,7 +84,14 @@ export const MarketPipelineService = {
           const marketOdds = oddsObject[market.marketId];
           const overrides = marketOverridesMap.get(market.marketId);
 
-          const adminDisabled = overrides?.isActive === "false";
+          // "Completed Match" and "Tied Match" markets are inactive by default
+          // — they must be explicitly enabled by an admin.
+          const defaultInactiveMarket =
+            market.marketName === "Completed Match" ||
+            market.marketName === "Tied Match";
+          const adminDisabled = overrides
+            ? overrides.isActive === "false"
+            : defaultInactiveMarket;
           const adminHidden = overrides?.isVisible === "false";
 
           // Build final marketCondition: admin overrides take priority over API

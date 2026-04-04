@@ -971,6 +971,30 @@ export const matkaTransactionDetails = pgTable("matka_transaction_details", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
+// ── Market Results ───────────────────────────────────────────────────────────
+export const marketResults = pgTable("market_results", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventId: bigint("event_id", { mode: "number" }).notNull(),
+  eventTypeId: bigint("event_type_id", { mode: "number" }).notNull(),
+  competitionId: bigint("competition_id", { mode: "number" }),
+  marketId: numeric("market_id").notNull().unique(),
+  marketType: integer("market_type").default(MarketType.MatchOdds).notNull(), // 0=MatchOdds, 1=TiedMatch, 2=CompleteMatch, 3=Bookmaker, 4=Fancy
+  status: varchar("status", { length: 20 }).default("PENDING").notNull(), // PENDING | DECLARED | VOID | ROLLBACK
+  winnerId: bigint("winner_id", { mode: "number" }), // selectionId for odds/bookmaker, line value for fancy
+  winnerName: varchar("winner_name", { length: 255 }),
+  runners: jsonb("runners").$type<{ selectionId: number; name: string; result: string }[]>(), // full result per runner
+  source: varchar("source", { length: 20 }).default("api").notNull(), // api | manual
+  apiResponse: jsonb("api_response"), // raw external API response for audit
+  settledAt: timestamp("settled_at"), // when bets were actually settled against this result
+  declaredAt: timestamp("declared_at"), // when result was first declared
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
 // ── Indexes ──────────────────────────────────────────────────────────────────
 export const currencyValueHistoryIndex = { table: currencyValueHistory, columns: [currencyValueHistory.currencyId] as const };
 

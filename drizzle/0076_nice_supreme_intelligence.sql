@@ -1,0 +1,22 @@
+CREATE TABLE "market_results" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"event_id" bigint NOT NULL,
+	"event_type_id" bigint NOT NULL,
+	"competition_id" bigint,
+	"market_id" numeric NOT NULL,
+	"market_type" integer DEFAULT 0 NOT NULL,
+	"status" varchar(20) DEFAULT 'PENDING' NOT NULL,
+	"winner_id" bigint,
+	"winner_name" varchar(255),
+	"runners" jsonb,
+	"source" varchar(20) DEFAULT 'api' NOT NULL,
+	"api_response" jsonb,
+	"settled_at" timestamp,
+	"declared_at" timestamp,
+	"added_by" uuid DEFAULT '00000000-0000-0000-0000-000000000000' NOT NULL,
+	"added_date" timestamp DEFAULT now() NOT NULL,
+	"update_by" uuid DEFAULT '00000000-0000-0000-0000-000000000000' NOT NULL,
+	"update_date" timestamp DEFAULT now() NOT NULL,
+	"record_status" integer DEFAULT 0 NOT NULL,
+	CONSTRAINT "market_results_market_id_unique" UNIQUE("market_id")
+);

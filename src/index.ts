@@ -12,6 +12,7 @@ import { casinoAggregatorRoutes } from "./routes/casino/aggregator";
 import { casinoCallbackRoutes } from "./routes/casino/callback";
 import { casinoGamesRoutes } from "./routes/casino/games";
 import { startBetSettlementService } from "./services/bet-settlement";
+import { startMarketResultCronJobs } from "./services/market-result-cron-service";
 import { AdminMarketService } from "@services/admin-market-service";
 import { OddsHistoryWorker } from "@services/odds-history-worker";
 import { seriesRoutes } from "./routes/series-route";
@@ -129,13 +130,21 @@ async function initializeServices() {
   // startBetSettlementService();
   console.log("[Init] Bet settlement started");
 
+  // Step 5b: Start market result cron jobs (10min Fancy, 15min Odds/Bookmaker)
+  try {
+    startMarketResultCronJobs();
+    console.log("[Init] Market result cron jobs started");
+  } catch (e) {
+    console.error("[Init] Market result cron failed (non-fatal):", e);
+  }
+
   // // Step 6: Start sports & competitions sync cron jobs
-  // try {
-  //   await startCronJobs();
-  //   console.log("[Init] Sports/competitions sync cron started");
-  // } catch (e) {
-  //   console.error("[Init] Sports sync cron failed (non-fatal):", e);
-  // }
+  try {
+    await startCronJobs();
+    console.log("[Init] Sports/competitions sync cron started");
+  } catch (e) {
+    console.error("[Init] Sports sync cron failed (non-fatal):", e);
+  }
 
   // Step 6: Clean up stale Redis keys and trim bloated streams
   await cleanupRedis();

@@ -14,6 +14,7 @@ import {
   updateEventsStatus,
   upsertEventWhitelabelOverrides,
 } from "../../services/dashboard/games-service";
+import { syncCompetitions } from "../../db/seed";
 
 export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
   .resolve(async ({ request }): Promise<{ resolvedDb: DbType; whitelabel: any }> => {
@@ -115,6 +116,18 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     params: t.Object({
       id: t.String(),
     }),
+  })
+
+  // ── Sync all competitions from external API ────────────────────────────
+  .post("/sync-competitions", async ({ set }) => {
+    try {
+      const result = await syncCompetitions();
+      set.status = 200;
+      return { success: true, data: result };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to sync competitions" };
+    }
   })
 
   // ── Competition endpoints (role + whitelabel aware) ─────────────────────

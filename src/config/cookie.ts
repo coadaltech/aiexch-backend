@@ -2,17 +2,17 @@ const isProduction = process.env.NODE_ENV === "production";
 
 export const cookieConfig = {
   accessToken: {
-    httpOnly: false, // Must be false so frontend JS can read and set as first-party cookie
+    httpOnly: false,
     secure: isProduction,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: 60 * 15, // 15 minutes
+    // No maxAge → session cookie → cleared when browser closes
   },
   refreshToken: {
     httpOnly: false,
     secure: isProduction,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    // No maxAge → session cookie → cleared when browser closes
   },
 };
