@@ -912,7 +912,6 @@ export const matkaShifts = pgTable("matka_shifts", {
   akharRate: decimal("akhar_rate", { precision: 10, scale: 2 }).default("0").notNull(),
   akharCommission: decimal("akhar_commission", { precision: 10, scale: 2 }).default("0").notNull(),
   mainJantriTime: varchar("main_jantri_time", { length: 30 }),
-  result: integer("result"),                                      // winning number (null = not declared)
   isActive: boolean("is_active").default(true).notNull(),
   nextDayAllow: boolean("next_day_allow").default(false).notNull(),
   capping: decimal("capping", { precision: 15, scale: 2 }).default("0").notNull(),  // 0 = no limit
@@ -928,11 +927,10 @@ export const matkaShifts = pgTable("matka_shifts", {
 export const matkaTransactions = pgTable("matka_transactions", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
+    .references(() => users.id, { onDelete: "no action" })
     .notNull(),
   shiftId: uuid("shift_id")
-    .references(() => matkaShifts.id, { onDelete: "cascade" })
-    .notNull(),
+    .references(() => matkaShifts.id, { onDelete: "set null" }),
   transactionDate: date("transaction_date").notNull(),
   daraRate: decimal("dara_rate", { precision: 10, scale: 2 }).notNull(),
   daraCommission: decimal("dara_commission", { precision: 10, scale: 2 }).notNull(),
@@ -954,7 +952,7 @@ export const matkaTransactions = pgTable("matka_transactions", {
 export const matkaTransactionDetails = pgTable("matka_transaction_details", {
   id: uuid("id").primaryKey().defaultRandom(),
   transactionId: uuid("transaction_id")
-    .references(() => matkaTransactions.id, { onDelete: "cascade" })
+    .references(() => matkaTransactions.id, { onDelete: "no action" })
     .notNull(),
   numberType: integer("number_type").notNull(),                   // 1=main(1-100), 2=akhar(A0-A9), 3=akhar(B0-B9)
   number: varchar("number", { length: 4 }).notNull(),             // "1"-"100" or "A0"-"A9" or "B0"-"B9"
@@ -984,9 +982,65 @@ export const marketResults = pgTable("market_results", {
   winnerName: varchar("winner_name", { length: 255 }),
   runners: jsonb("runners").$type<{ selectionId: number; name: string; result: string }[]>(), // full result per runner
   source: varchar("source", { length: 20 }).default("api").notNull(), // api | manual
+  runs: integer("runs"),              // matka/fancy result runs (null = not declared)
   apiResponse: jsonb("api_response"), // raw external API response for audit
   settledAt: timestamp("settled_at"), // when bets were actually settled against this result
   declaredAt: timestamp("declared_at"), // when result was first declared
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Matka Transaction Logs ──────────────────────────────────────────────────
+export const matkaTransactionLogs = pgTable("matka_transaction_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  matkaTransactionId: uuid("matka_transaction_id")
+    .references(() => matkaTransactions.id, { onDelete: "no action" })
+    .notNull(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "no action" })
+    .notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  browser: varchar("browser", { length: 100 }),
+  browserVersion: varchar("browser_version", { length: 50 }),
+  os: varchar("os", { length: 100 }),
+  osVersion: varchar("os_version", { length: 50 }),
+  deviceType: varchar("device_type", { length: 20 }),
+  deviceBrand: varchar("device_brand", { length: 100 }),
+  deviceModel: varchar("device_model", { length: 100 }),
+  country: varchar("country", { length: 100 }),
+  city: varchar("city", { length: 100 }),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Matka Transaction Commissions ──────────────────────────────────────────
+export const matkaTransactionCommissions = pgTable("matka_transaction_commissions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  matkaTransactionId: uuid("matka_transaction_id")
+    .references(() => matkaTransactions.id, { onDelete: "no action" })
+    .notNull(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "no action" })
+    .notNull(),
+  agentId: uuid("agent_id"),
+  agentPercent: decimal("agent_percent", { precision: 5, scale: 2 }).default("0"),
+  masterId: uuid("master_id"),
+  masterPercent: decimal("master_percent", { precision: 5, scale: 2 }).default("0"),
+  superId: uuid("super_id"),
+  superPercent: decimal("super_percent", { precision: 5, scale: 2 }).default("0"),
+  adminId: uuid("admin_id"),
+  adminPercent: decimal("admin_percent", { precision: 5, scale: 2 }).default("0"),
+  ownerId: uuid("owner_id"),
+  ownerPercent: decimal("owner_percent", { precision: 5, scale: 2 }).default("0"),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

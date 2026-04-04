@@ -4,12 +4,16 @@ import {
   matkaShifts,
   matkaTransactions,
   matkaTransactionDetails,
+  matkaTransactionLogs,
+  matkaTransactionCommissions,
   ledgerLimit,
   users,
+  profiles,
 } from "../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
-import { RecordStatus } from "../types/enums";
+import { parseUserAgent } from "../utils/parse-ua";
+import { RecordStatus, UserRole } from "../types/enums";
 
 export const matkaRoutes = new Elysia({ prefix: "/matka" })
 
@@ -147,7 +151,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   // ── Place bet (submit jantri) ─────────────────────────────────────────────
   .post(
     "/place",
-    async ({ body, store, set }) => {
+    async ({ body, store, set, request }) => {
       try {
         const { shiftId, bets } = body as {
           shiftId: string;
@@ -192,33 +196,53 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           }
         }
 
-        // Check capping (user bet limit per shift)
+        // Check capping (per-number bet limit for this shift)
         const cappingLimit = Number(shift.capping);
         if (cappingLimit > 0) {
-          // Get total amount already bet by this user on this shift
-          const [existing] = await db
+          // Get amount already bet per number by this user on this shift
+          const existingPerNumber = await db
             .select({
-              total: sql<string>`COALESCE(SUM(CAST(${matkaTransactions.totalAmount} AS NUMERIC)), 0)`,
+              number: matkaTransactionDetails.number,
+              numberType: matkaTransactionDetails.numberType,
+              total: sql<string>`COALESCE(SUM(CAST(${matkaTransactionDetails.amount} AS NUMERIC)), 0)`,
             })
-            .from(matkaTransactions)
+            .from(matkaTransactionDetails)
+            .innerJoin(matkaTransactions, eq(matkaTransactionDetails.transactionId, matkaTransactions.id))
             .where(
               and(
                 eq(matkaTransactions.userId, store.id),
                 eq(matkaTransactions.shiftId, shiftId),
-                eq(matkaTransactions.recordStatus, RecordStatus.Active)
+                eq(matkaTransactions.recordStatus, RecordStatus.Active),
+                eq(matkaTransactionDetails.recordStatus, RecordStatus.Active)
               )
-            );
+            )
+            .groupBy(matkaTransactionDetails.number, matkaTransactionDetails.numberType);
 
-          const alreadyBet = Number(existing?.total ?? 0);
-          const newBetTotal = bets.reduce((sum, b) => sum + b.amount, 0);
+          // Build a map of existing amounts: "numberType:number" → amount
+          const existingMap = new Map<string, number>();
+          for (const row of existingPerNumber) {
+            existingMap.set(`${row.numberType}:${row.number}`, Number(row.total));
+          }
 
-          if (alreadyBet + newBetTotal > cappingLimit) {
-            set.status = 400;
-            const remaining = Math.max(0, cappingLimit - alreadyBet);
-            return {
-              success: false,
-              error: `Bet limit exceeded. Shift cap: ${cappingLimit}, already bet: ${alreadyBet}, remaining: ${remaining}`,
-            };
+          // Also accumulate new bets in this request per number
+          const newBetMap = new Map<string, number>();
+          for (const bet of bets) {
+            const key = `${bet.numberType}:${bet.number}`;
+            newBetMap.set(key, (newBetMap.get(key) ?? 0) + bet.amount);
+          }
+
+          // Check each number's total doesn't exceed capping
+          for (const [key, newAmount] of newBetMap) {
+            const existing = existingMap.get(key) ?? 0;
+            if (existing + newAmount > cappingLimit) {
+              const [, number] = key.split(":");
+              const remaining = Math.max(0, cappingLimit - existing);
+              set.status = 400;
+              return {
+                success: false,
+                error: `Bet limit exceeded for number ${number}. Cap per number: ${cappingLimit}, already bet: ${existing}, remaining: ${remaining}`,
+              };
+            }
           }
         }
 
@@ -309,6 +333,91 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             .where(eq(ledgerLimit.userId, store.id));
         }
 
+        // Insert matka transaction log
+        const ipAddress =
+          request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+          request.headers.get("x-real-ip") ||
+          null;
+        const ua = parseUserAgent(request.headers.get("user-agent"));
+
+        await db.insert(matkaTransactionLogs).values({
+          matkaTransactionId: transaction.id,
+          userId: store.id,
+          ipAddress,
+          ...ua,
+          addedBy: store.id,
+          updateBy: store.id,
+        });
+
+        // ── Commission snapshot ──
+        // Walk up the hierarchy: User → Agent → Master → Super → Admin → Owner
+        const hierarchyRows = await db.execute(sql`
+          WITH RECURSIVE hierarchy AS (
+            SELECT
+              u.id AS ancestor_id,
+              u.role AS ancestor_role,
+              p.downline::DECIMAL(5,2) AS downline,
+              1 AS depth
+            FROM users u
+            JOIN profiles p ON p.user_id = u.id
+            WHERE u.id = (SELECT added_by FROM users WHERE id = ${store.id})
+
+            UNION ALL
+
+            SELECT
+              u2.id,
+              u2.role,
+              p2.downline::DECIMAL(5,2),
+              h.depth + 1
+            FROM hierarchy h
+            JOIN users u2 ON u2.id = (SELECT added_by FROM users WHERE id = h.ancestor_id)
+            JOIN profiles p2 ON p2.user_id = u2.id
+            WHERE h.depth < 10
+              AND u2.id IS NOT NULL
+          )
+          SELECT ancestor_id, ancestor_role, downline
+          FROM hierarchy
+          ORDER BY depth ASC
+        `);
+
+        const ancestors = Array.isArray(hierarchyRows) ? hierarchyRows : (hierarchyRows as any)?.rows || [];
+
+        const snapshotData: typeof matkaTransactionCommissions.$inferInsert = {
+          matkaTransactionId: transaction.id,
+          userId: store.id,
+          addedBy: store.id,
+          updateBy: store.id,
+        };
+
+        let previousDownline = 0;
+        for (let i = 0; i < ancestors.length; i++) {
+          const row = ancestors[i];
+          const role = Number(row.ancestor_role);
+          const downline = parseFloat(row.downline ?? "0");
+          const share = downline - previousDownline;
+
+          if (role === UserRole.Agent) {
+            snapshotData.agentId = row.ancestor_id;
+            snapshotData.agentPercent = Math.max(share, 0).toFixed(2);
+          } else if (role === UserRole.Master) {
+            snapshotData.masterId = row.ancestor_id;
+            snapshotData.masterPercent = Math.max(share, 0).toFixed(2);
+          } else if (role === UserRole.Super) {
+            snapshotData.superId = row.ancestor_id;
+            snapshotData.superPercent = Math.max(share, 0).toFixed(2);
+          } else if (role === UserRole.Admin) {
+            snapshotData.adminId = row.ancestor_id;
+            snapshotData.adminPercent = Math.max(share, 0).toFixed(2);
+          } else if (role === UserRole.Owner) {
+            snapshotData.ownerId = row.ancestor_id;
+            snapshotData.ownerPercent = Math.max(100 - previousDownline, 0).toFixed(2);
+          }
+
+          previousDownline = downline;
+        }
+
+        await db.insert(matkaTransactionCommissions).values(snapshotData);
+
         return {
           success: true,
           data: {
@@ -350,7 +459,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           shiftId: matkaTransactions.shiftId,
           shiftName: matkaShifts.name,
           shiftDate: matkaShifts.shiftDate,
-          result: matkaShifts.result,
           transactionDate: matkaTransactions.transactionDate,
           totalAmount: matkaTransactions.totalAmount,
           totalCommission: matkaTransactions.totalCommission,

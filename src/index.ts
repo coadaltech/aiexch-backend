@@ -17,6 +17,7 @@ import { AdminMarketService } from "@services/admin-market-service";
 import { OddsHistoryWorker } from "@services/odds-history-worker";
 import { seriesRoutes } from "./routes/series-route";
 import { matkaRoutes } from "./routes/matka";
+import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
 import { startCronJobs, ensureSystemUser } from "@db/seed";
@@ -136,6 +137,14 @@ async function initializeServices() {
     console.log("[Init] Market result cron jobs started");
   } catch (e) {
     console.error("[Init] Market result cron failed (non-fatal):", e);
+  }
+
+  // Step 5c: Start matka shift date cron (daily 10:00 AM IST)
+  try {
+    startMatkaShiftCron();
+    console.log("[Init] Matka shift date cron started");
+  } catch (e) {
+    console.error("[Init] Matka shift cron failed (non-fatal):", e);
   }
 
   // // Step 6: Start sports & competitions sync cron jobs

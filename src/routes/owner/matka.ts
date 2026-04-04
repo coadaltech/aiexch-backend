@@ -230,41 +230,6 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
-  // ── Set shift result ──────────────────────────────────────────────────────
-  .post(
-    "/shifts/:id/result",
-    async ({ body, params, set, store }) => {
-      try {
-        const [updated] = await db
-          .update(matkaShifts)
-          .set({
-            result: body.result,
-            updateBy: (store as any).id || SYSTEM_USER_ID,
-          })
-          .where(eq(matkaShifts.id, params.id))
-          .returning();
-
-        if (!updated) {
-          set.status = 404;
-          return { success: false, error: "Shift not found" };
-        }
-
-        return { success: true, data: updated };
-      } catch (error) {
-        set.status = 500;
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Failed to set result",
-        };
-      }
-    },
-    {
-      body: t.Object({
-        result: t.Number({ minimum: 0, maximum: 100 }),
-      }),
-    }
-  )
-
   // ── Get jantri summary for a shift (admin view with totals) ───────────────
   .get("/shifts/:id/jantri", async ({ params, set }) => {
     try {
