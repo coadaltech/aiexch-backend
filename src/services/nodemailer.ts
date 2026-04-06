@@ -19,9 +19,9 @@ export const sendEmail = async (to: string, subject: string, html: string) => {
 
   try {
     await transporter.sendMail(mailOptions);
-
   } catch (error) {
-    console.error("Error sending email:");
+    console.error("Error sending email:", error);
+    throw error;
   }
 };
 
@@ -33,13 +33,10 @@ export const sendOTP = async (email: string, otp: string) => {
       success: true,
     };
   } catch (error) {
-    if (error instanceof Error) {
-
-
-      return {
-        success: false,
-      };
-    }
+    console.error("Error sending OTP:", error);
+    return {
+      success: false,
+    };
   }
 };
 

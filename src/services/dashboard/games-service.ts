@@ -90,9 +90,10 @@ export const updateCompetitionsStatus = async (
     try {
       await redis.del(`series:${sportId}`);
       await redis.del(`dashboard-competitions:${sportId}`);
-      await redis.del(`series:withMatches:${sportId}`);
+      await redis.del(`sports:seriesWithMatches:${sportId}`);
       // Also clear whitelabel-specific series cache keys (series:{sportId}:{whitelabelId})
       await CacheService.invalidatePattern(`series:${sportId}:*`);
+      await CacheService.invalidatePattern(`sports:seriesWithMatches:${sportId}:*`);
       console.log(`✅ Cleared cache for sport: ${sportId}`);
     } catch (cacheError) {
       console.error("⚠️ Failed to clear cache (non-fatal):", cacheError);
@@ -150,10 +151,11 @@ export const getCompetitionsWithOverrides = async (
         .where(eq(competitions.sport_id, sportIdNum));
 
       // For owner: return all rows with override info
-      // For non-owner: only globally active AND not overridden to inactive
+      // For non-owner: return all globally active competitions (including those overridden
+      // to inactive, so the admin can toggle them back on in their panel)
       const filtered = isOwner
         ? rows
-        : rows.filter((r) => r.is_active && (r.whitelabelActive === null || r.whitelabelActive === true));
+        : rows.filter((r) => r.is_active);
 
       return filtered.map((r) => ({
         ...r,
@@ -231,8 +233,9 @@ export const upsertCompetitionWhitelabelOverrides = async (
     try {
       await redis.del(`series:${sportId}`);
       await redis.del(`dashboard-competitions:${sportId}`);
-      await redis.del(`series:withMatches:${sportId}`);
+      await redis.del(`sports:seriesWithMatches:${sportId}`);
       await CacheService.invalidatePattern(`series:${sportId}:*`);
+      await CacheService.invalidatePattern(`sports:seriesWithMatches:${sportId}:*`);
     } catch (_) { /* non-fatal */ }
 
     return { success: true, message: `Updated ${updates.length} override(s) successfully` };
@@ -286,9 +289,12 @@ export const getEventsWithOverrides = async (
         )
         .where(eq(events.competitionId, compIdNum));
 
+      // For owner: return all rows
+      // For non-owner: return all globally active events (including those overridden
+      // to inactive, so the admin can toggle them back on in their panel)
       const filtered = isOwner
         ? rows
-        : rows.filter((r) => r.isActive && (r.whitelabelActive === null || r.whitelabelActive === true));
+        : rows.filter((r) => r.isActive);
 
       return filtered.map((r) => ({
         ...r,
@@ -344,8 +350,9 @@ export const updateEventsStatus = async (
         const sportId = comp[0].sport_id;
         await redis.del(`series:${sportId}`);
         await redis.del(`dashboard-competitions:${sportId}`);
-        await redis.del(`series:withMatches:${sportId}`);
+        await redis.del(`sports:seriesWithMatches:${sportId}`);
         await CacheService.invalidatePattern(`series:${sportId}:*`);
+        await CacheService.invalidatePattern(`sports:seriesWithMatches:${sportId}:*`);
       }
     } catch (_) { /* non-fatal */ }
 
@@ -413,8 +420,9 @@ export const upsertEventWhitelabelOverrides = async (
         const sportId = comp[0].sport_id;
         await redis.del(`series:${sportId}`);
         await redis.del(`dashboard-competitions:${sportId}`);
-        await redis.del(`series:withMatches:${sportId}`);
+        await redis.del(`sports:seriesWithMatches:${sportId}`);
         await CacheService.invalidatePattern(`series:${sportId}:*`);
+        await CacheService.invalidatePattern(`sports:seriesWithMatches:${sportId}:*`);
       }
     } catch (_) { /* non-fatal */ }
 

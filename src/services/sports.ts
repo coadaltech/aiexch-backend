@@ -81,15 +81,12 @@ export const SportsService = {
             whitelabelId,
           });
 
-          if (dbEvents.length > 0) {
-            return {
-              id: seriesId,
-              name: seriesName,
-              eventTypeId: eventTypeId,
-              matches: dbEvents,
-            };
-          }
-          return null;
+          return {
+            id: seriesId,
+            name: seriesName,
+            eventTypeId: eventTypeId,
+            matches: dbEvents,
+          };
         } catch (error) {
           console.error(`[Series] Error fetching events for series ${seriesId}:`, error);
           return null;
