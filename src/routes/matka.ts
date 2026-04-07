@@ -196,10 +196,10 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           }
         }
 
-        // Check capping (per-number bet limit for this shift)
+        // Check capping (per-number bet limit for this shift per day)
         const cappingLimit = Number(shift.capping);
         if (cappingLimit > 0) {
-          // Get amount already bet per number by this user on this shift
+          // Get amount already bet per number by this user on this shift TODAY
           const existingPerNumber = await db
             .select({
               number: matkaTransactionDetails.number,
@@ -212,6 +212,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
               and(
                 eq(matkaTransactions.userId, store.id),
                 eq(matkaTransactions.shiftId, shiftId),
+                eq(matkaTransactions.transactionDate, shift.shiftDate),
                 eq(matkaTransactions.recordStatus, RecordStatus.Active),
                 eq(matkaTransactionDetails.recordStatus, RecordStatus.Active)
               )
@@ -224,25 +225,29 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             existingMap.set(`${row.numberType}:${row.number}`, Number(row.total));
           }
 
-          // Also accumulate new bets in this request per number
-          const newBetMap = new Map<string, number>();
+          // Check each bet's number total doesn't exceed capping, collect all violations
+          const exceeded: string[] = [];
+          const allocatedMap = new Map(existingMap);
+
           for (const bet of bets) {
             const key = `${bet.numberType}:${bet.number}`;
-            newBetMap.set(key, (newBetMap.get(key) ?? 0) + bet.amount);
+            const allocated = allocatedMap.get(key) ?? 0;
+            const remaining = Math.max(0, cappingLimit - allocated);
+            if (bet.amount > remaining) {
+              exceeded.push(
+                `Number ${bet.number}: cap ${cappingLimit}, already bet ${allocated}, remaining ${remaining}`
+              );
+            } else {
+              allocatedMap.set(key, allocated + bet.amount);
+            }
           }
 
-          // Check each number's total doesn't exceed capping
-          for (const [key, newAmount] of newBetMap) {
-            const existing = existingMap.get(key) ?? 0;
-            if (existing + newAmount > cappingLimit) {
-              const [, number] = key.split(":");
-              const remaining = Math.max(0, cappingLimit - existing);
-              set.status = 400;
-              return {
-                success: false,
-                error: `Bet limit exceeded for number ${number}. Cap per number: ${cappingLimit}, already bet: ${existing}, remaining: ${remaining}`,
-              };
-            }
+          if (exceeded.length > 0) {
+            set.status = 400;
+            return {
+              success: false,
+              error: `Capping limit exceeded. ${exceeded.join(". ")}`,
+            };
           }
         }
 
@@ -287,8 +292,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           .where(eq(ledgerLimit.userId, store.id));
 
         if (ledger) {
-          const available = Number(ledger.creditLimit) - Number(ledger.limitConsumed);
-          if (totalAmount > available) {
+          // const available = Number(ledger.creditLimit) - Number(ledger.limitConsumed);
+          if (totalAmount > Number(ledger.finalLimit)) {
             set.status = 400;
             return { success: false, error: "Insufficient balance" };
           }

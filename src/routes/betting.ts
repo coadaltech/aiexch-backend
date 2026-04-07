@@ -163,31 +163,14 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Bet rejected: no available limit" };
       }
 
-      if (stake > finalLimitNum) {
-        set.status = 400;
-        return { success: false, error: "Bet rejected: stake " + stake + " exceeds your available limit " + finalLimitNum };
-      }
+      // NOTE: We no longer compare stake or single-bet exposure against finalLimit here.
+      // The DB trigger (trg_recalc_ledger_on_bet) calculates the TOTAL worst-case exposure
+      // across all markets after inserting this bet, and checks total_exposure <= user_limit.
+      // This allows e.g. a lay bet with stake 5000 if the worst-case loss is only 800 and
+      // the user's limit covers that.
 
-      // ── STEP 2: Calculate exposure for THIS bet only ──
-      // No need to fetch all existing bets — ledger already tracks cumulative exposure.
-      // We only calculate how much NEW exposure this single bet adds.
+      // ── STEP 2: Insert bet + details in a single transaction ──
       const potentialReturn = stake * odds;
-      let betExposure: number;
-
-      if (type === "back") {
-        // Back bet: worst case = you lose your stake
-        betExposure = stake;
-      } else {
-        // Lay bet: worst case = you pay out (potentialReturn - stake) = liability
-        betExposure = potentialReturn - stake;
-      }
-
-      if (betExposure > finalLimitNum) {
-        set.status = 400;
-        return { success: false, error: "Bet rejected: exposure " + betExposure + " exceeds available limit " + finalLimitNum };
-      }
-
-      // ── STEP 3: Insert bet + details in a single transaction ──
       const today = new Date();
       const numericSelectionId = Number(selectionId);
 
