@@ -547,6 +547,20 @@
       "when": 1775306807910,
       "tag": "0077_ambitious_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1744012800000,
+      "tag": "0078_declare_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1775567653642,
+      "tag": "0079_tough_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }

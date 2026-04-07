@@ -1,9 +1,8 @@
 import cron from "node-cron";
 import { db } from "../db";
-import { transactions, marketResults } from "../db/schema";
+import { transactions, marketResults, events, sports, competitions } from "../db/schema";
 import { eq, and, inArray, ne, sql } from "drizzle-orm";
 import { SportsService } from "./sports";
-import { addResultToQueue } from "../queues/betting";
 import { MarketType } from "../types/enums";
 
 interface UndeclaredMarket {
@@ -12,6 +11,10 @@ interface UndeclaredMarket {
   eventTypeId: number;
   competitionId: number | null;
   marketType: number;
+  marketName: string | null;
+  eventTypeName: string;
+  competitionName: string;
+  eventName: string;
 }
 
 /**
@@ -22,7 +25,6 @@ async function getUndeclaredMarkets(
   marketTypes: number[]
 ): Promise<UndeclaredMarket[]> {
   try {
-    // Get distinct markets from matched transactions
     const unsettledMarkets = await db
       .select({
         marketId: transactions.marketId,
@@ -30,6 +32,7 @@ async function getUndeclaredMarkets(
         eventTypeId: transactions.eventTypeId,
         competitionId: transactions.competitionId,
         marketType: transactions.marketType,
+        marketName: transactions.marketName,
       })
       .from(transactions)
       .where(
@@ -43,7 +46,8 @@ async function getUndeclaredMarkets(
         transactions.matchId,
         transactions.eventTypeId,
         transactions.competitionId,
-        transactions.marketType
+        transactions.marketType,
+        transactions.marketName
       );
 
     if (unsettledMarkets.length === 0) return [];
@@ -62,14 +66,54 @@ async function getUndeclaredMarkets(
       );
 
     const declaredSet = new Set(alreadyDeclared.map((r) => r.marketId));
-
-    return unsettledMarkets.filter(
+    const filtered = unsettledMarkets.filter(
       (m) => !declaredSet.has(m.marketId)
-    ) as UndeclaredMarket[];
+    );
+
+    if (filtered.length === 0) return [];
+
+    // Enrich with names from sports / competitions / events tables
+    return await enrichWithNames(filtered as any);
   } catch (error) {
     console.error("[MarketResultCron] Error fetching undeclared markets:", error);
     return [];
   }
+}
+
+async function enrichWithNames(
+  markets: Omit<UndeclaredMarket, "eventTypeName" | "competitionName" | "eventName">[]
+): Promise<UndeclaredMarket[]> {
+  const eventTypeIds = [...new Set(markets.map((m) => m.eventTypeId))];
+  const competitionIds = [...new Set(markets.map((m) => m.competitionId).filter(Boolean))] as number[];
+  const matchIds = [...new Set(markets.map((m) => m.matchId))];
+
+  const [sportsRows, competitionRows, eventRows] = await Promise.all([
+    db
+      .select({ sportId: sports.sport_id, name: sports.name })
+      .from(sports)
+      .where(inArray(sports.sport_id, eventTypeIds)),
+    competitionIds.length > 0
+      ? db
+          .select({ competitionId: competitions.competition_id, name: competitions.name })
+          .from(competitions)
+          .where(inArray(competitions.competition_id, competitionIds))
+      : Promise.resolve([]),
+    db
+      .select({ eventId: events.eventId, name: events.name })
+      .from(events)
+      .where(inArray(events.eventId, matchIds)),
+  ]);
+
+  const sportMap = new Map(sportsRows.map((r) => [r.sportId, r.name]));
+  const competitionMap = new Map(competitionRows.map((r) => [r.competitionId, r.name]));
+  const eventMap = new Map(eventRows.map((r) => [r.eventId, r.name]));
+
+  return markets.map((m) => ({
+    ...m,
+    eventTypeName: sportMap.get(m.eventTypeId) ?? "",
+    competitionName: m.competitionId ? (competitionMap.get(m.competitionId) ?? "") : "",
+    eventName: eventMap.get(m.matchId) ?? "",
+  }));
 }
 
 /**
@@ -82,7 +126,6 @@ async function checkMarketOddsStatus(
   const resolvedMarketIds = new Set<string>();
 
   try {
-    // Chunk into groups of 30 (API limit)
     const chunks: string[][] = [];
     for (let i = 0; i < marketIds.length; i += 30) {
       chunks.push(marketIds.slice(i, i + 30));
@@ -118,115 +161,8 @@ async function checkMarketOddsStatus(
 }
 
 /**
- * Fetch result from the new Result API and store it in market_results table.
- * Then trigger bet settlement via the result queue.
- */
-async function fetchAndStoreResult(market: UndeclaredMarket): Promise<void> {
-  try {
-    const apiResult = await SportsService.getNewMarketResult({
-      marketId: market.marketId,
-    });
-
-    if (!apiResult?.isSuccess || !apiResult?.items) {
-      console.warn(
-        `[MarketResultCron] No result from API for market ${market.marketId}`
-      );
-      return;
-    }
-
-    const { Status, WinnerId, MarketId } = apiResult.items;
-    const status = Status?.toUpperCase();
-
-    // Only process DECLARED, VOID, ROLLBACK statuses
-    if (!status || status === "PENDING" || status === "INACTIVE" || status === "CLOSED") {
-      return;
-    }
-
-    console.log(
-      `[MarketResultCron] Result for market ${market.marketId}: Status=${status}, WinnerId=${WinnerId}`
-    );
-
-    // Upsert into market_results table
-    await db
-      .insert(marketResults)
-      .values({
-        eventId: market.matchId,
-        eventTypeId: market.eventTypeId,
-        competitionId: market.competitionId,
-        marketId: market.marketId,
-        marketType: market.marketType,
-        status: status,
-        winnerId: WinnerId ? Number(WinnerId) : null,
-        source: "api",
-        apiResponse: apiResult,
-        declaredAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: marketResults.marketId,
-        set: {
-          status: status,
-          winnerId: WinnerId ? Number(WinnerId) : null,
-          apiResponse: apiResult,
-          declaredAt: new Date(),
-          updateDate: new Date(),
-        },
-      });
-
-    // If result is DECLARED, settle the bets
-    if (status === "DECLARED" && WinnerId) {
-      // Build results map: fetch runner details from odds to map all runners
-      const resultsMap = await buildResultsMap(market, Number(WinnerId));
-
-      if (Object.keys(resultsMap).length > 0) {
-        // Update market_results with runners info
-        const runners = Object.entries(resultsMap).map(([selId, result]) => ({
-          selectionId: Number(selId),
-          name: "",
-          result,
-        }));
-
-        await db
-          .update(marketResults)
-          .set({ runners })
-          .where(eq(marketResults.marketId, market.marketId));
-
-        // Queue bet settlement
-        await addResultToQueue({
-          matchId: market.matchId,
-          results: resultsMap,
-        });
-
-        console.log(
-          `[MarketResultCron] Queued settlement for market ${market.marketId}, match ${market.matchId}`
-        );
-      }
-    } else if (status === "VOID" || status === "ROLLBACK") {
-      // For VOID/ROLLBACK, cancel all matched bets for this market
-      await db
-        .update(transactions)
-        .set({ status: "void", settledAt: new Date() })
-        .where(
-          and(
-            eq(transactions.marketId, market.marketId),
-            eq(transactions.status, "matched")
-          )
-        );
-
-      console.log(
-        `[MarketResultCron] Voided all bets for market ${market.marketId} (${status})`
-      );
-    }
-  } catch (error) {
-    console.error(
-      `[MarketResultCron] Error processing result for market ${market.marketId}:`,
-      error
-    );
-  }
-}
-
-/**
  * Build a results map (selectionId → "winner" | "loser") using the Books API
- * and the winnerId from the Result API.
+ * and the winnerId from the Result API. Used to populate varrunners for the procedure.
  */
 async function buildResultsMap(
   market: UndeclaredMarket,
@@ -235,9 +171,7 @@ async function buildResultsMap(
   const results: Record<string, "winner" | "loser"> = {};
 
   try {
-    // For Fancy/Line markets, winnerId is the line value, not a selectionId
     if (market.marketType === MarketType.Fancy) {
-      // For fancy markets, we use the old result endpoints which give per-runner results
       const sessionResults = await SportsService.getSessionResults({
         eventTypeId: String(market.eventTypeId),
         marketIds: [market.marketId],
@@ -245,15 +179,11 @@ async function buildResultsMap(
 
       for (const result of sessionResults) {
         if (result.id && result.result) {
-          const resultStatus = result.result.toUpperCase();
-          results[result.id] =
-            resultStatus === "WINNER" || resultStatus === "WON"
-              ? "winner"
-              : "loser";
+          const s = result.result.toUpperCase();
+          results[result.id] = s === "WINNER" || s === "WON" ? "winner" : "loser";
         }
       }
 
-      // Fallback: if session results are empty, try fancy results
       if (Object.keys(results).length === 0) {
         const fancyResults = await SportsService.getFancyResults({
           eventTypeId: String(market.eventTypeId),
@@ -262,11 +192,8 @@ async function buildResultsMap(
 
         for (const result of fancyResults) {
           if (result.id && result.result) {
-            const resultStatus = result.result.toUpperCase();
-            results[result.id] =
-              resultStatus === "WINNER" || resultStatus === "WON"
-                ? "winner"
-                : "loser";
+            const s = result.result.toUpperCase();
+            results[result.id] = s === "WINNER" || s === "WON" ? "winner" : "loser";
           }
         }
       }
@@ -274,18 +201,14 @@ async function buildResultsMap(
       return results;
     }
 
-    // For Odds/Bookmaker markets: fetch runners from Books API to get all selectionIds
-    const oddsData = await SportsService.getOdds({
-      marketId: market.marketId,
-    });
-
+    const oddsData = await SportsService.getOdds({ marketId: market.marketId });
     const marketOdds = oddsData[market.marketId];
+
     if (marketOdds?.runners && Array.isArray(marketOdds.runners)) {
       for (const runner of marketOdds.runners) {
         const selId = runner.selectionId?.toString();
         if (!selId) continue;
 
-        // Check runner status from odds data first
         const runnerStatus = runner.status?.toUpperCase() || "";
         if (runnerStatus === "WINNER" || runnerStatus === "WON") {
           results[selId] = "winner";
@@ -297,13 +220,10 @@ async function buildResultsMap(
         ) {
           results[selId] = "loser";
         } else {
-          // Fallback: use winnerId from Result API
-          results[selId] =
-            Number(selId) === winnerId ? "winner" : "loser";
+          results[selId] = Number(selId) === winnerId ? "winner" : "loser";
         }
       }
     } else {
-      // If no runners from odds, fallback: get selections from transactions
       const marketBets = await db
         .select({ selectionId: transactions.selectionId })
         .from(transactions)
@@ -328,6 +248,131 @@ async function buildResultsMap(
   }
 
   return results;
+}
+
+/**
+ * Look up the winner's selection name from the transactions table.
+ */
+async function getWinnerName(marketId: string, selectionId: number): Promise<string> {
+  try {
+    const rows = await db
+      .select({ selectionName: transactions.selectionName })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.marketId, marketId),
+          eq(transactions.selectionId, selectionId)
+        )
+      )
+      .limit(1);
+
+    return rows[0]?.selectionName ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetch result from the external Result API and, on a DECLARED result,
+ * call declare_process + update_limit_after_declare stored procedures.
+ * For VOID/ROLLBACK, cancel all matched bets for the market.
+ */
+async function fetchAndStoreResult(market: UndeclaredMarket): Promise<void> {
+  try {
+    const apiResult = await SportsService.getNewMarketResult({
+      marketId: market.marketId,
+    });
+
+    if (!apiResult?.isSuccess || !apiResult?.items) {
+      console.warn(
+        `[MarketResultCron] No result from API for market ${market.marketId}`
+      );
+      return;
+    }
+
+    const { Status, WinnerId } = apiResult.items;
+    const status = Status?.toUpperCase();
+
+    if (!status || status === "PENDING" || status === "INACTIVE" || status === "CLOSED") {
+      return;
+    }
+
+    console.log(
+      `[MarketResultCron] Result for market ${market.marketId}: Status=${status}, WinnerId=${WinnerId}`
+    );
+
+    if (status === "DECLARED" && WinnerId) {
+      const winnerIdNum = Number(WinnerId);
+
+      // For fancy markets: WinnerId is the actual run value (line result).
+      // For odds/bookmaker: WinnerId is the winning selectionId.
+      const isFancy = market.marketType === MarketType.Fancy;
+      const winRunnerId = winnerIdNum;
+      const winRun = isFancy ? winnerIdNum : 0;
+
+      // Winner name — meaningful for odds/bookmaker, not for fancy
+      const winnerName = isFancy
+        ? (market.marketName ?? "")
+        : await getWinnerName(market.marketId, winnerIdNum);
+
+      // Build runners array for storage in market_results (via the procedure)
+      const resultsMap = await buildResultsMap(market, winnerIdNum);
+      const runners = Object.entries(resultsMap).map(([selId, result]) => ({
+        selectionId: Number(selId),
+        name: "",
+        result,
+      }));
+
+      // Call declare_process — archives transactions, creates vouchers, inserts market_results
+      await db.execute(sql`
+        CALL public.declare_process(
+          ${market.marketId}::numeric,
+          ${market.marketType}::int,
+          ${market.eventTypeId}::bigint,
+          ${market.competitionId ?? 0}::bigint,
+          ${market.matchId}::bigint,
+          ${market.eventTypeName}::varchar,
+          ${market.competitionName}::varchar,
+          ${market.eventName}::varchar,
+          ${market.marketName ?? ""}::varchar,
+          ${winRunnerId}::bigint,
+          ${winRun}::int,
+          ${winnerName}::varchar,
+          ${JSON.stringify(runners)}::jsonb,
+          'api'::varchar,
+          ${JSON.stringify(apiResult)}::jsonb
+        )
+      `);
+
+      // Call update_limit_after_declare — recalculates limit_used for all affected users
+      await db.execute(sql`
+        CALL public.update_limit_after_declare(${market.marketId}::numeric)
+      `);
+
+      console.log(
+        `[MarketResultCron] Declared market ${market.marketId} via stored procedures`
+      );
+    } else if (status === "VOID" || status === "ROLLBACK") {
+      await db
+        .update(transactions)
+        .set({ status: "void", settledAt: new Date() })
+        .where(
+          and(
+            eq(transactions.marketId, market.marketId),
+            eq(transactions.status, "matched")
+          )
+        );
+
+      console.log(
+        `[MarketResultCron] Voided all bets for market ${market.marketId} (${status})`
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[MarketResultCron] Error processing result for market ${market.marketId}:`,
+      error
+    );
+  }
 }
 
 /**
@@ -366,7 +411,7 @@ async function processUndeclaredMarkets(marketTypes: number[]): Promise<void> {
       `[MarketResultCron] ${resolvedMarketIds.size} ${label} markets have resolved runners`
     );
 
-    // Step 2: For resolved markets, fetch result from Result API and process
+    // Step 2: For resolved markets, fetch result and run procedures
     const resolvedMarkets = undeclaredMarkets.filter((m) =>
       resolvedMarketIds.has(m.marketId)
     );

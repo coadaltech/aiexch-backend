@@ -900,6 +900,104 @@ export const transactionCommissions = pgTable("transaction_commissions", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
+// ── Transactions Declare (archive after result declared) ─────────────────────
+export const transactionsDeclare = pgTable("transactions_declare", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  whitelabelId: uuid("whitelabel_id"),
+  eventTypeId: bigint("event_type_id", { mode: "number" }).notNull(),
+  competitionId: bigint("competition_id", { mode: "number" }),
+  matchId: bigint("match_id", { mode: "number" }).notNull(),
+  marketId: numeric("market_id").notNull(),
+  marketName: varchar("market_name", { length: 255 }),
+  marketType: integer("market_type").default(0).notNull(),
+  selectionId: bigint("selection_id", { mode: "number" }).notNull(),
+  selectionName: varchar("selection_name", { length: 255 }),
+  betType: integer("bet_type").notNull(),
+  stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
+  odds: decimal("odds", { precision: 10, scale: 4 }).notNull(),
+  status: varchar("status", { length: 20 }).default("matched"),
+  settledAmount: decimal("settled_amount", { precision: 15, scale: 2 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  matchedAt: timestamp("matched_at"),
+  settledAt: timestamp("settled_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  resultCheckedAt: timestamp("result_checked_at"),
+  // ── Audit ──
+  addedBy: uuid("added_by").notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").notNull(),
+  updateDate: timestamp("update_date").defaultNow().notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Transaction Details Declare (archive after result declared) ───────────────
+export const transactionDetailsDeclare = pgTable("transaction_details_declare", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id").notNull(),
+  runnerId: bigint("runner_id", { mode: "number" }).notNull(),
+  runnerName: varchar("runner_name", { length: 255 }),
+  isUserSelection: boolean("is_user_selection").default(false).notNull(),
+  betType: integer("bet_type"),
+  price: decimal("price", { precision: 10, scale: 4 }).notNull(),
+  run: integer("run").default(0),
+  stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
+  potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").notNull(),
+  updateDate: timestamp("update_date").defaultNow().notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Transaction Commissions Declare (archive after result declared) ───────────
+export const transactionCommissionsDeclare = pgTable("transaction_commissions_declare", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  agentId: uuid("agent_id"),
+  agentPercent: decimal("agent_percent", { precision: 5, scale: 2 }).default("0"),
+  masterId: uuid("master_id"),
+  masterPercent: decimal("master_percent", { precision: 5, scale: 2 }).default("0"),
+  superId: uuid("super_id"),
+  superPercent: decimal("super_percent", { precision: 5, scale: 2 }).default("0"),
+  adminId: uuid("admin_id"),
+  adminPercent: decimal("admin_percent", { precision: 5, scale: 2 }).default("0"),
+  ownerId: uuid("owner_id"),
+  ownerPercent: decimal("owner_percent", { precision: 5, scale: 2 }).default("0"),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Transaction Logs Declare (archive after result declared) ──────────────────
+export const transactionLogsDeclare = pgTable("transaction_logs_declare", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  browser: varchar("browser", { length: 100 }),
+  browserVersion: varchar("browser_version", { length: 50 }),
+  os: varchar("os", { length: 100 }),
+  osVersion: varchar("os_version", { length: 50 }),
+  deviceType: varchar("device_type", { length: 20 }),
+  deviceBrand: varchar("device_brand", { length: 100 }),
+  deviceModel: varchar("device_model", { length: 100 }),
+  country: varchar("country", { length: 100 }),
+  city: varchar("city", { length: 100 }),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
 // ── Matka Shifts ────────────────────────────────────────────────────────────
 export const matkaShifts = pgTable("matka_shifts", {
   id: uuid("id").primaryKey().defaultRandom(),
