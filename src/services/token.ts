@@ -14,8 +14,8 @@ export function generateRefreshToken(payload: any) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRY });
 }
 
-export function generateTokens(id: string, email: string, role: number) {
-  const payload = { id, email, role };
+export function generateTokens(id: string, email: string, role: number, sessionToken: string) {
+  const payload = { id, email, role, sessionToken };
 
   const accessToken = generateAccessToken(payload);
   const refreshToken = generateRefreshToken(payload);
@@ -36,6 +36,7 @@ export function decodeToken(token: string) {
     return jwt.decode(token) as {
       id: string;
       role: number;
+      sessionToken?: string;
     };
   } catch (error) {
     return null;

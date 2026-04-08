@@ -34,6 +34,7 @@ export const users = pgTable("users", {
   accountStatus: boolean("account_status").default(true).notNull(),
   parentAccountStatus: boolean("parent_account_status").default(true).notNull(),
   emailVerified: boolean("email_verified").default(false),
+  sessionToken: varchar("session_token", { length: 36 }),
   createdBy: uuid("created_by"),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),

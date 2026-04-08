@@ -10,7 +10,7 @@ import {
   users,
   profiles,
 } from "../db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, ne, gte, lte } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
 import { parseUserAgent } from "../utils/parse-ua";
 import { RecordStatus, UserRole } from "../types/enums";
@@ -104,8 +104,21 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
 
   // ── Public: get jantri totals for a shift ─────────────────────────────────
   // Returns aggregated bet amounts per number for display in the grid
-  .get("/shifts/:id/jantri", async ({ params, set }) => {
+  // Optional ?date=YYYY-MM-DD to filter by transactionDate
+  .get("/shifts/:id/jantri", async ({ params, set, query }) => {
     try {
+      const dateFilter = (query as any)?.date as string | undefined;
+
+      const whereConditions = [
+        eq(matkaTransactions.shiftId, params.id),
+        eq(matkaTransactions.recordStatus, RecordStatus.Active),
+        eq(matkaTransactionDetails.recordStatus, RecordStatus.Active),
+      ];
+
+      if (dateFilter) {
+        whereConditions.push(eq(matkaTransactions.transactionDate, dateFilter));
+      }
+
       const totals = await db
         .select({
           number: matkaTransactionDetails.number,
@@ -117,13 +130,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           matkaTransactions,
           eq(matkaTransactionDetails.transactionId, matkaTransactions.id)
         )
-        .where(
-          and(
-            eq(matkaTransactions.shiftId, params.id),
-            eq(matkaTransactions.recordStatus, RecordStatus.Active),
-            eq(matkaTransactionDetails.recordStatus, RecordStatus.Active)
-          )
-        )
+        .where(and(...whereConditions))
         .groupBy(matkaTransactionDetails.number, matkaTransactionDetails.numberType);
 
       return { success: true, data: totals };
@@ -139,8 +146,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   // ── Protected routes ──────────────────────────────────────────────────────
   .state({ id: "" as string, role: 0 as number })
   .guard({
-    beforeHandle({ cookie, headers, set, store }) {
-      const state_result = app_middleware({ cookie, headers });
+    async beforeHandle({ cookie, headers, set, store }) {
+      const state_result = await app_middleware({ cookie, headers });
       set.status = state_result.code;
       if (!state_result.data) return state_result;
       store.id = state_result.data.id;
@@ -489,4 +496,290 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         error: error instanceof Error ? error.message : "Failed to fetch bets",
       };
     }
-  });
+  })
+
+  // ── Get single transaction with details ───────────────────────────────────
+  .get("/transactions/:id", async ({ params, store, set }) => {
+    try {
+      const [txn] = await db
+        .select({
+          id: matkaTransactions.id,
+          shiftId: matkaTransactions.shiftId,
+          shiftName: matkaShifts.name,
+          shiftDate: matkaShifts.shiftDate,
+          transactionDate: matkaTransactions.transactionDate,
+          totalAmount: matkaTransactions.totalAmount,
+          totalCommission: matkaTransactions.totalCommission,
+          finalAmount: matkaTransactions.finalAmount,
+          daraRate: matkaTransactions.daraRate,
+          akharRate: matkaTransactions.akharRate,
+          addedDate: matkaTransactions.addedDate,
+        })
+        .from(matkaTransactions)
+        .innerJoin(matkaShifts, eq(matkaTransactions.shiftId, matkaShifts.id))
+        .where(
+          and(
+            eq(matkaTransactions.id, params.id),
+            eq(matkaTransactions.userId, store.id),
+            eq(matkaTransactions.recordStatus, RecordStatus.Active)
+          )
+        );
+
+      if (!txn) {
+        set.status = 404;
+        return { success: false, error: "Transaction not found" };
+      }
+
+      const details = await db
+        .select({
+          id: matkaTransactionDetails.id,
+          numberType: matkaTransactionDetails.numberType,
+          number: matkaTransactionDetails.number,
+          amount: matkaTransactionDetails.amount,
+          rate: matkaTransactionDetails.rate,
+          commission: matkaTransactionDetails.commission,
+        })
+        .from(matkaTransactionDetails)
+        .where(
+          and(
+            eq(matkaTransactionDetails.transactionId, params.id),
+            eq(matkaTransactionDetails.recordStatus, RecordStatus.Active)
+          )
+        );
+
+      return { success: true, data: { ...txn, details } };
+    } catch (error) {
+      set.status = 500;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to fetch transaction",
+      };
+    }
+  })
+
+  // ── Soft-delete a transaction ─────────────────────────────────────────────
+  .delete("/transactions/:id", async ({ params, store, set }) => {
+    try {
+      // Verify ownership
+      const [txn] = await db
+        .select()
+        .from(matkaTransactions)
+        .where(
+          and(
+            eq(matkaTransactions.id, params.id),
+            eq(matkaTransactions.userId, store.id),
+            eq(matkaTransactions.recordStatus, RecordStatus.Active)
+          )
+        );
+
+      if (!txn) {
+        set.status = 404;
+        return { success: false, error: "Transaction not found" };
+      }
+
+      // Soft-delete transaction and its details
+      await db
+        .update(matkaTransactions)
+        .set({ recordStatus: RecordStatus.Deleted })
+        .where(eq(matkaTransactions.id, params.id));
+
+      await db
+        .update(matkaTransactionDetails)
+        .set({ recordStatus: RecordStatus.Deleted })
+        .where(eq(matkaTransactionDetails.transactionId, params.id));
+
+      // Restore ledger: subtract totalAmount from limitConsumed (floor at 0)
+      const [ledger] = await db
+        .select()
+        .from(ledgerLimit)
+        .where(eq(ledgerLimit.userId, store.id));
+
+      if (ledger) {
+        const newConsumed = Math.max(
+          0,
+          Number(ledger.limitConsumed) - Number(txn.totalAmount)
+        );
+        await db
+          .update(ledgerLimit)
+          .set({ limitConsumed: String(newConsumed) })
+          .where(eq(ledgerLimit.userId, store.id));
+      }
+
+      return { success: true };
+    } catch (error) {
+      set.status = 500;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to delete transaction",
+      };
+    }
+  })
+
+  // ── Update (edit) a transaction ───────────────────────────────────────────
+  .put(
+    "/transactions/:id",
+    async ({ params, store, set, body }) => {
+      try {
+        const { bets } = body as {
+          bets: { number: string; numberType: number; amount: number }[];
+        };
+
+        if (!bets || bets.length === 0) {
+          set.status = 400;
+          return { success: false, error: "Bets are required" };
+        }
+
+        // Verify ownership
+        const [txn] = await db
+          .select()
+          .from(matkaTransactions)
+          .where(
+            and(
+              eq(matkaTransactions.id, params.id),
+              eq(matkaTransactions.userId, store.id),
+              eq(matkaTransactions.recordStatus, RecordStatus.Active)
+            )
+          );
+
+        if (!txn) {
+          set.status = 404;
+          return { success: false, error: "Transaction not found" };
+        }
+
+        // Validate shift still open
+        if (!txn.shiftId) {
+          set.status = 400;
+          return { success: false, error: "Transaction has no associated shift" };
+        }
+
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(
+            and(
+              eq(matkaShifts.id, txn.shiftId),
+              eq(matkaShifts.isActive, true),
+              eq(matkaShifts.recordStatus, RecordStatus.Active)
+            )
+          );
+
+        if (!shift) {
+          set.status = 400;
+          return { success: false, error: "Shift not found or inactive" };
+        }
+
+        if (shift.mainJantriTime) {
+          const now = new Date();
+          const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
+          const shiftTime = new Date(shift.shiftDate);
+          shiftTime.setHours(hours, minutes, 0, 0);
+          if (shift.nextDayAllow) {
+            shiftTime.setDate(shiftTime.getDate() + 1);
+          }
+          if (now > shiftTime) {
+            set.status = 400;
+            return { success: false, error: "Shift betting time has closed" };
+          }
+        }
+
+        // Calculate new totals
+        const daraRate = Number(shift.daraRate);
+        const daraCommission = Number(shift.daraCommission);
+        const akharRate = Number(shift.akharRate);
+        const akharCommission = Number(shift.akharCommission);
+
+        let newTotalAmount = 0;
+        let newTotalCommission = 0;
+
+        const newDetailRows = bets.map((bet, idx) => {
+          const isAkhar = bet.numberType === 2 || bet.numberType === 3;
+          const rate = isAkhar ? akharRate : daraRate;
+          const commPercent = isAkhar ? akharCommission : daraCommission;
+          const commission = (bet.amount * commPercent) / 100;
+          const finalAmt = bet.amount - commission;
+
+          newTotalAmount += bet.amount;
+          newTotalCommission += commission;
+
+          return {
+            transactionId: params.id,
+            numberType: bet.numberType,
+            number: bet.number,
+            amount: String(bet.amount),
+            rate: String(rate),
+            commission: String(commission),
+            finalAmount: String(finalAmt),
+            orderNumber: idx + 1,
+            addedBy: store.id,
+            updateBy: store.id,
+          };
+        });
+
+        const newFinalAmount = newTotalAmount - newTotalCommission;
+        const oldTotal = Number(txn.totalAmount);
+        const diff = newTotalAmount - oldTotal;
+
+        // Update ledger: add diff (can be positive or negative)
+        const [ledger] = await db
+          .select()
+          .from(ledgerLimit)
+          .where(eq(ledgerLimit.userId, store.id));
+
+        if (ledger) {
+          const newConsumed = Math.max(0, Number(ledger.limitConsumed) + diff);
+          await db
+            .update(ledgerLimit)
+            .set({ limitConsumed: String(newConsumed) })
+            .where(eq(ledgerLimit.userId, store.id));
+        }
+
+        // Soft-delete existing details
+        await db
+          .update(matkaTransactionDetails)
+          .set({ recordStatus: RecordStatus.Deleted })
+          .where(eq(matkaTransactionDetails.transactionId, params.id));
+
+        // Insert new details
+        await db.insert(matkaTransactionDetails).values(newDetailRows);
+
+        // Update transaction header
+        await db
+          .update(matkaTransactions)
+          .set({
+            totalAmount: String(newTotalAmount),
+            totalCommission: String(newTotalCommission),
+            finalAmount: String(newFinalAmount),
+            updateBy: store.id,
+          })
+          .where(eq(matkaTransactions.id, params.id));
+
+        return {
+          success: true,
+          data: {
+            transactionId: params.id,
+            totalAmount: newTotalAmount,
+            totalCommission: newTotalCommission,
+            finalAmount: newFinalAmount,
+            betCount: bets.length,
+          },
+        };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to update transaction",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        bets: t.Array(
+          t.Object({
+            number: t.String(),
+            numberType: t.Number(),
+            amount: t.Number({ minimum: 1 }),
+          })
+        ),
+      }),
+    }
+  );

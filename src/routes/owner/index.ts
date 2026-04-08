@@ -24,8 +24,8 @@ import { liveMarketsRoutes } from "./live-markets";
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .state({ id: "", role: 0 as number })
   .guard({
-    beforeHandle({ cookie, headers, set, store }) {
-      const state_result = app_middleware({
+    async beforeHandle({ cookie, headers, set, store }) {
+      const state_result = await app_middleware({
         cookie,
         headers,
         allowed: [UserRole.Owner, UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent],

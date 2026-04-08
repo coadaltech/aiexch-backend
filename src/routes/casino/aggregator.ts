@@ -59,8 +59,8 @@ export const casinoAggregatorRoutes = new Elysia({ prefix: "/casino" })
 
   .state({ id: 0, role: 0 as number })
   .guard({
-    beforeHandle({ cookie, headers, set, store }) {
-      const state_result = app_middleware({ cookie, headers });
+    async beforeHandle({ cookie, headers, set, store }) {
+      const state_result = await app_middleware({ cookie, headers });
 
       set.status = state_result.code;
       if (!state_result.data) return state_result;

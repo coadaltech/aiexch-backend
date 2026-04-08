@@ -128,7 +128,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     async ({ body, headers, request, set, cookie, db, whitelabel }) => {
       try {
 
-        const { email, password } = body;
+        const { username, password } = body;
 
         const clientIP = getCurrentIP(headers, request);
         const ua = parseUserAgent(request.headers.get("user-agent"));
@@ -136,7 +136,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         const [user] = await db
           .select()
           .from(users)
-          .where(eq(users.email, email));
+          .where(eq(users.username, username));
 
         if (!user) {
           set.status = 404;
@@ -220,10 +220,16 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           status: "success",
         });
 
+        // Generate a unique session token — stored in DB and embedded in JWT.
+        // Any new login overwrites this, invalidating all previous sessions.
+        const sessionToken = crypto.randomUUID();
+        await db.update(users).set({ sessionToken }).where(eq(users.id, user.id));
+
         const { accessToken, refreshToken } = generateTokens(
           user.id,
           user.email,
-          user.role ?? UserRole.User
+          user.role ?? UserRole.User,
+          sessionToken
         );
 
         cookie.accessToken.set({
@@ -259,7 +265,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     },
     {
       body: t.Object({
-        email: t.String({ format: "email" }),
+        username: t.String({ minLength: 1 }),
         password: t.String({ minLength: 1 }),
       }),
     }
@@ -396,11 +402,20 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         return { success: false, message: "Account suspended" };
       }
 
-      // Generate new tokens
+      // Validate session token — if the user logged in on another device since
+      // this token was issued, decoded.sessionToken won't match the DB value.
+      if (decoded.sessionToken && user.sessionToken && decoded.sessionToken !== user.sessionToken) {
+        set.status = 401;
+        return { success: false, message: "Session expired. Please login again." };
+      }
+
+      // Generate new tokens (preserve the same sessionToken so only a new login invalidates the session)
+      const sessionToken = user.sessionToken ?? decoded.sessionToken ?? crypto.randomUUID();
       const { accessToken, refreshToken: newRefreshToken } = generateTokens(
         user.id,
         user.email,
-        user.role ?? UserRole.User
+        user.role ?? UserRole.User,
+        sessionToken
       );
 
       // Set new tokens in cookies

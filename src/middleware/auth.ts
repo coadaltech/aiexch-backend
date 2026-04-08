@@ -1,6 +1,10 @@
 import jwt from "jsonwebtoken";
 import { Cookie } from "elysia";
 import { RoleType } from "../types";
+import { db } from "@db/index";
+import { users } from "@db/schema";
+import { eq } from "drizzle-orm";
+import { decodeToken } from "@services/token";
 
 interface ElysiaMiddlewareType {
   cookie: Record<string, Cookie<string | undefined | unknown>>;
@@ -17,7 +21,7 @@ export const authenticate_jwt = (access_token: string) => {
       success: true,
       code: 200,
       message: "Valid Access Token",
-      data: decoded as { id: string; role: RoleType },
+      data: decoded as { id: string; role: RoleType; sessionToken?: string },
     };
   } catch (err) {
     return {
@@ -28,7 +32,7 @@ export const authenticate_jwt = (access_token: string) => {
   }
 };
 
-export const app_middleware = ({ cookie, headers, allowed }: ElysiaMiddlewareType) => {
+export const app_middleware = async ({ cookie, headers, allowed }: ElysiaMiddlewareType) => {
   // Prefer Authorization header (works cross-domain on Safari), fall back to cookie
   const authHeader = headers?.authorization;
   const tokenFromHeader = authHeader?.replace(/^Bearer\s+/i, "").trim();
@@ -63,6 +67,32 @@ export const app_middleware = ({ cookie, headers, allowed }: ElysiaMiddlewareTyp
       message: "Restricted Endpoint",
     };
   }
+
+  // ── Session token validation ──────────────────────────────────────────────
+  // Decode the token to get the sessionToken embedded at login time, then
+  // compare it against the value stored in the DB.  If they differ, the user
+  // has logged in on another device/tab and this session is now invalid.
+  const decoded = decodeToken(access_token);
+  if (decoded?.sessionToken) {
+    try {
+      const [userRecord] = await db
+        .select({ sessionToken: users.sessionToken })
+        .from(users)
+        .where(eq(users.id, middleware_response.data.id))
+        .limit(1);
+
+      if (userRecord?.sessionToken && userRecord.sessionToken !== decoded.sessionToken) {
+        return {
+          success: false,
+          code: 401,
+          message: "Session expired. You have been logged in on another device.",
+        };
+      }
+    } catch {
+      // DB lookup failure — don't block the request, let it through
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   return {
     success: middleware_response.success,
