@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { sportsGames } from "../db/schema";
-import { eq } from "drizzle-orm";
+import { sportsGames, transactions } from "../db/schema";
+import { eq, inArray, sql } from "drizzle-orm";
 import { SportsService } from "../services/sports";
 import { getAvailableSportsList } from "../services/sports-service";
 import { whitelabel_middleware } from "../middleware/whitelabel";
@@ -259,6 +259,34 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
     } catch {
       set.status = 500;
       return { success: false, error: "Failed to fetch new market results" };
+    }
+  })
+
+  // Returns total bet counts per match for a list of matchIds (comma-separated)
+  .get("/bet-counts", async ({ query, set }) => {
+    try {
+      const ids = (query?.matchIds as string || "").split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      if (ids.length === 0) {
+        set.status = 200;
+        return { success: true, data: {} };
+      }
+      const rows = await db
+        .select({
+          matchId: transactions.matchId,
+          count: sql<number>`cast(count(*) as int)`,
+        })
+        .from(transactions)
+        .where(inArray(transactions.matchId, ids))
+        .groupBy(transactions.matchId);
+      const data: Record<string, number> = {};
+      for (const row of rows) {
+        data[String(row.matchId)] = row.count;
+      }
+      set.status = 200;
+      return { success: true, data };
+    } catch {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch bet counts" };
     }
   })
 
