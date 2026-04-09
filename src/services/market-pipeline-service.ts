@@ -131,6 +131,7 @@ export const MarketPipelineService = {
             status: isSuspended ? "SUSPENDED" : market.status,
             inPlay: market.inPlay,
             bettingType: market.bettingType,
+            provider: market.provider ?? "BETFAIR",
             marketCondition: finalCondition,
             sportingEvent: marketOdds?.sportingEvent ?? market.sportingEvent,
             adminDisabled,
