@@ -7,7 +7,7 @@ import cron from "node-cron";
 import { syncAllActiveCompetitionEvents } from "../services/event-sync-service";
 
 // API Configuration
-const API_BASE_URL = "https://api.aiexch.com/sports-proxy/sports";
+const API_BASE_URL = "https://api.aiexch.com/Soe81s9017b44b6d822da257xk055b11/sports";
 
 // Helper function for API calls
 const fetchApi = async (url: string) => {

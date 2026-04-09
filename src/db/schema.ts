@@ -1039,6 +1039,11 @@ export const matkaTransactions = pgTable("matka_transactions", {
   totalCommission: decimal("total_commission", { precision: 15, scale: 2 }).default("0").notNull(),
   finalAmount: decimal("final_amount", { precision: 15, scale: 2 }).default("0").notNull(),
   deviceType: varchar("device_type", { length: 10 }).default("WEB").notNull(),
+  // ── Copy reference (which shift this was copied from) ──
+  copyReferenceShiftId: uuid("copy_reference_shift_id")
+    .references(() => matkaShifts.id, { onDelete: "set null" }),
+  // ── Whitelabel tracking ──
+  whitelabelId: uuid("whitelabel_id"),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

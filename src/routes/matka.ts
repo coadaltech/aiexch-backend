@@ -160,9 +160,11 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     "/place",
     async ({ body, store, set, request }) => {
       try {
-        const { shiftId, bets } = body as {
+        const { shiftId, bets, copyReferenceShiftId, whitelabelId } = body as {
           shiftId: string;
           bets: { number: string; numberType: number; amount: number }[];
+          copyReferenceShiftId?: string;
+          whitelabelId?: string;
         };
 
         if (!shiftId || !bets || bets.length === 0) {
@@ -320,6 +322,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             totalAmount: String(totalAmount),
             totalCommission: String(totalCommission),
             finalAmount: String(finalAmount),
+            ...(copyReferenceShiftId ? { copyReferenceShiftId } : {}),
+            ...(whitelabelId ? { whitelabelId } : {}),
             addedBy: store.id,
             updateBy: store.id,
           })
@@ -458,13 +462,39 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             amount: t.Number({ minimum: 1 }),
           })
         ),
+        copyReferenceShiftId: t.Optional(t.String()),
+        whitelabelId: t.Optional(t.String()),
       }),
     }
   )
 
   // ── Get user's matka bet history ──────────────────────────────────────────
+  // Query params:
+  //   ?shiftId=uuid   – filter by shift
+  //   ?status=active  – only today's transactions (default)
+  //   ?status=inactive – only transactions before today
   .get("/my-bets", async ({ store, set, query }) => {
     try {
+      const today = new Date().toISOString().split("T")[0];
+      const filterShiftId = (query as any)?.shiftId as string | undefined;
+      const filterStatus = (query as any)?.status as string | undefined;
+
+      const whereConditions: any[] = [
+        eq(matkaTransactions.userId, store.id),
+        eq(matkaTransactions.recordStatus, RecordStatus.Active),
+      ];
+
+      if (filterShiftId) {
+        whereConditions.push(eq(matkaTransactions.shiftId, filterShiftId));
+      }
+
+      if (filterStatus === "inactive") {
+        whereConditions.push(sql`${matkaTransactions.transactionDate} < ${today}::date`);
+      } else {
+        // default: active = today only
+        whereConditions.push(eq(matkaTransactions.transactionDate, today));
+      }
+
       const txns = await db
         .select({
           id: matkaTransactions.id,
@@ -476,19 +506,37 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           totalCommission: matkaTransactions.totalCommission,
           finalAmount: matkaTransactions.finalAmount,
           addedDate: matkaTransactions.addedDate,
+          copyReferenceShiftId: matkaTransactions.copyReferenceShiftId,
+          whitelabelId: matkaTransactions.whitelabelId,
         })
         .from(matkaTransactions)
         .innerJoin(matkaShifts, eq(matkaTransactions.shiftId, matkaShifts.id))
-        .where(
-          and(
-            eq(matkaTransactions.userId, store.id),
-            eq(matkaTransactions.recordStatus, RecordStatus.Active)
-          )
-        )
+        .where(and(...whereConditions))
         .orderBy(desc(matkaTransactions.addedDate))
-        .limit(50);
+        .limit(200);
 
-      return { success: true, data: txns };
+      // Resolve copy-reference shift names in one extra query if needed
+      const refShiftIds = [...new Set(
+        txns.map((t) => t.copyReferenceShiftId).filter(Boolean) as string[]
+      )];
+
+      let refShiftMap: Record<string, string> = {};
+      if (refShiftIds.length > 0) {
+        const refRows = await db
+          .select({ id: matkaShifts.id, name: matkaShifts.name })
+          .from(matkaShifts)
+          .where(sql`${matkaShifts.id} = ANY(ARRAY[${sql.join(refShiftIds.map(id => sql`${id}::uuid`), sql`, `)}])`);
+        for (const r of refRows) refShiftMap[r.id] = r.name;
+      }
+
+      const data = txns.map((t) => ({
+        ...t,
+        copyReferenceShiftName: t.copyReferenceShiftId
+          ? refShiftMap[t.copyReferenceShiftId] ?? null
+          : null,
+      }));
+
+      return { success: true, data };
     } catch (error) {
       set.status = 500;
       return {

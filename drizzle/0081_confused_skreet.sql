@@ -1,0 +1,3 @@
+ALTER TABLE "matka_transactions" ADD COLUMN "copy_reference_shift_id" uuid;--> statement-breakpoint
+ALTER TABLE "matka_transactions" ADD COLUMN "whitelabel_id" uuid;--> statement-breakpoint
+ALTER TABLE "matka_transactions" ADD CONSTRAINT "matka_transactions_copy_reference_shift_id_matka_shifts_id_fk" FOREIGN KEY ("copy_reference_shift_id") REFERENCES "public"."matka_shifts"("id") ON DELETE set null ON UPDATE no action;
