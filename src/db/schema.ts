@@ -510,8 +510,8 @@ export const transactionDetails = pgTable("transaction_details", {
   runnerName: varchar("runner_name", { length: 255 }),
   isUserSelection: boolean("is_user_selection").default(false).notNull(),
   betType: integer("bet_type"), // 0=back, 1=lay (BetType enum)
-  price: decimal("price", { precision: 10, scale: 4 }).notNull(),
   basePrice: decimal("base_price", { precision: 10, scale: 4 }).notNull(),
+  price: decimal("price", { precision: 10, scale: 4 }).notNull(),
   run: integer("run").default(0),
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
