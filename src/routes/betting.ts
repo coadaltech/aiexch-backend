@@ -41,6 +41,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         run,
         type,
         runners,
+        provider,
       } = body as {
         matchId: string | number;
         marketId: string | number;
@@ -56,6 +57,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         run?: number | null;
         type: "back" | "lay";
         runners: { id: string | number; name: string; price: number }[];
+        provider?: string;
       };
 
       // Validate input
@@ -204,16 +206,21 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // Odds market: 3 rows (Team A, Team B, Draw)
         // Bookmaker market: 2 rows (Team A, Team B)
         // Line market: 1 row (session runner with run value)
+        const isBetfair = provider?.toUpperCase() === "BETFAIR";
         const detailRows = runners.map((runner) => {
           const runnerId = Number(runner.id);
           const isSelected = runnerId === numericSelectionId;
+          // BETFAIR: store price-1 in `price` (profit multiplier), raw odds in `basePrice`
+          // Others:  store raw odds in both `price` and `basePrice`
+          const storedPrice = isBetfair ? runner.price - 1 : runner.price;
           return {
             transactionId: newTxn.id,
             runnerId,
             runnerName: runner.name || null,
             isUserSelection: isSelected,
             betType: parseBetType(type),
-            price: runner.price.toString(),
+            price: storedPrice.toString(),
+            basePrice: runner.price.toString(),
             run: isSelected && run != null ? Math.round(run) : 0,
             stake: stake.toString(),
             potentialReturn: isSelected ? potentialReturn.toFixed(2) : "0",
