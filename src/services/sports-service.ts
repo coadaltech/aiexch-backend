@@ -1,6 +1,7 @@
 // src/services/sports-service.ts
 import { db } from "@db/index";
 import { sports } from "@db/schema";
+import { asc } from "drizzle-orm";
 import { CacheService } from "./cache";
 
 export const getAvailableSportsList = async () => {
@@ -16,11 +17,11 @@ export const getAvailableSportsList = async () => {
     // Retry once — Neon cold start may fail the first query
     let sportsData;
     try {
-      sportsData = await db.select().from(sports);
+      sportsData = await db.select().from(sports).orderBy(asc(sports.sort_order));
     } catch (firstError) {
       console.warn("First DB query failed (possible cold start), retrying in 3s...");
       await new Promise(r => setTimeout(r, 3000));
-      sportsData = await db.select().from(sports);
+      sportsData = await db.select().from(sports).orderBy(asc(sports.sort_order));
     }
 
     const transformedData = sportsData.map((sport) => ({

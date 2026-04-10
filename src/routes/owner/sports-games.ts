@@ -1,7 +1,8 @@
 import { Elysia, t } from "elysia";
 import { db } from "../../db";
-import { sports, sportsGames, competitions } from "../../db/schema";
+import { sports, sportsGames, competitions, SYSTEM_USER_ID } from "../../db/schema";
 import { eq } from "drizzle-orm";
+import { CacheService } from "../../services/cache";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { resolveOwnerScope } from "../../utils/ownerScope";
 import { UserRole } from "../../types/enums";
@@ -117,6 +118,34 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
       id: t.String(),
     }),
   })
+
+  // ── Bulk reorder sports (drag-and-drop display order) ─────────────────
+  .put(
+    "/reorder",
+    async ({ body, set }) => {
+      try {
+        const { sports: sportOrders } = body as {
+          sports: Array<{ sportId: number; sortOrder: number }>;
+        };
+
+        for (const { sportId, sortOrder } of sportOrders) {
+          await db
+            .update(sports)
+            .set({ sort_order: sortOrder, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
+            .where(eq(sports.sport_id, sportId));
+        }
+
+        // Bust the sports list cache so the sidebar reflects the new order immediately
+        await CacheService.del("sports:list");
+
+        set.status = 200;
+        return { success: true };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to reorder sports" };
+      }
+    },
+  )
 
   // ── Sync all competitions from external API ────────────────────────────
   .post("/sync-competitions", async ({ set }) => {

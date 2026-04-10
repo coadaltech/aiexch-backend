@@ -148,12 +148,12 @@ async function initializeServices() {
   }
 
   // // Step 6: Start sports & competitions sync cron jobs
-  // try {
-  //   await startCronJobs();
-  //   console.log("[Init] Sports/competitions sync cron started");
-  // } catch (e) {
-  //   console.error("[Init] Sports sync cron failed (non-fatal):", e);
-  // }
+  try {
+    await startCronJobs();
+    console.log("[Init] Sports/competitions sync cron started");
+  } catch (e) {
+    console.error("[Init] Sports sync cron failed (non-fatal):", e);
+  }
 
   // Step 6: Clean up stale Redis keys and trim bloated streams
   await cleanupRedis();

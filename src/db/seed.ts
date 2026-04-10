@@ -9,6 +9,19 @@ import { syncAllActiveCompetitionEvents } from "../services/event-sync-service";
 // API Configuration
 const API_BASE_URL = "https://api.aiexch.com/Soe81s9017b44b6d822da257xk055b11/sports";
 
+// ── ID remappings: API returns one ID but competitions live under a different ID ─
+const SPORT_ID_REMAPPINGS: Record<number, number> = {
+  2378961: 500, // Politics — API event ID is 2378961, but competitions are fetched under 500
+};
+
+// ── Manually managed sports that are not returned by the external API ──────────
+const MANUAL_SPORTS = [
+  { sport_id: 1001, name: "Matka" },
+  { sport_id: 1002, name: "Lottery" },
+  { sport_id: 1003, name: "Skill Games" },
+  { sport_id: 1004, name: "Jambo" },
+];
+
 // Helper function for API calls
 const fetchApi = async (url: string) => {
   try {
@@ -77,11 +90,15 @@ const getCompetitionsFromApi = async (sportId: number) => {
 // DB Operations
 const upsertSport = async (sportData: any) => {
   try {
-    const sportId =
+    let sportId =
       sportData.id ||
       sportData.eventTypeId ||
       sportData.sport_id ||
       sportData.eventType?.id;
+    // Apply ID remapping (e.g. Politics 2378961 → 500)
+    if (sportId && SPORT_ID_REMAPPINGS[Number(sportId)]) {
+      sportId = SPORT_ID_REMAPPINGS[Number(sportId)];
+    }
     const sportName =
       sportData.name ||
       sportData.eventTypeName ||
@@ -220,6 +237,40 @@ const syncSports = async () => {
     console.log(
       `Sports sync done — Total: ${sportsData.length} | Added: ${addedCount} | Updated: ${updatedCount} | Errors: ${errorCount}`,
     );
+
+    // Upsert manually managed sports (matka, lottery, etc.)
+    // Preserves is_active if the row already exists
+    for (const manual of MANUAL_SPORTS) {
+      try {
+        const existing = await db
+          .select()
+          .from(sports)
+          .where(eq(sports.sport_id, manual.sport_id))
+          .limit(1);
+
+        if (existing.length > 0) {
+          await db
+            .update(sports)
+            .set({ name: manual.name, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
+            .where(eq(sports.sport_id, manual.sport_id));
+          console.log(`Manual sport updated: ${manual.name} (ID: ${manual.sport_id})`);
+        } else {
+          await db.insert(sports).values({
+            sport_id: manual.sport_id,
+            name: manual.name,
+            is_active: false,
+            sort_order: 0,
+            addedBy: SYSTEM_USER_ID,
+            addedDate: new Date(),
+            updateBy: SYSTEM_USER_ID,
+            updateDate: new Date(),
+          });
+          console.log(`Manual sport added: ${manual.name} (ID: ${manual.sport_id})`);
+        }
+      } catch (err: any) {
+        console.error(`Error upserting manual sport ${manual.name}:`, err.message);
+      }
+    }
 
     return {
       total: sportsData.length,
