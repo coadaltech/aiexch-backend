@@ -172,7 +172,6 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       // the user's limit covers that.
 
       // ── STEP 2: Insert bet + details in a single transaction ──
-      const potentialReturn = stake * odds;
       const today = new Date();
       const numericSelectionId = Number(selectionId);
 
@@ -207,12 +206,24 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // Bookmaker market: 2 rows (Team A, Team B)
         // Line market: 1 row (session runner with run value)
         const isBetfair = provider?.toUpperCase() === "BETFAIR";
+        const isBack = type === "back";
         const detailRows = runners.map((runner) => {
           const runnerId = Number(runner.id);
           const isSelected = runnerId === numericSelectionId;
           // BETFAIR: store price-1 in `price` (profit multiplier), raw odds in `basePrice`
           // Others:  store raw odds in both `price` and `basePrice`
           const storedPrice = isBetfair ? runner.price - 1 : runner.price;
+
+          // potentialReturn = P&L for this runner if IT wins
+          // Back bet:  selected runner wins → +stake * storedPrice; other runners win → -stake
+          // Lay bet:   selected runner wins → -(stake * storedPrice) liability; others win → +stake
+          let runnerPotentialReturn: number;
+          if (isBack) {
+            runnerPotentialReturn = isSelected ? stake * storedPrice : -stake;
+          } else {
+            runnerPotentialReturn = isSelected ? -(stake * storedPrice) : stake;
+          }
+
           return {
             transactionId: newTxn.id,
             runnerId,
@@ -223,7 +234,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             basePrice: runner.price.toString(),
             run: isSelected && run != null ? Math.round(run) : 0,
             stake: stake.toString(),
-            potentialReturn: isSelected ? potentialReturn.toFixed(2) : "0",
+            potentialReturn: runnerPotentialReturn.toFixed(2),
             addedBy: store.id,
             updateBy: store.id,
           };
