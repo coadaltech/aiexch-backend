@@ -403,14 +403,14 @@ export const startCronJobs = async () => {
   console.log("[Seed] Setting up cron jobs...");
 
   // Sports: every 24 hours at midnight UTC
-  cron.schedule(
-    "0 0 * * *",
-    () => {
-      console.log("[Seed] Running scheduled sports sync...");
-      syncSports();
-    },
-    { timezone: "UTC" },
-  );
+  // cron.schedule(
+  //   "0 0 * * *",
+  //   () => {
+  //     console.log("[Seed] Running scheduled sports sync...");
+  //     syncSports();
+  //   },
+  //   { timezone: "UTC" },
+  // );
 
   // Competitions: every 12 hours
   cron.schedule(
@@ -422,9 +422,9 @@ export const startCronJobs = async () => {
     { timezone: "UTC" },
   );
 
-  // Events: every 30 minutes — sync events for all active competitions
+  // Events: every 12 hours — sync events for all active competitions
   cron.schedule(
-    "*/30 * * * *",
+    "0 */12 * * *",
     () => {
       console.log("[Seed] Running scheduled events sync...");
       syncAllActiveCompetitionEvents();
@@ -436,7 +436,7 @@ export const startCronJobs = async () => {
 
   // Run initial sync immediately
   console.log("[Seed] Running initial sync...");
-  await syncSports();
+  // await syncSports();
   await syncCompetitions();
   await syncAllActiveCompetitionEvents();
   console.log("[Seed] Initial sync completed!");
@@ -451,16 +451,16 @@ export const runAll = async () => {
 };
 
 // Manual execution
-if (import.meta.main) {
-  runAll()
-    .then(() => {
-      console.log("Manual execution completed!");
-      process.exit(0);
-    })
-    .catch((error) => {
-      console.error("Manual execution failed:", error);
-      process.exit(1);
-    });
-}
+// if (import.meta.main) {
+//   runAll()
+//     .then(() => {
+//       console.log("Manual execution completed!");
+//       process.exit(0);
+//     })
+//     .catch((error) => {
+//       console.error("Manual execution failed:", error);
+//       process.exit(1);
+//     });
+// }
 
 export { syncSports, syncCompetitions };
