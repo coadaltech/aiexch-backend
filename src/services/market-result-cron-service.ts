@@ -301,7 +301,7 @@ async function fetchAndStoreResult(market: UndeclaredMarket): Promise<void> {
       `[MarketResultCron] Result for market ${market.marketId}: Status=${status}, WinnerId=${WinnerId}`
     );
 
-    if (status === "DECLARED" && WinnerId) {
+    if (status === "DECLARED" && WinnerId != null) {
       const winnerIdNum = Number(WinnerId);
 
       // For fancy markets: WinnerId is the actual run value (line result).
@@ -363,6 +363,35 @@ async function fetchAndStoreResult(market: UndeclaredMarket): Promise<void> {
           )
         );
 
+      // Record the void/rollback in market_results so this market is not retried
+      await db.execute(sql`
+        INSERT INTO public.market_results (
+          id, event_id, event_type_id, competition_id, market_id, market_type,
+          status, source, api_response, settled_at, declared_at,
+          added_by, added_date, update_by, update_date, record_status
+        ) VALUES (
+          gen_random_uuid(),
+          ${market.matchId}::bigint,
+          ${market.eventTypeId}::bigint,
+          ${market.competitionId ?? 0}::bigint,
+          ${market.marketId}::numeric,
+          ${market.marketType}::int,
+          ${status}::varchar,
+          'api'::varchar,
+          ${JSON.stringify(apiResult)}::jsonb,
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+          '00000000-0000-0000-0000-000000000000'::uuid,
+          CURRENT_TIMESTAMP,
+          '00000000-0000-0000-0000-000000000000'::uuid,
+          CURRENT_TIMESTAMP, 0
+        )
+        ON CONFLICT (market_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          api_response = EXCLUDED.api_response,
+          settled_at = EXCLUDED.settled_at,
+          update_date = CURRENT_TIMESTAMP
+      `);
+
       console.log(
         `[MarketResultCron] Voided all bets for market ${market.marketId} (${status})`
       );
@@ -396,27 +425,24 @@ async function processUndeclaredMarkets(marketTypes: number[]): Promise<void> {
       `[MarketResultCron] Found ${undeclaredMarkets.length} undeclared ${label} markets`
     );
 
-    // Step 1: Check which markets have WINNER/LOSER in odds data
+    // Step 1: Check which markets have WINNER/LOSER in odds data (used for logging only)
     const allMarketIds = undeclaredMarkets.map((m) => m.marketId);
     const resolvedMarketIds = await checkMarketOddsStatus(allMarketIds);
 
-    if (resolvedMarketIds.size === 0) {
-      console.log(
-        `[MarketResultCron] No ${label} markets with resolved runners yet`
-      );
-      return;
-    }
-
     console.log(
-      `[MarketResultCron] ${resolvedMarketIds.size} ${label} markets have resolved runners`
+      `[MarketResultCron] ${resolvedMarketIds.size} of ${undeclaredMarkets.length} ${label} markets confirmed by Books API`
     );
 
-    // Step 2: For resolved markets, fetch result and run procedures
-    const resolvedMarkets = undeclaredMarkets.filter((m) =>
-      resolvedMarketIds.has(m.marketId)
-    );
+    // Step 2: Process ALL markets via the Result API.
+    // Books-API-confirmed markets are processed first as a priority hint,
+    // but we do NOT skip the rest — the Result API is the authoritative source
+    // and markets must not get permanently stuck when the Books API lags.
+    const prioritized = [
+      ...undeclaredMarkets.filter((m) => resolvedMarketIds.has(m.marketId)),
+      ...undeclaredMarkets.filter((m) => !resolvedMarketIds.has(m.marketId)),
+    ];
 
-    for (const market of resolvedMarkets) {
+    for (const market of prioritized) {
       await fetchAndStoreResult(market);
     }
 

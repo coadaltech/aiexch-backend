@@ -154,8 +154,9 @@ export const marketManagementRoutes = new Elysia({
         );
         return { success: true, data: result };
       } catch (error) {
+        console.error("[market-management] PUT /markets/:marketId error:", error);
         set.status = 500;
-        return { success: false, error: "Failed to update market settings" };
+        return { success: false, error: "Failed to update market settings", detail: (error as Error)?.message };
       }
     },
     {
