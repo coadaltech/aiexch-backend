@@ -102,6 +102,7 @@ async function initializeServices() {
   // Step 0: Ensure the "system" user exists (used as default for audit columns)
   await ensureSystemUser();
   console.log("[Init] System user ensured");
+  // initializeuserservice comments
 
   // Step 1: Connect Redis (non-blocking — app works without it via in-memory cache)
   await connectRedis();
