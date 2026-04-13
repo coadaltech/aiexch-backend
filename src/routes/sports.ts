@@ -1,10 +1,11 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
 import { sportsGames, transactions } from "../db/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { SportsService } from "../services/sports";
 import { getAvailableSportsList } from "../services/sports-service";
 import { whitelabel_middleware } from "../middleware/whitelabel";
+import { app_middleware } from "../middleware/auth";
 
 export const sportsRoutes = new Elysia({ prefix: "/sports" })
   .get("/", async ({ set }) => {
@@ -262,21 +263,29 @@ export const sportsRoutes = new Elysia({ prefix: "/sports" })
     }
   })
 
-  // Returns total bet counts per match for a list of matchIds (comma-separated)
-  .get("/bet-counts", async ({ query, set }) => {
+  // Returns the current user's bet counts per match for a list of matchIds (comma-separated)
+  .get("/bet-counts", async ({ query, set, cookie, headers }) => {
     try {
       const ids = (query?.matchIds as string || "").split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n));
       if (ids.length === 0) {
         set.status = 200;
         return { success: true, data: {} };
       }
+
+      const auth = await app_middleware({ cookie, headers });
+      if (!auth.success || !auth.data?.id) {
+        set.status = 200;
+        return { success: true, data: {} };
+      }
+      const userId = auth.data.id;
+
       const rows = await db
         .select({
           matchId: transactions.matchId,
           count: sql<number>`cast(count(*) as int)`,
         })
         .from(transactions)
-        .where(inArray(transactions.matchId, ids))
+        .where(and(inArray(transactions.matchId, ids), eq(transactions.userId, userId)))
         .groupBy(transactions.matchId);
       const data: Record<string, number> = {};
       for (const row of rows) {
