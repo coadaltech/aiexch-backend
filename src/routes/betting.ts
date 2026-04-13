@@ -206,6 +206,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // Bookmaker market: 2 rows (Team A, Team B)
         // Line market: 1 row (session runner with run value)
         const isBetfair = provider?.toUpperCase() === "BETFAIR";
+        const isWinningOdds = marketType?.toUpperCase() === "WINNING_ODDS";
         const isBack = type === "back";
         const detailRows = runners.map((runner) => {
           const runnerId = Number(runner.id);
@@ -214,7 +215,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           // to guarantee transaction_details.price matches transactions.odds exactly.
           // For other runners, use their own price from the runners array.
           const runnerOdds = isSelected ? odds : runner.price;
-          const storedPrice = isBetfair ? runnerOdds - 1 : runnerOdds;
+          const storedPrice = (isBetfair || isWinningOdds) ? runnerOdds - 1 : runnerOdds;
 
           // potentialReturn = P&L for this runner if IT wins
           // Back bet:  selected runner wins → +stake * storedPrice; other runners win → -stake
