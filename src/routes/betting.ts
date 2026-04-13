@@ -215,7 +215,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           // For the selected runner, use the authoritative `odds` from the transaction
           // to guarantee transaction_details.price matches transactions.odds exactly.
           // For other runners, use their own price from the runners array.
-          const runnerOdds = isSelected ? odds : runner.price;
+          const runnerOdds = isSelected ? odds : (runner.price ?? 0);
           // Betfair fancy (LINE) markets: odds are already the raw run value (e.g. 1), never subtract 1.
           // Betfair non-fancy and WINNING_ODDS: odds are decimal (e.g. 1.98), subtract 1 for profit ratio.
           const storedPrice = (isBetfair && isFancy) ? runnerOdds : (isBetfair || isWinningOdds) ? runnerOdds - 1 : runnerOdds;
