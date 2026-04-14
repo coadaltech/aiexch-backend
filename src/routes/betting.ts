@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings } from "../db/schema";
 // Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
@@ -101,7 +101,9 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Betting is disabled for your account" };
       }
 
-      // Server-side market status check: reject if suspended or ball running
+      // Server-side market status + min/max bet validation
+      let resolvedMinBet = 0;
+      let resolvedMaxBet = 0;
       try {
         if (redis.isReady) {
           const liveJson = await redis.get(`live:markets:${matchId}`);
@@ -121,12 +123,46 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
                 set.status = 400;
                 return { success: false, error: "Bet rejected: market is locked" };
               }
+              // Capture min/max from live market conditions
+              if (targetMarket.marketCondition?.minBet) {
+                resolvedMinBet = parseFloat(targetMarket.marketCondition.minBet) || 0;
+              }
+              if (targetMarket.marketCondition?.maxBet) {
+                resolvedMaxBet = parseFloat(targetMarket.marketCondition.maxBet) || 0;
+              }
             }
           }
         }
       } catch (e) {
         // Non-critical: if Redis check fails, allow the bet through
         // (the DB trigger will still enforce limits)
+      }
+
+      // Fallback: fetch min/max from market_settings DB when Redis didn't provide them
+      if (resolvedMinBet === 0 && resolvedMaxBet === 0) {
+        try {
+          const [mktSetting] = await db
+            .select({ minBet: marketSettings.minBet, maxBet: marketSettings.maxBet })
+            .from(marketSettings)
+            .where(eq(marketSettings.marketId, String(marketId)))
+            .limit(1);
+          if (mktSetting) {
+            resolvedMinBet = parseFloat(mktSetting.minBet ?? "0") || 0;
+            resolvedMaxBet = parseFloat(mktSetting.maxBet ?? "0") || 0;
+          }
+        } catch (e) {
+          // Non-critical: DB lookup failed, skip min/max enforcement
+        }
+      }
+
+      // Enforce min/max bet limits
+      if (resolvedMinBet > 0 && stake < resolvedMinBet) {
+        set.status = 400;
+        return { success: false, error: `Bet rejected: minimum bet is ${resolvedMinBet}` };
+      }
+      if (resolvedMaxBet > 0 && stake > resolvedMaxBet) {
+        set.status = 400;
+        return { success: false, error: `Bet rejected: maximum bet is ${resolvedMaxBet}` };
       }
 
       // Fetch whitelabelId from users table

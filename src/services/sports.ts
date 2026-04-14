@@ -563,13 +563,15 @@ export const SportsService = {
           );
       }
 
+      const now = new Date();
       // Transform to match the shape the frontend expects (same as old external API)
       return rows.map((r) => ({
         id: r.eventId,
         name: r.name,
         openDate: r.openDate ? r.openDate.toISOString() : null,
         status: "OPEN",
-        inPlay: false, // Will be updated by live data / WebSocket
+        // A match whose openDate is in the past has started and is likely in-play
+        inPlay: r.openDate ? r.openDate <= now : false,
         defaultMarketId: r.defaultMarketId || null,
       }));
     } catch (error) {

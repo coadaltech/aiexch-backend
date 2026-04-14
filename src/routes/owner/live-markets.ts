@@ -50,6 +50,99 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
     }
   })
 
+  // GET /owner/live-markets/bets?matchId=123
+  .get("/bets", async ({ set, store, query }) => {
+    try {
+      const userId = (store as { id: string }).id;
+      const userRole = (store as { role: number }).role;
+      const matchId = query.matchId ? parseInt(query.matchId as string) : null;
+
+      if (!matchId) {
+        set.status = 400;
+        return { success: false, error: "matchId is required" };
+      }
+
+      const result = await db.execute(sql`
+        SELECT
+          t.id,
+          t.match_id,
+          t.market_id,
+          t.market_name,
+          t.market_type,
+          t.selection_id,
+          t.selection_name,
+          t.bet_type,
+          t.stake,
+          t.odds,
+          t.status,
+          t.settled_amount,
+          t.matched_at,
+          t.ip_address,
+          -- Bettor
+          u.username   AS user_name,
+          u.id         AS user_id,
+          -- Whitelabel
+          wl.name      AS whitelabel_name,
+          -- Event / Competition
+          e.name       AS event_name,
+          c.name       AS competition_name,
+          -- User-selection detail (potential return for this bet)
+          td.potential_return,
+          td.run,
+          -- Commission hierarchy (percents are cumulative from bottom)
+          tc.agent_id,   tc.agent_percent,
+          tc.master_id,  tc.master_percent,
+          tc.super_id,   tc.super_percent,
+          tc.admin_id,   tc.admin_percent,
+          tc.owner_id,   tc.owner_percent,
+          -- Hierarchy usernames
+          ua.username    AS agent_name,
+          um.username    AS master_name,
+          us.username    AS super_name,
+          uadm.username  AS admin_name,
+          uo.username    AS owner_name
+        FROM transactions t
+        JOIN users u
+          ON u.id = t.user_id
+        JOIN transaction_commissions tc
+          ON tc.transaction_id = t.id
+         AND COALESCE(tc.record_status, 0) = 0
+        LEFT JOIN transaction_details td
+          ON td.transaction_id = t.id
+         AND td.is_user_selection = TRUE
+         AND COALESCE(td.record_status, 0) = 0
+        LEFT JOIN whitelabels wl  ON wl.id  = t.whitelabel_id
+        LEFT JOIN events      e   ON e.event_id        = t.match_id
+        LEFT JOIN competitions c  ON c.competition_id  = t.competition_id
+        LEFT JOIN users ua   ON ua.id   = tc.agent_id
+        LEFT JOIN users um   ON um.id   = tc.master_id
+        LEFT JOIN users us   ON us.id   = tc.super_id
+        LEFT JOIN users uadm ON uadm.id = tc.admin_id
+        LEFT JOIN users uo   ON uo.id   = tc.owner_id
+        WHERE t.match_id = ${matchId}
+          AND t.status = 'matched'
+          AND COALESCE(t.record_status, 0) = 0
+          AND (CASE
+                WHEN ${userRole} = 0 THEN tc.owner_id  = ${userId}::uuid
+                WHEN ${userRole} = 3 THEN tc.admin_id  = ${userId}::uuid
+                WHEN ${userRole} = 4 THEN tc.super_id  = ${userId}::uuid
+                WHEN ${userRole} = 5 THEN tc.master_id = ${userId}::uuid
+                WHEN ${userRole} = 6 THEN tc.agent_id  = ${userId}::uuid
+                ELSE 1 <> 1
+               END)
+        ORDER BY t.matched_at DESC
+        LIMIT 500
+      `);
+
+      const rows = Array.isArray(result) ? result : (result as any)?.rows ?? [];
+      return { success: true, data: rows };
+    } catch (error) {
+      console.error("live-markets/bets error:", error);
+      set.status = 500;
+      return { success: false, error: "Failed to fetch bets" };
+    }
+  })
+
   // GET /owner/live-markets/summary
   // Returns per-market P&L for the logged-in user based on their commission share.
   // Uses get_hissa_of_group (non-fancy) and get_hissa_of_group_fancy.
