@@ -287,7 +287,6 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // Insert transaction log
         await tx.insert(transactionLogs).values({
           transactionId: newTxn.id,
-          userId: store.id,
           ipAddress,
           ...ua,
           addedBy: store.id,
@@ -346,7 +345,6 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         //   Owner gets: 100 - 85 = 15%
         const snapshotData: typeof transactionCommissions.$inferInsert = {
           transactionId: newTxn.id,
-          userId: store.id,
           addedBy: store.id,
           updateBy: store.id,
         };

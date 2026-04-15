@@ -358,7 +358,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
 
         await db.insert(matkaTransactionLogs).values({
           matkaTransactionId: transaction.id,
-          userId: store.id,
           ipAddress,
           ...ua,
           addedBy: store.id,
@@ -400,7 +399,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
 
         const snapshotData: typeof matkaTransactionCommissions.$inferInsert = {
           matkaTransactionId: transaction.id,
-          userId: store.id,
           addedBy: store.id,
           updateBy: store.id,
         };

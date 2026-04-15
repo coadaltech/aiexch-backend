@@ -712,12 +712,7 @@ export const userLoginLogs = pgTable("user_login_logs", {
 // ── Transaction Logs ─────────────────────────────────────────────────────────
 export const transactionLogs = pgTable("transaction_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
-  transactionId: uuid("transaction_id")
-    .references(() => transactions.id, { onDelete: "cascade" })
-    .notNull(),
-  userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
-    .notNull(),
+  transactionId: uuid("transaction_id").notNull(),
   ipAddress: varchar("ip_address", { length: 45 }),
   userAgent: text("user_agent"),
   browser: varchar("browser", { length: 100 }),
@@ -878,12 +873,7 @@ export const marketOddsHistory = pgTable("market_odds_history", {
 // ── Transaction Commissions ──────────────────────────────────────────────────
 export const transactionCommissions = pgTable("transaction_commissions", {
   id: uuid("id").primaryKey().defaultRandom(),
-  transactionId: uuid("transaction_id")
-    .references(() => transactions.id, { onDelete: "cascade" })
-    .notNull(),
-  userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
-    .notNull(),
+  transactionId: uuid("transaction_id").notNull(),
   agentId: uuid("agent_id"),
   agentPercent: decimal("agent_percent", { precision: 5, scale: 2 }).default("0"),
   masterId: uuid("master_id"),
@@ -1102,12 +1092,7 @@ export const marketResults = pgTable("market_results", {
 // ── Matka Transaction Logs ──────────────────────────────────────────────────
 export const matkaTransactionLogs = pgTable("matka_transaction_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
-  matkaTransactionId: uuid("matka_transaction_id")
-    .references(() => matkaTransactions.id, { onDelete: "no action" })
-    .notNull(),
-  userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "no action" })
-    .notNull(),
+  matkaTransactionId: uuid("matka_transaction_id").notNull(),
   ipAddress: varchar("ip_address", { length: 45 }),
   userAgent: text("user_agent"),
   browser: varchar("browser", { length: 100 }),
@@ -1130,12 +1115,7 @@ export const matkaTransactionLogs = pgTable("matka_transaction_logs", {
 // ── Matka Transaction Commissions ──────────────────────────────────────────
 export const matkaTransactionCommissions = pgTable("matka_transaction_commissions", {
   id: uuid("id").primaryKey().defaultRandom(),
-  matkaTransactionId: uuid("matka_transaction_id")
-    .references(() => matkaTransactions.id, { onDelete: "no action" })
-    .notNull(),
-  userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "no action" })
-    .notNull(),
+  matkaTransactionId: uuid("matka_transaction_id").notNull(),
   agentId: uuid("agent_id"),
   agentPercent: decimal("agent_percent", { precision: 5, scale: 2 }).default("0"),
   masterId: uuid("master_id"),
