@@ -8,8 +8,10 @@ import {
   userReadNotifications,
   users,
   ledgerLimit,
+  transactionsDeclare,
+  transactionDetailsDeclare,
 } from "../db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
 import { increment } from "../utils/numbers";
 import { uploadFile } from "../services/s3";
@@ -698,6 +700,214 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     set.status = 200;
     return { success: true, data: availablePromocodes };
   })
+  // Account ledger statement
+  // Returns: opening balance row, transaction rows (date range), closing balance row
+  .get("/account-statement", async ({ query, store, set, db }) => {
+    const today    = new Date().toISOString().split("T")[0];
+    const fromDate = (query.fromDate as string) || today;
+    const toDate   = (query.toDate   as string) || today;
+    const userId   = store.id as string;
+
+    try {
+      const result = await db.execute(sql`
+        WITH all_txn AS (
+          -- Path A: user appears as voucher_detail owner (settlement P&L, deposits, etc.)
+          SELECT
+            vd.voucher_id,
+            v.type        AS voucher_type,
+            v.status,
+            v.method,
+            v.reference,
+            v.market_id,
+            v.event_id,
+            vd.description,
+            v.remarks, v.remarks1, v.remarks2, v.remarks3,
+            vd.dr_cr,
+            vd.amount,
+            COALESCE(vd.voucher_date, v.voucher_date, v.added_date::date) AS voucher_date,
+            v.added_date
+          FROM voucher_details vd
+          INNER JOIN vouchers v ON v.id = vd.voucher_id AND v.record_status = 0
+          WHERE vd.user_id      = ${userId}::uuid
+            AND vd.record_status = 0
+
+          UNION
+
+          -- Path B: user owns the voucher header (limit vouchers, etc.)
+          SELECT
+            v.id          AS voucher_id,
+            v.type        AS voucher_type,
+            v.status,
+            v.method,
+            v.reference,
+            v.market_id,
+            v.event_id,
+            vd.description,
+            v.remarks, v.remarks1, v.remarks2, v.remarks3,
+            vd.dr_cr,
+            vd.amount,
+            COALESCE(vd.voucher_date, v.voucher_date, v.added_date::date) AS voucher_date,
+            v.added_date
+          FROM vouchers v
+          INNER JOIN voucher_details vd ON vd.voucher_id = v.id AND vd.record_status = 0
+          WHERE v.user_id      = ${userId}::uuid
+            AND v.record_status = 0
+        ),
+        bal AS (
+          SELECT COALESCE(MAX(user_balance), 0) AS v
+          FROM ledger_limit
+          WHERE user_id = ${userId}::uuid AND record_status = 0
+        ),
+        ob AS (
+          SELECT b.v - COALESCE(SUM(CASE WHEN t.dr_cr = 1 THEN t.amount ELSE -t.amount END), 0) AS amount
+          FROM bal b
+          LEFT JOIN all_txn t ON t.voucher_date < ${fromDate}::date
+          GROUP BY b.v
+        ),
+        cb AS (
+          SELECT b.v - COALESCE(SUM(CASE WHEN t.dr_cr = 1 THEN t.amount ELSE -t.amount END), 0) AS amount
+          FROM bal b
+          LEFT JOIN all_txn t ON t.voucher_date <= ${toDate}::date
+          GROUP BY b.v
+        )
+        SELECT
+          0                  AS orderflag,
+          NULL::uuid         AS voucher_id,
+          NULL::int          AS voucher_type,
+          NULL::int          AS status,
+          NULL::varchar      AS method,
+          NULL::varchar      AS reference,
+          NULL::numeric      AS market_id,
+          NULL::bigint       AS event_id,
+          NULL::varchar      AS description,
+          NULL::varchar      AS remarks,
+          NULL::varchar      AS remarks1,
+          NULL::varchar      AS remarks2,
+          NULL::varchar      AS remarks3,
+          o.amount           AS credit,
+          0::numeric         AS debit,
+          ${fromDate}::date  AS voucher_date,
+          NULL::timestamptz  AS added_date
+        FROM ob o
+
+        UNION ALL
+
+        SELECT
+          1                  AS orderflag,
+          t.voucher_id,
+          t.voucher_type,
+          t.status,
+          t.method::varchar,
+          t.reference::varchar,
+          t.market_id,
+          t.event_id,
+          t.description::varchar,
+          t.remarks::varchar,
+          t.remarks1::varchar,
+          t.remarks2::varchar,
+          t.remarks3::varchar,
+          CASE WHEN t.dr_cr = 1 AND t.amount >= 0 THEN t.amount ELSE 0 END AS credit,
+          CASE WHEN t.dr_cr = 0 OR t.amount < 0  THEN ABS(t.amount) ELSE 0 END AS debit,
+          t.voucher_date,
+          t.added_date
+        FROM all_txn t
+        WHERE t.voucher_date BETWEEN ${fromDate}::date AND ${toDate}::date
+
+        UNION ALL
+
+        SELECT
+          2                  AS orderflag,
+          NULL::uuid,
+          NULL::int,
+          NULL::int,
+          NULL::varchar,
+          NULL::varchar,
+          NULL::numeric,
+          NULL::bigint,
+          NULL::varchar,
+          NULL::varchar,
+          NULL::varchar,
+          NULL::varchar,
+          NULL::varchar,
+          c.amount           AS credit,
+          0::numeric         AS debit,
+          ${toDate}::date    AS voucher_date,
+          NULL::timestamptz  AS added_date
+        FROM cb c
+
+        ORDER BY orderflag, added_date DESC NULLS LAST, voucher_id DESC
+      `);
+
+      const rows = Array.isArray(result)
+        ? result
+        : Array.isArray((result as any).rows)
+          ? (result as any).rows
+          : Array.from(result as any);
+
+      set.status = 200;
+      return { success: true, data: { transactions: rows } };
+    } catch (error: any) {
+      set.status = 500;
+      return { success: false, error: error?.message || "Failed to fetch account statement" };
+    }
+  })
+
+  // Bet details for a settlement row.
+  //   - Per-bet rows come from the SQL function (transactions_declare + market_results).
+  //   - Per-bet P&L isn't stored (voucher_details.transaction_id is NULL on settlement,
+  //     because settlement aggregates P&L per user per market). So we return per-bet
+  //     Won/Lost status derived from winner_id, and the market-level net P&L pulled
+  //     from voucher_details joined by voucher_id.
+  .get("/account-statement/bet-details", async ({ query, store, set, db }) => {
+    const marketId  = query.marketId  as string;
+    const voucherId = (query.voucherId as string) || null;
+    if (!marketId) {
+      set.status = 400;
+      return { success: false, error: "marketId is required" };
+    }
+    try {
+      const betsResult = await db.execute(sql`
+        SELECT * FROM get_user_account_ledger_statement_transaction_detail(
+          ${store.id}::uuid,
+          ${marketId}::numeric,
+          ${voucherId}::uuid
+        )
+      `);
+      const bets = Array.isArray(betsResult)
+        ? betsResult
+        : Array.isArray((betsResult as any).rows)
+          ? (betsResult as any).rows
+          : Array.from(betsResult as any);
+
+      // Market-level net P&L for this voucher (settlement stores aggregated P&L here).
+      let marketPnl = 0;
+      if (voucherId) {
+        const pnlResult = await db.execute(sql`
+          SELECT COALESCE(
+            SUM(CASE WHEN vd.dr_cr = 1 THEN vd.amount ELSE -vd.amount END),
+            0
+          ) AS pnl
+          FROM voucher_details vd
+          WHERE vd.voucher_id     = ${voucherId}::uuid
+            AND vd.user_id        = ${store.id}::uuid
+            AND vd.record_status  = 0
+        `);
+        const pnlRows = Array.isArray(pnlResult)
+          ? pnlResult
+          : Array.isArray((pnlResult as any).rows)
+            ? (pnlResult as any).rows
+            : Array.from(pnlResult as any);
+        marketPnl = parseFloat(pnlRows[0]?.pnl ?? 0);
+      }
+
+      set.status = 200;
+      return { success: true, data: { bets, marketPnl } };
+    } catch (error: any) {
+      set.status = 500;
+      return { success: false, error: error?.message || "Failed to fetch bet details" };
+    }
+  })
+
   .post(
     "/change-password",
     async ({ body, store, set, db }) => {

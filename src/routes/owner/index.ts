@@ -20,6 +20,7 @@ import { currenciesRoutes } from "./currencies";
 import { marketManagementRoutes } from "./market-management";
 import { matkaOwnerRoutes } from "./matka";
 import { liveMarketsRoutes } from "./live-markets";
+import { ownerAccountStatementRoutes } from "./account-statement";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .state({ id: "", role: 0 as number })
@@ -57,3 +58,4 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(marketManagementRoutes)
   .use(matkaOwnerRoutes)
   .use(liveMarketsRoutes)
+  .use(ownerAccountStatementRoutes)

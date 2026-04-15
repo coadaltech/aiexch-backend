@@ -947,7 +947,6 @@ export const transactionDetailsDeclare = pgTable("transaction_details_declare", 
 export const transactionCommissionsDeclare = pgTable("transaction_commissions_declare", {
   id: uuid("id").primaryKey().defaultRandom(),
   transactionId: uuid("transaction_id").notNull(),
-  userId: uuid("user_id").notNull(),
   agentId: uuid("agent_id"),
   agentPercent: decimal("agent_percent", { precision: 5, scale: 2 }).default("0"),
   masterId: uuid("master_id"),
@@ -970,7 +969,6 @@ export const transactionCommissionsDeclare = pgTable("transaction_commissions_de
 export const transactionLogsDeclare = pgTable("transaction_logs_declare", {
   id: uuid("id").primaryKey().defaultRandom(),
   transactionId: uuid("transaction_id").notNull(),
-  userId: uuid("user_id").notNull(),
   ipAddress: varchar("ip_address", { length: 45 }),
   userAgent: text("user_agent"),
   browser: varchar("browser", { length: 100 }),

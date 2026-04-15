@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings, sports, competitions, events } from "../db/schema";
 // Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
@@ -440,10 +440,34 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return acc;
       }, {});
 
+      // Fetch sport, competition, and event names
+      const sportIds = [...new Set(userTransactions.map((t) => t.eventTypeId).filter(Boolean))];
+      const competitionIds = [...new Set(userTransactions.map((t) => t.competitionId).filter(Boolean))] as number[];
+      const matchIds = [...new Set(userTransactions.map((t) => t.matchId).filter(Boolean))];
+
+      const [sportsRows, competitionsRows, eventsRows] = await Promise.all([
+        sportIds.length > 0
+          ? db.select({ sport_id: sports.sport_id, name: sports.name }).from(sports).where(inArray(sports.sport_id, sportIds))
+          : [],
+        competitionIds.length > 0
+          ? db.select({ competition_id: competitions.competition_id, name: competitions.name }).from(competitions).where(inArray(competitions.competition_id, competitionIds))
+          : [],
+        matchIds.length > 0
+          ? db.select({ eventId: events.eventId, name: events.name }).from(events).where(inArray(events.eventId, matchIds))
+          : [],
+      ]);
+
+      const sportMap = new Map((sportsRows as { sport_id: number; name: string }[]).map((r) => [r.sport_id, r.name]));
+      const competitionMap = new Map((competitionsRows as { competition_id: number; name: string }[]).map((r) => [r.competition_id, r.name]));
+      const eventMap = new Map((eventsRows as { eventId: number; name: string }[]).map((r) => [r.eventId, r.name]));
+
       const result = userTransactions.map((t) => ({
         ...t,
         marketType: marketTypeToString(t.marketType),
         details: detailsMap[t.id] || [],
+        sportName: sportMap.get(t.eventTypeId) ?? null,
+        competitionName: t.competitionId ? (competitionMap.get(t.competitionId) ?? null) : null,
+        eventName: eventMap.get(t.matchId) ?? null,
       }));
 
       set.status = 200;
