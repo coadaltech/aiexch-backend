@@ -120,7 +120,7 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
         LEFT JOIN users uadm ON uadm.id = tc.admin_id
         LEFT JOIN users uo   ON uo.id   = tc.owner_id
         WHERE t.match_id = ${matchId}
-          AND t.status = 'matched'
+          AND t.status IN ('pending', 'matched')
           AND COALESCE(t.record_status, 0) = 0
           AND (CASE
                 WHEN ${userRole} = 0 THEN tc.owner_id  = ${userId}::uuid
@@ -140,6 +140,48 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
       console.error("live-markets/bets error:", error);
       set.status = 500;
       return { success: false, error: "Failed to fetch bets" };
+    }
+  })
+
+  // GET /owner/live-markets/bets/log?transactionId=<uuid>
+  // Returns the transaction_logs row attached to a single matched bet (one per txn).
+  .get("/bets/log", async ({ set, query }) => {
+    try {
+      const transactionId = query.transactionId as string | undefined;
+      if (!transactionId) {
+        set.status = 400;
+        return { success: false, error: "transactionId is required" };
+      }
+
+      const result = await db.execute(sql`
+        SELECT
+          id,
+          transaction_id,
+          ip_address,
+          user_agent,
+          browser,
+          browser_version,
+          os,
+          os_version,
+          device_type,
+          device_brand,
+          device_model,
+          country,
+          city,
+          added_date
+        FROM transaction_logs
+        WHERE transaction_id = ${transactionId}::uuid
+          AND COALESCE(record_status, 0) = 0
+        ORDER BY added_date DESC
+        LIMIT 1
+      `);
+
+      const rows = Array.isArray(result) ? result : (result as any)?.rows ?? [];
+      return { success: true, data: rows[0] ?? null };
+    } catch (error) {
+      console.error("live-markets/bets/log error:", error);
+      set.status = 500;
+      return { success: false, error: "Failed to fetch transaction log" };
     }
   })
 

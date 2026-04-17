@@ -258,6 +258,7 @@ export const vouchers = pgTable("vouchers", {
   marketId: numeric("market_id"),
   approvedBy: uuid("approved_by"),
   approvedDate: date("approved_date"),
+  shiftId: uuid("shift_id").default("00000000-0000-0000-0000-000000000000"),
   voucherDate: date("voucher_date").defaultNow().notNull(),
   // ── Audit ──
   addedBy: uuid("added_by"),
@@ -294,6 +295,7 @@ export const voucherDetails = pgTable("voucher_details", {
   isProcessed: boolean("is_processed").default(false).notNull(),
   description: varchar("description", { length: 255 }),
   whitelabelId: uuid("whitelabel_id"),
+  shiftId: uuid("shift_id").default("00000000-0000-0000-0000-000000000000"),
   voucherDate: date("voucher_date").defaultNow().notNull(),
   // ── Audit ──
   addedBy: uuid("added_by"),
@@ -1124,6 +1126,22 @@ export const matkaTransactionCommissions = pgTable("matka_transaction_commission
   adminPercent: decimal("admin_percent", { precision: 5, scale: 2 }).default("0"),
   ownerId: uuid("owner_id"),
   ownerPercent: decimal("owner_percent", { precision: 5, scale: 2 }).default("0"),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Declare Result (matka result declaration) ─────────────────────────────
+export const declareResult = pgTable("declare_result", {
+  declareId: uuid("declare_id").primaryKey().defaultRandom(),
+  shiftId: uuid("shift_id").notNull(),
+  declareDate: date("declare_date").notNull(),
+  declareNumber: integer("declare_number").notNull(),
+  isNeeded: integer("is_needed").default(0),
+  redeclareNos: integer("redeclare_nos").default(0),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

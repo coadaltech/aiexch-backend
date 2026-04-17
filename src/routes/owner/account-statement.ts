@@ -46,6 +46,8 @@ export const ownerAccountStatementRoutes = new Elysia()
             v.remarks, v.remarks1, v.remarks2, v.remarks3,
             vd.dr_cr,
             vd.amount,
+            vd.opposite_user_id,
+            vd.whitelabel_id,
             COALESCE(vd.voucher_date, v.voucher_date, v.added_date::date) AS voucher_date,
             v.added_date
           FROM voucher_details vd
@@ -68,6 +70,8 @@ export const ownerAccountStatementRoutes = new Elysia()
             v.remarks, v.remarks1, v.remarks2, v.remarks3,
             vd.dr_cr,
             vd.amount,
+            vd.opposite_user_id,
+            vd.whitelabel_id,
             COALESCE(vd.voucher_date, v.voucher_date, v.added_date::date) AS voucher_date,
             v.added_date
           FROM vouchers v
@@ -106,6 +110,8 @@ export const ownerAccountStatementRoutes = new Elysia()
           NULL::varchar      AS remarks1,
           NULL::varchar      AS remarks2,
           NULL::varchar      AS remarks3,
+          NULL::varchar      AS opposite_username,
+          NULL::varchar      AS whitelabel_name,
           o.amount           AS credit,
           0::numeric         AS debit,
           ${fromDate}::date  AS voucher_date,
@@ -128,11 +134,15 @@ export const ownerAccountStatementRoutes = new Elysia()
           t.remarks1::varchar,
           t.remarks2::varchar,
           t.remarks3::varchar,
+          ou.username::varchar AS opposite_username,
+          wl.name::varchar     AS whitelabel_name,
           CASE WHEN t.dr_cr = 1 AND t.amount >= 0 THEN t.amount ELSE 0 END AS credit,
           CASE WHEN t.dr_cr = 0 OR t.amount < 0  THEN ABS(t.amount) ELSE 0 END AS debit,
           t.voucher_date,
           t.added_date
         FROM all_txn t
+        LEFT JOIN users       ou ON ou.id = t.opposite_user_id
+        LEFT JOIN whitelabels wl ON wl.id = t.whitelabel_id
         WHERE t.voucher_date BETWEEN ${fromDate}::date AND ${toDate}::date
 
         UNION ALL
@@ -146,6 +156,8 @@ export const ownerAccountStatementRoutes = new Elysia()
           NULL::varchar,
           NULL::numeric,
           NULL::bigint,
+          NULL::varchar,
+          NULL::varchar,
           NULL::varchar,
           NULL::varchar,
           NULL::varchar,

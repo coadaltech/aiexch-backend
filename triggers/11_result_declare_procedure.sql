@@ -44,7 +44,6 @@ BEGIN
     );
 
     -- 2. Pre-calculate per-user net P&L and admin commission using a CTE
-    DROP TABLE IF EXISTS base_data;
     CREATE TEMP TABLE base_data AS
     WITH transaction_table AS 
 	(
@@ -65,33 +64,14 @@ BEGIN
 		SELECT
 			tp.user_id,
 			tp.whitelabel_id,
-			SUM(
-				(CASE WHEN td.bet_type = 0 THEN 1 ELSE -1 END) *
-				(CASE WHEN td.is_user_selection THEN td.potential_return - td.stake ELSE -td.stake END)
-			) AS net_pl,
-			SUM(
-				(CASE WHEN td.bet_type = 0 THEN 1 ELSE -1 END) *
-				(CASE WHEN td.is_user_selection THEN td.potential_return - td.stake ELSE -td.stake END)
-				*
-				COALESCE(tp.admin_percent, 0) / 100.0
+			SUM(td.potential_return) AS net_pl,
+			SUM((td.potential_return)*COALESCE(tp.admin_percent, 0) / 100.0
 			) AS admin_commission,
-			SUM(
-				(CASE WHEN td.bet_type = 0 THEN 1 ELSE -1 END) *
-				(CASE WHEN td.is_user_selection THEN td.potential_return - td.stake ELSE -td.stake END)
-				*
-				COALESCE(tp.super_percent, 0) / 100.0
+			SUM((td.potential_return)*COALESCE(tp.super_percent, 0) / 100.0
 			) AS super_commission,
-			SUM(
-				(CASE WHEN td.bet_type = 0 THEN 1 ELSE -1 END) *
-				(CASE WHEN td.is_user_selection THEN td.potential_return - td.stake ELSE -td.stake END)
-				*
-				COALESCE(tp.master_percent, 0) / 100.0
+			SUM((td.potential_return)*COALESCE(tp.master_percent, 0) / 100.0
 			) AS master_commission,
-			SUM(
-				(CASE WHEN td.bet_type = 0 THEN 1 ELSE -1 END) *
-				(CASE WHEN td.is_user_selection THEN td.potential_return - td.stake ELSE -td.stake END)
-				*
-				COALESCE(tp.agent_percent, 0) / 100.0
+			SUM((td.potential_return)*COALESCE(tp.agent_percent, 0) / 100.0
 			) AS agent_commission,
 			tp.admin_id,
 			tp.super_id,
@@ -110,7 +90,7 @@ BEGIN
 			,sum(
 				(CASE
 					WHEN td.bet_type = 1 THEN
-						CASE WHEN td.run <= varwin_run THEN -td.potential_return ELSE td.stake END
+						CASE WHEN td.run <= varwin_run THEN td.potential_return ELSE td.stake END
 					ELSE
 						CASE WHEN td.run > varwin_run THEN -td.stake ELSE td.potential_return END
 				END)
@@ -118,7 +98,7 @@ BEGIN
 			,SUM(
 				(CASE
 					WHEN td.bet_type = 1 THEN
-						CASE WHEN td.run <= varwin_run THEN -td.potential_return ELSE td.stake END
+						CASE WHEN td.run <= varwin_run THEN td.potential_return ELSE td.stake END
 					ELSE
 						CASE WHEN td.run > varwin_run THEN -td.stake ELSE td.potential_return END
 				END)
@@ -128,7 +108,7 @@ BEGIN
 			,SUM(
 				(CASE
 					WHEN td.bet_type = 1 THEN
-						CASE WHEN td.run <= varwin_run THEN -td.potential_return ELSE td.stake END
+						CASE WHEN td.run <= varwin_run THEN td.potential_return ELSE td.stake END
 					ELSE
 						CASE WHEN td.run > varwin_run THEN -td.stake ELSE td.potential_return END
 				END)
@@ -138,7 +118,7 @@ BEGIN
 			,SUM(
 				(CASE
 					WHEN td.bet_type = 1 THEN
-						CASE WHEN td.run <= varwin_run THEN -td.potential_return ELSE td.stake END
+						CASE WHEN td.run <= varwin_run THEN td.potential_return ELSE td.stake END
 					ELSE
 						CASE WHEN td.run > varwin_run THEN -td.stake ELSE td.potential_return END
 				END)
@@ -148,7 +128,7 @@ BEGIN
 			,SUM(
 				(CASE
 					WHEN td.bet_type = 1 THEN
-						CASE WHEN td.run <= varwin_run THEN -td.potential_return ELSE td.stake END
+						CASE WHEN td.run <= varwin_run THEN td.potential_return ELSE td.stake END
 					ELSE
 						CASE WHEN td.run > varwin_run THEN -td.stake ELSE td.potential_return END
 				END)
@@ -508,17 +488,17 @@ BEGIN
 	;
 
 	INSERT INTO transaction_commissions_declare(
-	id, transaction_id, user_id, agent_id, agent_percent, master_id, master_percent, super_id, super_percent, admin_id, admin_percent, owner_id, owner_percent, added_by, added_date, update_by, update_date, record_status)
+	id, transaction_id, agent_id, agent_percent, master_id, master_percent, super_id, super_percent, admin_id, admin_percent, owner_id, owner_percent, added_by, added_date, update_by, update_date, record_status)
 	select 
-	id, transaction_id, user_id, agent_id, agent_percent, master_id, master_percent, super_id, super_percent, admin_id, admin_percent, owner_id, owner_percent, added_by, added_date, update_by, update_date, record_status
+	id, transaction_id, agent_id, agent_percent, master_id, master_percent, super_id, super_percent, admin_id, admin_percent, owner_id, owner_percent, added_by, added_date, update_by, update_date, record_status
 	from transaction_commissions
 	where transaction_id in (select id from transactions where market_id = varmarket_id) 
 	;
 
 	INSERT INTO transaction_logs_declare(
-	id, transaction_id, user_id, ip_address, user_agent, browser, browser_version, os, os_version, device_type, device_brand, device_model, country, city, added_by, added_date, update_by, update_date, record_status)
+	id, transaction_id, ip_address, user_agent, browser, browser_version, os, os_version, device_type, device_brand, device_model, country, city, added_by, added_date, update_by, update_date, record_status)
 	select 
-	id, transaction_id, user_id, ip_address, user_agent, browser, browser_version, os, os_version, device_type, device_brand, device_model, country, city, added_by, added_date, update_by, update_date, record_status
+	id, transaction_id, ip_address, user_agent, browser, browser_version, os, os_version, device_type, device_brand, device_model, country, city, added_by, added_date, update_by, update_date, record_status
 	from transaction_logs
 	where transaction_id in (select id from transactions where market_id = varmarket_id) 
 	;

@@ -544,6 +544,124 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
+  // ── Live Prediction: per-number sale + P/L for the logged-in player ──────
+  // Numbers the user has placed bets on, plus the player-side profit if
+  // that number wins. Mirrors the math in public.get_user_matka_jantri so
+  // the page shows correct wins/losses for dara + bahar + ander.
+  .get("/live-prediction/:shiftId", async ({ params, store, set }) => {
+    try {
+      const userId = (store as any).id;
+
+      const [shift] = await db
+        .select()
+        .from(matkaShifts)
+        .where(eq(matkaShifts.id, params.shiftId));
+
+      if (!shift) {
+        set.status = 404;
+        return { success: false, error: "Shift not found" };
+      }
+
+      const rows = await db.execute(sql`
+        WITH all_nums AS (
+          SELECT generate_series AS nums, 1 AS num_type FROM generate_series(1, 100)
+          UNION ALL
+          SELECT generate_series * 111,  2 FROM generate_series(1, 9)
+          UNION ALL
+          SELECT generate_series * 1111, 3 FROM generate_series(1, 9)
+        ),
+        rows AS (
+          SELECT nums, num_type,
+            CASE num_type
+              WHEN 1 THEN nums
+              WHEN 2 THEN nums / 111
+              WHEN 3 THEN (nums / 1111) * 10
+            END AS r
+          FROM all_nums
+        )
+        SELECT
+          an.nums::int     AS nums,
+          an.num_type::int AS num_type,
+          COALESCE(SUM(CASE
+            WHEN mtd.number_type = an.num_type
+             AND mtd.number::integer = an.nums
+            THEN mtd.amount ELSE 0
+          END), 0)::text AS sale,
+          ROUND(COALESCE(SUM(CASE
+            WHEN mtd.number_type = 1 THEN
+              CASE WHEN mtd.number::integer = an.r
+                THEN mtd.amount * mtd.rate ELSE -mtd.amount END
+            WHEN mtd.number_type = 2 THEN
+              CASE WHEN mtd.number::integer = (an.r % 10) * 111
+                THEN mtd.amount * mtd.rate ELSE -mtd.amount END
+            WHEN mtd.number_type = 3 THEN
+              CASE WHEN mtd.number::integer = (an.r / 10) * 1111
+                THEN mtd.amount * mtd.rate ELSE -mtd.amount END
+            ELSE 0
+          END), 0), 2)::text AS profit
+        FROM rows an
+        LEFT JOIN matka_transactions mt
+          ON mt.user_id  = ${userId}::uuid
+         AND mt.shift_id = ${params.shiftId}::uuid
+         AND mt.record_status = 0
+        LEFT JOIN matka_transaction_details mtd
+          ON mtd.transaction_id = mt.id
+         AND mtd.record_status = 0
+        GROUP BY an.nums, an.num_type
+        ORDER BY an.num_type, an.nums
+      `);
+
+      const numbers = ((rows as any).rows ?? rows).map((r: any) => ({
+        nums: Number(r.nums),
+        num_type: Number(r.num_type),
+        sale: r.sale,
+        profit: r.profit,
+      }));
+
+      return { success: true, data: { shift, numbers } };
+    } catch (error) {
+      console.error("[user live-prediction] failed:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch live prediction",
+      };
+    }
+  })
+
+  // ── Declared matka results history (read-only for players) ────────────────
+  .get("/declared-history", async ({ query, set }) => {
+    try {
+      const limit = Math.min(Number((query as any)?.limit ?? 50), 200);
+      const rows = await db.execute(sql`
+        SELECT
+          id, runs, declared_at,
+          (api_response->>'shiftName') AS shift_name,
+          (api_response->>'shiftDate') AS shift_date,
+          (api_response->>'shiftId')   AS shift_id
+        FROM market_results
+        WHERE event_type_id = 999
+          AND status = 'DECLARED'
+          AND record_status = 0
+        ORDER BY declared_at DESC
+        LIMIT ${limit}
+      `);
+      return { success: true, data: (rows as any).rows ?? rows };
+    } catch (error) {
+      set.status = 500;
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch declared history",
+      };
+    }
+  })
+
   // ── Get single transaction with details ───────────────────────────────────
   .get("/transactions/:id", async ({ params, store, set }) => {
     try {
