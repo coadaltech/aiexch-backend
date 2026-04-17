@@ -1,4 +1,4 @@
--- Return signature changed (added settled_amount), so we must drop first.
+-- Return signature changed (added ip_address, record_status), so we must drop first.
 DROP FUNCTION IF EXISTS public.get_user_account_ledger_statement_transaction_detail(uuid, numeric, uuid);
 
 CREATE OR REPLACE FUNCTION public.get_user_account_ledger_statement_transaction_detail(
@@ -47,7 +47,20 @@ RETURNS TABLE(
     api_response         jsonb,
     settled_at           timestamp without time zone,
     declared_at          timestamp without time zone,
-    runs                 integer
+    runs                 integer,
+
+    ip_address           varchar(45),
+    user_agent           text,
+    browser              varchar(100),
+    browser_version      varchar(50),
+    os                   varchar(100),
+    os_version           varchar(50),
+    device_type          varchar(20),
+    device_brand         varchar(100),
+    device_model         varchar(100),
+    country              varchar(100),
+    city                 varchar(100),
+    record_status        integer
 )
 LANGUAGE plpgsql
 AS $function$
@@ -113,11 +126,23 @@ BEGIN
         mr.api_response,
         mr.settled_at,
         mr.declared_at,
-        mr.runs
+        mr.runs,
+
+        tld.ip_address,
+        tld.user_agent,
+        tld.browser,
+        tld.browser_version,
+        tld.os,
+        tld.os_version,
+        tld.device_type,
+        tld.device_brand,
+        tld.device_model,
+        tld.country,
+        tld.city,
+        tdd.record_status
     FROM trans
     INNER JOIN transaction_details_declare tdd
             ON tdd.transaction_id     = trans.id
-           AND tdd.record_status      = 0
            AND tdd.is_user_selection  = TRUE
     LEFT JOIN transaction_commissions_declare tcd
             ON tcd.transaction_id = trans.id
@@ -126,6 +151,10 @@ BEGIN
     LEFT JOIN market_results mr
             ON mr.market_id      = trans.market_id
            AND mr.record_status  = 0
+    -- Join transaction_logs_declare for IP address
+    LEFT JOIN transaction_logs_declare tld
+            ON tld.transaction_id = trans.id
+           AND tld.record_status  = 0
     ORDER BY tdd.added_date DESC;
 END;
 $function$;

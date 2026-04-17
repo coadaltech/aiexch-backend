@@ -359,23 +359,20 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         return { success: false, error: "Role not supported" };
       }
 
-      // Call the existing SQL function directly. It returns (shift_id, nums,
-      // amount, profit) for nums 1..100. We display whatever it gives back —
-      // the function's logic is maintained separately in 01_matka_procedures.sql.
+      // Call the SQL function that returns (shift_id, nums, amount, profit,
+      // declare_count) for nums 1..100. Logic is in 01_matka_procedures.sql.
       let jantriRows: any[] = [];
       try {
         const jr = await db.execute(sql`
-          SELECT nums, amount::text AS sale, profit::text AS profit
-          FROM public.get_user_matka_jantri_of_group(
-            ${viewerId}::uuid, ${params.shiftId}::uuid, ${viewerRole}::int
+          SELECT nums, amount::text AS sale, profit::text AS profit, declare_count
+          FROM public.get_matka_sel_preductiondata_allnumber(
+            ${params.shiftId}::uuid, ${shift.shiftDate}::date
           )
         `);
         jantriRows = (jr as any).rows ?? jr;
       } catch (e) {
-        console.error("[live-prediction] jantri function call failed:", e);
+        console.error("[live-prediction] prediction function call failed:", e);
       }
-
-      const declaredMap = new Map<string, number>();
 
       // Always return a full 1..100 grid. The SQL function returns at most
       // 100 rows; any gaps get filled with zeros.
@@ -389,7 +386,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           num_type: 1,
           sale: r?.sale ?? "0",
           profit: r?.profit ?? "0",
-          declared_count: declaredMap.get(`1:${n}`) ?? 0,
+          declared_count: Number(r?.declare_count ?? 0),
         };
       });
 
@@ -468,6 +465,16 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Role not supported" };
         }
 
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(eq(matkaShifts.id, params.shiftId));
+
+        if (!shift) {
+          set.status = 404;
+          return { success: false, error: "Shift not found" };
+        }
+
         // "Party" is the viewer's nearest non-null downline level.
         // We INNER-JOIN commissions filtered by the viewer's role column so
         // only bets in which the viewer actually has a stake show up, and
@@ -475,27 +482,33 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         const partyIdExpr = sql.raw(`(${cfg.downlineSql})::text`);
         const partyJoinExpr = sql.raw(`pu.id = ${cfg.downlineSql}`);
 
-        // Profit/sale only consider bets of the SAME number_type as the
-        // selected number — a dara bet on 50 doesn't affect bahar 333.
-        // Profit/sale only consider bets of the SAME number_type as the
-        // selected number — a dara bet on 50 doesn't affect bahar 333.
+        // Sale/profit consider ALL number_type bets with cross-type
+        // correlation — mirrors get_matka_sel_preductiondata_allnumber logic.
         const breakdown = await db.execute(sql`
           WITH base AS (
             SELECT
               ${partyIdExpr}             AS party_id,
               COALESCE(pu.username, '—') AS party_name,
               SUM(CASE
-                WHEN mtd.number_type = ${numType}
-                 AND mtd.number::integer = ${num}
-                THEN mtd.amount ELSE 0
+                WHEN mtd.number_type = 1 AND mtd.number::integer = ${num}
+                  THEN mtd.amount
+                WHEN mtd.number_type = 2 AND mtd.number::integer = (${num} % 10) * 111
+                  THEN mtd.amount / 10
+                WHEN mtd.number_type = 3 AND mtd.number::integer = ROUND((${num}::numeric / 10), 0) * 1111
+                  THEN mtd.amount / 10
+                ELSE 0
               END) AS sale,
               SUM(
                 (CASE
-                  WHEN mtd.number_type = ${numType} THEN
+                  WHEN mtd.number_type = 1 THEN
                     CASE WHEN mtd.number::integer = ${num}
-                      THEN mtd.amount * mtd.rate
-                      ELSE -mtd.amount
-                    END
+                      THEN mtd.amount * mtd.rate ELSE -mtd.amount END
+                  WHEN mtd.number_type = 2 THEN
+                    CASE WHEN mtd.number::integer = (${num} % 10) * 111
+                      THEN mtd.amount * mtd.rate ELSE -mtd.amount END
+                  WHEN mtd.number_type = 3 THEN
+                    CASE WHEN mtd.number::integer = ROUND((${num}::numeric / 10), 0) * 1111
+                      THEN mtd.amount * mtd.rate ELSE -mtd.amount END
                   ELSE 0
                 END) * (${sql.raw("mtc." + cfg.percentCol)} / 100)
               ) AS player_profit_share
@@ -508,6 +521,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
               ON mtd.transaction_id = mt.id AND mtd.record_status = 0
             LEFT JOIN users pu ON ${partyJoinExpr}
             WHERE mt.shift_id = ${params.shiftId}::uuid
+              AND mt.transaction_date = ${shift.shiftDate}::date
               AND mt.record_status = 0
             GROUP BY ${partyIdExpr}, pu.username
           )
@@ -628,18 +642,23 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Role not supported" };
         }
 
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(eq(matkaShifts.id, params.shiftId));
+
+        if (!shift) {
+          set.status = 404;
+          return { success: false, error: "Shift not found" };
+        }
+
         const wlParam = (query?.whitelabelId as string | undefined) ?? "all";
         const isAll = wlParam === "all" || !wlParam;
 
-        // Party id from the breakdown is the resolved downline uuid. Filter
-        // rows so we only see bets that pass through both the viewer AND the
-        // selected party.
         const partyFilter = isAll
           ? sql``
           : sql`AND (${sql.raw(cfg.downlineSql)})::text = ${wlParam}`;
 
-        // Same candidate set as the Numbers list: dara 1..100, bahar 111..999
-        // (repeating triplets), ander 1111..9999 (repeating quadruplets).
         const rows = await db.execute(sql`
           WITH all_nums AS (
             SELECT generate_series AS nums, 1 AS num_type FROM generate_series(1, 100)
@@ -647,28 +666,31 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
             SELECT generate_series * 111,  2 FROM generate_series(1, 9)
             UNION ALL
             SELECT generate_series * 1111, 3 FROM generate_series(1, 9)
+          ),
+          filtered_bets AS (
+            SELECT mtd.number_type, mtd.number::integer AS num,
+                   SUM(mtd.amount) AS total_amount
+            FROM matka_transactions mt
+            JOIN matka_transaction_commissions mtc
+              ON mtc.matka_transaction_id = mt.id
+              AND mtc.record_status = 0
+              AND ${sql.raw("mtc." + cfg.viewerCol)} = ${viewerId}::uuid
+              ${partyFilter}
+            JOIN matka_transaction_details mtd
+              ON mtd.transaction_id = mt.id
+              AND mtd.record_status = 0
+            WHERE mt.shift_id = ${params.shiftId}::uuid
+              AND mt.transaction_date = ${shift.shiftDate}::date
+              AND mt.record_status = 0
+            GROUP BY mtd.number_type, mtd.number::integer
           )
           SELECT
             an.nums::int     AS nums,
             an.num_type::int AS num_type,
-            COALESCE(SUM(CASE
-              WHEN mtd.number_type = an.num_type
-               AND mtd.number::integer = an.nums
-              THEN mtd.amount ELSE 0
-            END), 0)::text AS sale
+            COALESCE(fb.total_amount, 0)::text AS sale
           FROM all_nums an
-          LEFT JOIN matka_transactions mt
-            ON mt.shift_id = ${params.shiftId}::uuid
-            AND mt.record_status = 0
-          LEFT JOIN matka_transaction_commissions mtc
-            ON mtc.matka_transaction_id = mt.id
-            AND mtc.record_status = 0
-            AND ${sql.raw("mtc." + cfg.viewerCol)} = ${viewerId}::uuid
-            ${partyFilter}
-          LEFT JOIN matka_transaction_details mtd
-            ON mtd.transaction_id = mt.id
-            AND mtd.record_status = 0
-          GROUP BY an.nums, an.num_type
+          LEFT JOIN filtered_bets fb
+            ON fb.number_type = an.num_type AND fb.num = an.nums
           ORDER BY an.num_type, an.nums
         `);
 
