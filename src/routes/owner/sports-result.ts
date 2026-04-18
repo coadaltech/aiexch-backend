@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { db } from "@db/index";
-import { transactions } from "@db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { transactions, transactionDetails } from "@db/schema";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { SportsService } from "../../services/sports";
 import { MarketType } from "../../types/enums";
 import {
@@ -26,22 +26,26 @@ export const sportsResultRoutes = new Elysia({ prefix: "/sports-result" })
 
       const markets = await getUndeclaredMarkets(allMarketTypes);
 
-      // For each market, fetch distinct runners from transactions
+      // For each market, fetch distinct runners from transaction_details
+      // transaction_details has ALL runners per transaction (not just the one bet on)
       const enriched = await Promise.all(
         markets.map(async (m) => {
           const runners = await db
-            .select({
-              selectionId: transactions.selectionId,
-              selectionName: transactions.selectionName,
+            .selectDistinctOn([transactionDetails.runnerId], {
+              selectionId: transactionDetails.runnerId,
+              selectionName: transactionDetails.runnerName,
             })
-            .from(transactions)
+            .from(transactionDetails)
+            .innerJoin(
+              transactions,
+              eq(transactionDetails.transactionId, transactions.id)
+            )
             .where(
               and(
                 eq(transactions.marketId, m.marketId),
                 eq(transactions.status, "matched")
               )
-            )
-            .groupBy(transactions.selectionId, transactions.selectionName);
+            );
 
           return {
             ...m,
