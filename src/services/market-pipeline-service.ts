@@ -32,21 +32,21 @@ export const MarketPipelineService = {
    */
   async processEvent(eventId: string): Promise<any[]> {
     try {
-      // ── STEP 1: Check event-level admin overrides ──
-      const eventOverrides = await this.getEventOverrides(eventId);
+      // ── PHASE 1: Parallel — fetch everything that doesn't depend on each other ──
+      // eventOverrides, markets, and customMarkets are all independent
+      const [eventOverrides, allMarkets, customMarkets] = await Promise.all([
+        this.getEventOverrides(eventId),
+        SportsService.getMarkets({ eventId }),
+        this.getCustomMarkets(eventId),
+      ]);
+
       if (eventOverrides.isActive === false) {
-        // Event disabled by admin — return empty so LiveDataService broadcasts empty
         return [];
       }
 
-      // ── STEP 2: Fetch raw data from external API (same as before) ──
-      const allMarkets = await SportsService.getMarkets({ eventId });
-
       if (!allMarkets || allMarkets.length === 0) {
-        // Still check for custom markets even if no API markets
-        const customMarkets = await this.getCustomMarkets(eventId);
         if (customMarkets.length > 0) {
-          await this.finalize(eventId, customMarkets);
+          this.finalize(eventId, customMarkets); // fire-and-forget
           return customMarkets;
         }
         return [];
@@ -57,29 +57,27 @@ export const MarketPipelineService = {
       );
 
       if (openMarkets.length === 0) {
-        const customMarkets = await this.getCustomMarkets(eventId);
         if (customMarkets.length > 0) {
-          await this.finalize(eventId, customMarkets);
+          this.finalize(eventId, customMarkets);
           return customMarkets;
         }
         return [];
       }
 
       const openMarketIds = openMarkets.map((m: any) => m.marketId);
-      const oddsObject = await SportsService.getOdds({ marketId: openMarketIds });
 
-      // ── STEP 3: Load admin overrides for all markets (batched) ──
-      const marketOverridesMap = await this.getMarketOverridesBatch(openMarketIds);
+      // ── PHASE 2: Parallel — odds + admin overrides (both need marketIds from phase 1) ──
+      const [oddsObject, marketOverridesMap] = await Promise.all([
+        SportsService.getOdds({ marketId: openMarketIds }),
+        this.getMarketOverridesBatch(openMarketIds),
+      ]);
 
-      // ── STEP 4: Merge API data + admin overrides ──
-      // Include ALL markets (even admin-disabled) with flags so admin panel can see them
+      // ── PHASE 3: Merge (CPU only, no I/O) ──
       const processedMarkets = openMarkets
         .map((market: any) => {
           const marketOdds = oddsObject[market.marketId];
           const overrides = marketOverridesMap.get(market.marketId);
 
-          // "Completed Match" and "Tied Match" markets are inactive by default
-          // — they must be explicitly enabled by an admin.
           const defaultInactiveMarket =
             market.marketName === "Completed Match" ||
             market.marketName === "Tied Match";
@@ -88,7 +86,6 @@ export const MarketPipelineService = {
             : defaultInactiveMarket;
           const adminHidden = overrides?.isVisible === "false";
 
-          // Build final marketCondition: admin overrides take priority over API
           const apiCondition = market.marketCondition || {};
           const finalCondition = {
             ...apiCondition,
@@ -112,7 +109,6 @@ export const MarketPipelineService = {
               overrides?.betLock === "true" ? true : apiCondition.betLock,
           };
 
-          // Determine suspended status
           const isSuspended =
             eventOverrides.suspended === true ||
             overrides?.suspended === "true" ||
@@ -145,15 +141,13 @@ export const MarketPipelineService = {
           };
         });
 
-      // ── STEP 5: Add custom markets for this event ──
-      const customMarkets = await this.getCustomMarkets(eventId);
       const allProcessed =
         customMarkets.length > 0
           ? [...processedMarkets, ...customMarkets]
           : processedMarkets;
 
-      // ── STEP 6–8: Store, snapshot, broadcast ──
-      await this.finalize(eventId, allProcessed);
+      // ── Fire-and-forget: Redis cache + snapshot (don't block return) ──
+      this.finalize(eventId, allProcessed);
 
       return allProcessed;
     } catch (error) {

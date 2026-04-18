@@ -15,7 +15,7 @@ import { db } from "@db/index";
 
 const api = axios.create({
   baseURL: process.env.SPORTS_GAME_PROVIDER_BASE_URL || "http://100.30.62.142",
-  timeout: 10000,
+  timeout: 3000, // 3s timeout — for real-time polling, better to skip a tick than block
 });
 
 function validateArray<T>(data: unknown, defaultValue: T[] = []): T[] {
@@ -816,55 +816,21 @@ export const SportsService = {
     try {
       const isRacingEvent = ["7", "4339"].includes(eventTypeId);
 
-      const marketOdds = this.getMarketsWithOdds({
-        // eventTypeId,
-        eventId: matchId,
-      });
+      // Only call getMarketsWithOdds — it fetches:
+      //   1. GET /sports/events/{eventId}  → all market catalogues
+      //   2. GET /sports/books/{marketIds} → all live odds, status, runners
+      // This covers match odds, bookmakers, sessions/fancy — all market types.
+      // No need for separate getSessions, getBookmakersWithOdds, getScore calls.
+      const marketOddsData = await this.getMarketsWithOdds({ eventId: matchId });
 
-      const score = await this.getScore({
-        eventTypeId,
-        matchId,
-      });
-      // console.log("score", score);
-
-      // 🐎 Skip unnecessary APIs for Horse Racing
-      const premiumFancy = !isRacingEvent
-        ? this.getPremiumFancy({ eventTypeId, matchId })
-        : Promise.resolve(null);
-
-      const bookmakers = !isRacingEvent
-        ? this.getBookmakersWithOdds({ eventTypeId, eventId: matchId })
-        : Promise.resolve(null);
-
-      // const sessions = !isRacingEvent
-      //   ? this.getSessions({ eventTypeId, matchId })
-      //   : Promise.resolve(null);
-      const sessions = this.getSessions({ eventTypeId, matchId });
-
-      const [
-        marketOddsData,
-        scoreData,
-        premiumFancyData,
-        bookmakersData,
-        sessionsData,
-      ] = await Promise.all([
-        marketOdds,
-        score,
-        premiumFancy,
-        bookmakers,
-        sessions,
-      ]);
-
-      const data = {
+      return {
         matchOdds: marketOddsData ?? null,
-        score: scoreData ?? null,
-        premiumFancy: premiumFancyData ?? null,
-        bookmakers: bookmakersData ?? null,
-        sessions: sessionsData ?? null,
+        score: null,
+        premiumFancy: null,
+        bookmakers: null,
+        sessions: null,
         showLay: !isRacingEvent,
       };
-
-      return data;
     } catch (error) {
       return {
         matchOdds: null,
