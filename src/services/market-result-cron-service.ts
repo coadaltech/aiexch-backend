@@ -5,7 +5,7 @@ import { eq, and, inArray, ne, sql } from "drizzle-orm";
 import { SportsService } from "./sports";
 import { MarketType } from "../types/enums";
 
-interface UndeclaredMarket {
+export interface UndeclaredMarket {
   marketId: string;
   matchId: number;
   eventTypeId: number;
@@ -21,7 +21,7 @@ interface UndeclaredMarket {
  * Fetch undeclared markets from transactions table grouped by marketId.
  * Only returns markets whose result has not been declared in market_results yet.
  */
-async function getUndeclaredMarkets(
+export async function getUndeclaredMarkets(
   marketTypes: number[]
 ): Promise<UndeclaredMarket[]> {
   try {
@@ -164,7 +164,7 @@ async function checkMarketOddsStatus(
  * Build a results map (selectionId → "winner" | "loser") using the Books API
  * and the winnerId from the Result API. Used to populate varrunners for the procedure.
  */
-async function buildResultsMap(
+export async function buildResultsMap(
   market: UndeclaredMarket,
   winnerId: number
 ): Promise<Record<string, "winner" | "loser">> {
@@ -253,7 +253,7 @@ async function buildResultsMap(
 /**
  * Look up the winner's selection name from the transactions table.
  */
-async function getWinnerName(marketId: string, selectionId: number): Promise<string> {
+export async function getWinnerName(marketId: string, selectionId: number): Promise<string> {
   try {
     const rows = await db
       .select({ selectionName: transactions.selectionName })
@@ -277,7 +277,7 @@ async function getWinnerName(marketId: string, selectionId: number): Promise<str
  * call declare_process + update_limit_after_declare stored procedures.
  * For VOID/ROLLBACK, cancel all matched bets for the market.
  */
-async function fetchAndStoreResult(market: UndeclaredMarket): Promise<void> {
+export async function fetchAndStoreResult(market: UndeclaredMarket): Promise<void> {
   try {
     const apiResult = await SportsService.getNewMarketResult({
       marketId: market.marketId,

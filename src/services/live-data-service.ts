@@ -3,20 +3,18 @@
 //
 // Architecture:
 //   FIRST LOAD (once per event):
-//     - getMarkets: GET /sports/events/{eventId} → market catalogues (names, runners, types)
-//     - getEventOverrides: Redis → admin event settings
-//     - getMarketOverridesBatch: Redis → admin market settings
-//     - getCustomMarkets: Redis → custom markets
+//     - getMarkets, getEventOverrides, getMarketOverridesBatch, getCustomMarkets
 //     → All stored in EventState.structure (refreshed every 60s)
 //
-//   EVERY TICK (~330ms):
-//     - getOdds: GET /sports/books/{marketIds} → ONLY call. Returns live odds + status.
+//   EVERY TICK:
+//     - getOdds: GET /sports/books/{marketIds} → ONLY external API call
 //     - Merge with cached structure (CPU only, no I/O)
 //     - Broadcast to subscribers
 //
-//   FINALIZE (fire-and-forget, not blocking):
-//     - Redis write for bet validation cache
-//     - Odds snapshot (throttled)
+//   LOOP SAFETY:
+//     - Each loop has a unique loopId. If a newer loop starts (e.g. after page refresh),
+//       the old loop detects loopId mismatch and exits. Prevents zombie loops.
+//     - Poll timeout: if getOdds hangs for >5s, the tick is skipped.
 
 import { MarketPipelineService } from "./market-pipeline-service";
 import { SportsService } from "./sports";
@@ -39,9 +37,9 @@ interface MarketStructure {
 interface EventState {
   subscribers: Map<string, SendFn>;
   loopRunning: boolean;
+  activeLoopId: number; // increments on each new loop — old loops detect mismatch and exit
   lastMessage: string | null;
   eventTypeId: string;
-  // Cached market structure — refreshed every 60s, not on every tick
   structure: MarketStructure | null;
   lastStructureRefresh: number;
 }
@@ -49,7 +47,8 @@ interface EventState {
 const activeEvents = new Map<string, EventState>();
 
 const MIN_POLL_GAP_MS = 200;
-const STRUCTURE_REFRESH_MS = 60_000; // refresh market structure every 60s
+const STRUCTURE_REFRESH_MS = 60_000;
+const POLL_TIMEOUT_MS = 5_000; // if getOdds hangs for >5s, skip the tick
 
 export const LiveDataService = {
   subscribe(clientId: string, send: SendFn, eventId: string, eventTypeId: string) {
@@ -59,6 +58,7 @@ export const LiveDataService = {
       state = {
         subscribers: new Map(),
         loopRunning: false,
+        activeLoopId: 0,
         lastMessage: null,
         eventTypeId,
         structure: null,
@@ -76,9 +76,10 @@ export const LiveDataService = {
 
     // Start poll loop if not already running
     if (!state.loopRunning) {
-      console.log(`[Live] Poll loop started: event=${eventId}, subscribers=${state.subscribers.size}`);
       state.loopRunning = true;
-      this._pollLoop(eventId);
+      state.activeLoopId++;
+      const loopId = state.activeLoopId;
+      this._pollLoop(eventId, loopId);
     }
   },
 
@@ -87,11 +88,9 @@ export const LiveDataService = {
     if (!state) return;
 
     state.subscribers.delete(clientId);
-
-    if (state.subscribers.size === 0) {
-      console.log(`[Live] Poll loop stopped: event=${eventId}`);
-      activeEvents.delete(eventId);
-    }
+    // Don't delete state from map here — let the loop detect 0 subscribers and exit cleanly.
+    // This prevents the race condition where a new subscribe() creates a new state
+    // that the old loop accidentally picks up.
   },
 
   cleanup(clientId: string) {
@@ -102,20 +101,37 @@ export const LiveDataService = {
     }
   },
 
-  async _pollLoop(eventId: string) {
+  async _pollLoop(eventId: string, loopId: number) {
     while (true) {
       const state = activeEvents.get(eventId);
-      if (!state || state.subscribers.size === 0) {
-        if (state) state.loopRunning = false;
+
+      // Exit conditions:
+      if (!state) return;
+      if (state.activeLoopId !== loopId) return; // a newer loop took over — this one is stale
+      if (state.subscribers.size === 0) {
+        // No subscribers — clean up and exit
+        state.loopRunning = false;
+        activeEvents.delete(eventId);
         return;
       }
 
       const start = Date.now();
 
       try {
-        await this._poll(eventId, state);
+        // Wrap poll in a timeout to prevent hanging on a stuck API call
+        await Promise.race([
+          this._poll(eventId, state),
+          new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error("Poll timeout")), POLL_TIMEOUT_MS)
+          ),
+        ]);
       } catch (error) {
-        console.error(`[Live] Poll error for event ${eventId}:`, (error as Error)?.message);
+        const msg = (error as Error)?.message;
+        if (msg === "Poll timeout") {
+          console.warn(`[Live] Poll timeout for event ${eventId} (>${POLL_TIMEOUT_MS}ms) — skipping tick`);
+        } else {
+          console.error(`[Live] Poll error for event ${eventId}:`, msg);
+        }
       }
 
       const elapsed = Date.now() - start;
@@ -125,10 +141,6 @@ export const LiveDataService = {
     }
   },
 
-  /**
-   * Refresh market structure: catalogues, admin overrides, custom markets.
-   * Called once on first subscriber, then every 60 seconds.
-   */
   async _refreshStructure(eventId: string, state: EventState): Promise<MarketStructure | null> {
     try {
       const [eventOverrides, allMarkets, customMarkets] = await Promise.all([
@@ -158,25 +170,23 @@ export const LiveDataService = {
 
       state.structure = structure;
       state.lastStructureRefresh = Date.now();
-      console.log(`[Live] Structure refreshed: event=${eventId}, ${openMarketIds.length} markets, ${customMarkets.length} custom`);
       return structure;
     } catch (error) {
       console.error(`[Live] Structure refresh error for ${eventId}:`, (error as Error)?.message);
-      return state.structure; // keep old structure on error
+      return state.structure;
     }
   },
 
   async _poll(eventId: string, state: EventState) {
     const now = Date.now();
 
-    // ── Refresh structure on first call or every 60s ──
+    // Refresh structure on first call or every 60s
     if (!state.structure || now - state.lastStructureRefresh >= STRUCTURE_REFRESH_MS) {
       await this._refreshStructure(eventId, state);
     }
 
     const structure = state.structure;
     if (!structure || (structure.openMarketIds.length === 0 && structure.customMarkets.length === 0)) {
-      // No markets — broadcast empty
       const message = JSON.stringify({
         type: "live-update",
         eventId,
@@ -191,18 +201,12 @@ export const LiveDataService = {
       return;
     }
 
-    // ── ONLY external API call per tick: GET /sports/books/{marketIds} ──
-    const pollStart = Date.now();
+    // ── ONLY external API call per tick ──
     const oddsObject = structure.openMarketIds.length > 0
       ? await SportsService.getOdds({ marketId: structure.openMarketIds })
       : {};
-    const pollMs = Date.now() - pollStart;
 
-    if (Math.random() < 0.05) {
-      console.log(`[Live] Poll ${eventId}: getOdds=${pollMs}ms, ${structure.openMarketIds.length} markets`);
-    }
-
-    // ── Merge: cached structure + fresh odds (CPU only, no I/O) ──
+    // ── Merge: cached structure + fresh odds (CPU only) ──
     const { eventOverrides, openMarkets, marketOverridesMap, customMarkets } = structure;
 
     const processedMarkets = openMarkets.map((market: any) => {
@@ -262,7 +266,7 @@ export const LiveDataService = {
       ? [...processedMarkets, ...customMarkets]
       : processedMarkets;
 
-    // ── Broadcast ──
+    // Broadcast
     const message = JSON.stringify({
       type: "live-update",
       eventId,
@@ -275,7 +279,7 @@ export const LiveDataService = {
     state.lastMessage = message;
     this._broadcast(state, message);
 
-    // ── Fire-and-forget: update Redis live cache for bet validation ──
+    // Fire-and-forget: update Redis live cache for bet validation
     MarketPipelineService.finalize(eventId, allProcessed);
   },
 

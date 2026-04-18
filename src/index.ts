@@ -113,12 +113,12 @@ async function initializeServices() {
   console.log("[Init] Whitelabel origins loaded");
 
   // Step 3: Sync admin overrides from DB to Redis
-  try {
-    await AdminMarketService.syncOverridesToRedis();
-    console.log("[Init] Admin overrides synced");
-  } catch (e) {
-    console.error("[Init] Admin sync failed (non-fatal):", e);
-  }
+  // try {
+  //   await AdminMarketService.syncOverridesToRedis();
+  //   console.log("[Init] Admin overrides synced");
+  // } catch (e) {
+  //   console.error("[Init] Admin sync failed (non-fatal):", e);
+  // }
 
   // Step 4: Start odds history worker
   try {
