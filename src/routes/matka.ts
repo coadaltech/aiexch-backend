@@ -172,6 +172,17 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Shift ID and bets are required" };
         }
 
+        // Resolve whitelabelId from the user's record if not provided
+        let resolvedWhitelabelId = whitelabelId;
+        if (!resolvedWhitelabelId) {
+          const [betUser] = await db
+            .select({ whitelabelId: users.whitelabelId })
+            .from(users)
+            .where(eq(users.id, store.id))
+            .limit(1);
+          resolvedWhitelabelId = betUser?.whitelabelId ?? undefined;
+        }
+
         // Validate shift exists and is active
         const [shift] = await db
           .select()
@@ -323,7 +334,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             totalCommission: String(totalCommission),
             finalAmount: String(finalAmount),
             ...(copyReferenceShiftId ? { copyReferenceShiftId } : {}),
-            ...(whitelabelId ? { whitelabelId } : {}),
+            ...(resolvedWhitelabelId ? { whitelabelId: resolvedWhitelabelId } : {}),
             addedBy: store.id,
             updateBy: store.id,
           })
@@ -339,15 +350,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           );
         }
 
-        // Update ledger consumption
-        if (ledger) {
-          await db
-            .update(ledgerLimit)
-            .set({
-              limitConsumed: String(Number(ledger.limitConsumed) + totalAmount),
-            })
-            .where(eq(ledgerLimit.userId, store.id));
-        }
+        // Recalculate exposure and update ledger_limit
+        await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
 
         // Insert matka transaction log
         const ipAddress =
@@ -752,22 +756,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .set({ recordStatus: RecordStatus.Deleted })
         .where(eq(matkaTransactionDetails.transactionId, params.id));
 
-      // Restore ledger: subtract totalAmount from limitConsumed (floor at 0)
-      const [ledger] = await db
-        .select()
-        .from(ledgerLimit)
-        .where(eq(ledgerLimit.userId, store.id));
-
-      if (ledger) {
-        const newConsumed = Math.max(
-          0,
-          Number(ledger.limitConsumed) - Number(txn.totalAmount)
-        );
-        await db
-          .update(ledgerLimit)
-          .set({ limitConsumed: String(newConsumed) })
-          .where(eq(ledgerLimit.userId, store.id));
-      }
+      // Recalculate exposure and update ledger_limit
+      await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
 
       return { success: true };
     } catch (error) {
@@ -880,22 +870,9 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         });
 
         const newFinalAmount = newTotalAmount - newTotalCommission;
-        const oldTotal = Number(txn.totalAmount);
-        const diff = newTotalAmount - oldTotal;
 
-        // Update ledger: add diff (can be positive or negative)
-        const [ledger] = await db
-          .select()
-          .from(ledgerLimit)
-          .where(eq(ledgerLimit.userId, store.id));
-
-        if (ledger) {
-          const newConsumed = Math.max(0, Number(ledger.limitConsumed) + diff);
-          await db
-            .update(ledgerLimit)
-            .set({ limitConsumed: String(newConsumed) })
-            .where(eq(ledgerLimit.userId, store.id));
-        }
+        // Recalculate exposure and update ledger_limit
+        await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
 
         // Soft-delete existing details
         await db

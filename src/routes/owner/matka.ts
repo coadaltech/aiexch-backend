@@ -433,36 +433,15 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
-  // ── Live Prediction: party breakdown for a single number ────────────────
+  // ── Live Prediction: party (user) breakdown for a single number ──────────
   .get(
     "/live-prediction/:shiftId/whitelabels",
-    async ({ params, query, set, store }) => {
+    async ({ params, query, set }) => {
       try {
-        const viewerId = (store as any).id;
-        const viewerRole = Number((store as any).role);
-        const cfg = roleConfig(viewerRole);
-
         const num = Number(query?.nums);
-        // Determine which number_type this nums belongs to:
-        //   1..100             → type 1 (dara)
-        //   111..999 repeating → type 2 (bahar)
-        //   1111..9999 repeating → type 3 (ander)
-        let numType: 1 | 2 | 3 | null = null;
-        if (Number.isInteger(num) && num >= 1 && num <= 100) numType = 1;
-        else if ([111, 222, 333, 444, 555, 666, 777, 888, 999].includes(num)) numType = 2;
-        else if ([1111, 2222, 3333, 4444, 5555, 6666, 7777, 8888, 9999].includes(num)) numType = 3;
-
-        if (!numType) {
+        if (!Number.isInteger(num) || num < 1 || num > 100) {
           set.status = 400;
-          return {
-            success: false,
-            error:
-              "Invalid nums (must be 1-100, 111/222/.../999, or 1111/2222/.../9999)",
-          };
-        }
-        if (!cfg) {
-          set.status = 403;
-          return { success: false, error: "Role not supported" };
+          return { success: false, error: "Invalid number (must be 1-100)" };
         }
 
         const [shift] = await db
@@ -475,147 +454,20 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Shift not found" };
         }
 
-        // "Party" is the viewer's nearest non-null downline level.
-        // We INNER-JOIN commissions filtered by the viewer's role column so
-        // only bets in which the viewer actually has a stake show up, and
-        // the P/L column uses that viewer's commission percentage.
-        const partyIdExpr = sql.raw(`(${cfg.downlineSql})::text`);
-        const partyJoinExpr = sql.raw(`pu.id = ${cfg.downlineSql}`);
-
-        // Sale/profit consider ALL number_type bets with cross-type
-        // correlation — mirrors get_matka_sel_preductiondata_allnumber logic.
-        const breakdown = await db.execute(sql`
-          WITH base AS (
-            SELECT
-              ${partyIdExpr}             AS party_id,
-              COALESCE(pu.username, '—') AS party_name,
-              SUM(CASE
-                WHEN mtd.number_type = 1 AND mtd.number::integer = ${num}
-                  THEN mtd.amount
-                WHEN mtd.number_type = 2 AND mtd.number::integer = (${num} % 10) * 111
-                  THEN mtd.amount / 10
-                WHEN mtd.number_type = 3 AND mtd.number::integer = ROUND((${num}::numeric / 10), 0) * 1111
-                  THEN mtd.amount / 10
-                ELSE 0
-              END) AS sale,
-              SUM(
-                (CASE
-                  WHEN mtd.number_type = 1 THEN
-                    CASE WHEN mtd.number::integer = ${num}
-                      THEN mtd.amount * mtd.rate ELSE -mtd.amount END
-                  WHEN mtd.number_type = 2 THEN
-                    CASE WHEN mtd.number::integer = (${num} % 10) * 111
-                      THEN mtd.amount * mtd.rate ELSE -mtd.amount END
-                  WHEN mtd.number_type = 3 THEN
-                    CASE WHEN mtd.number::integer = ROUND((${num}::numeric / 10), 0) * 1111
-                      THEN mtd.amount * mtd.rate ELSE -mtd.amount END
-                  ELSE 0
-                END) * (${sql.raw("mtc." + cfg.percentCol)} / 100)
-              ) AS player_profit_share
-            FROM matka_transactions mt
-            JOIN matka_transaction_commissions mtc
-              ON mtc.matka_transaction_id = mt.id
-             AND mtc.record_status = 0
-             AND ${sql.raw("mtc." + cfg.viewerCol)} = ${viewerId}::uuid
-            JOIN matka_transaction_details mtd
-              ON mtd.transaction_id = mt.id AND mtd.record_status = 0
-            LEFT JOIN users pu ON ${partyJoinExpr}
-            WHERE mt.shift_id = ${params.shiftId}::uuid
-              AND mt.transaction_date = ${shift.shiftDate}::date
-              AND mt.record_status = 0
-            GROUP BY ${partyIdExpr}, pu.username
-          )
+        const rows = await db.execute(sql`
           SELECT
-            party_id                                          AS whitelabel_id,
-            party_name                                        AS whitelabel_name,
-            ROUND(COALESCE(sale, 0), 2)::text                 AS sale,
-            ROUND(-COALESCE(player_profit_share, 0), 2)::text AS profit
-          FROM base
-          ORDER BY player_profit_share ASC
+            user_id::text  AS user_id,
+            name,
+            amount::text   AS sale,
+            profit::text   AS profit
+          FROM get_matka_sel_user_sale_profit(
+            ${params.shiftId}::uuid,
+            ${shift.shiftDate}::date,
+            ${num}
+          )
         `);
 
-        const wlRows: any[] = (breakdown as any).rows ?? breakdown;
-
-        // Last-N-shift consecutive W/L streak per party. A "W" is when the
-        // viewer's net profit on that party for the declared shift is
-        // positive (i.e. that party's bets lost overall).
-        const recentDeclared = await db.execute(sql`
-          SELECT id, runs, declared_at,
-                 (api_response->>'shiftId')::uuid AS shift_id
-          FROM market_results
-          WHERE event_type_id = ${MATKA_EVENT_TYPE_ID}
-            AND status = 'DECLARED'
-            AND record_status = 0
-            AND runs IS NOT NULL
-            AND api_response ? 'shiftId'
-          ORDER BY declared_at DESC
-          LIMIT 20
-        `);
-        const declaredList: any[] = (recentDeclared as any).rows ?? recentDeclared;
-
-        const streakByWl = new Map<string, { status: "W" | "L"; count: number }>();
-        for (const wl of wlRows) {
-          const wlId = wl.whitelabel_id as string | null;
-          if (!wlId) {
-            streakByWl.set("null", { status: "L", count: 0 });
-            continue;
-          }
-          let status: "W" | "L" | null = null;
-          let count = 0;
-          const partyMatchSql = sql`(${sql.raw(cfg.downlineSql)})::text = ${wlId}`;
-          for (const dec of declaredList) {
-            const r = await db.execute(sql`
-              SELECT COALESCE(SUM(
-                (CASE
-                  WHEN mtd.number_type = 1
-                    THEN (CASE WHEN mtd.number::integer = ${dec.runs}                                THEN mtd.amount * mtd.rate ELSE -mtd.amount END)
-                  WHEN mtd.number_type = 2
-                    THEN (CASE WHEN mtd.number::integer = (${dec.runs} % 10) * 111                  THEN mtd.amount * mtd.rate ELSE -mtd.amount END)
-                  WHEN mtd.number_type = 3
-                    THEN (CASE WHEN mtd.number::integer = (${dec.runs} / 10) * 1111 THEN mtd.amount * mtd.rate ELSE -mtd.amount END)
-                  ELSE 0
-                END) * (${sql.raw("mtc." + cfg.percentCol)} / 100)
-              ), 0)::numeric AS player_share
-              FROM matka_transactions mt
-              JOIN matka_transaction_commissions mtc
-                ON mt.id = mtc.matka_transaction_id AND mtc.record_status = 0
-                AND ${sql.raw("mtc." + cfg.viewerCol)} = ${viewerId}::uuid
-              JOIN matka_transaction_details mtd
-                ON mt.id = mtd.transaction_id AND mtd.record_status = 0
-              WHERE mt.shift_id = ${dec.shift_id}::uuid
-                AND ${partyMatchSql}
-                AND mt.record_status = 0
-            `);
-            const playerShare = Number(((r as any).rows ?? r)[0]?.player_share ?? 0);
-            if (playerShare === 0) continue; // no exposure on this shift, skip
-            const ownerProfit = -playerShare;
-            const cur: "W" | "L" = ownerProfit > 0 ? "W" : "L";
-            if (status === null) {
-              status = cur;
-              count = 1;
-            } else if (cur === status) {
-              count += 1;
-            } else {
-              break;
-            }
-          }
-          streakByWl.set(wlId, { status: status ?? "L", count });
-        }
-
-        const data = wlRows.map((r) => {
-          const key = (r.whitelabel_id as string) ?? "null";
-          const s = streakByWl.get(key) ?? { status: "L", count: 0 };
-          return {
-            whitelabelId: r.whitelabel_id,
-            whitelabelName: r.whitelabel_name,
-            sale: r.sale,
-            profit: r.profit,
-            lastWinStatus: s.status,
-            consecutiveCount: s.count,
-          };
-        });
-
-        return { success: true, data };
+        return { success: true, data: (rows as any).rows ?? rows };
       } catch (error) {
         set.status = 500;
         return {
@@ -623,7 +475,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           error:
             error instanceof Error
               ? error.message
-              : "Failed to fetch whitelabel breakdown",
+              : "Failed to fetch party breakdown",
         };
       }
     }
@@ -703,6 +555,53 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
             error instanceof Error
               ? error.message
               : "Failed to fetch jantri grid",
+        };
+      }
+    }
+  )
+
+  // ── Live Prediction: per-whitelabel sale for a single number (Agent Group) ──
+  .get(
+    "/live-prediction/:shiftId/agent-sale",
+    async ({ params, query, set, store }) => {
+      try {
+        const num = Number(query?.nums);
+        if (!Number.isInteger(num) || num < 1 || num > 100) {
+          set.status = 400;
+          return {
+            success: false,
+            error: "Invalid number (must be 1-100)",
+          };
+        }
+
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(eq(matkaShifts.id, params.shiftId));
+
+        if (!shift) {
+          set.status = 404;
+          return { success: false, error: "Shift not found" };
+        }
+
+        const rows = await db.execute(sql`
+          SELECT whitelabel_id, name, amount::text
+          FROM get_matka_sel_whitelabel_sale(
+            ${params.shiftId}::uuid,
+            ${shift.shiftDate}::date,
+            ${num}
+          )
+        `);
+
+        return { success: true, data: (rows as any).rows ?? rows };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to fetch agent sale",
         };
       }
     }
