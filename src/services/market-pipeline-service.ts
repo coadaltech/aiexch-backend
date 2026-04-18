@@ -1,6 +1,5 @@
 import { redis, redisIsHealthy } from "@db/redis";
 import { SportsService } from "./sports";
-import { broadcastMarketUpdate } from "./socket-service";
 import crypto from "crypto";
 
 /** Safe Redis helper — returns null/undefined instead of throwing when Redis is down */
@@ -36,12 +35,7 @@ export const MarketPipelineService = {
       // ── STEP 1: Check event-level admin overrides ──
       const eventOverrides = await this.getEventOverrides(eventId);
       if (eventOverrides.isActive === false) {
-        // Event disabled by admin — broadcast empty so frontend clears UI
-        broadcastMarketUpdate(eventId, {
-          eventId,
-          markets: [],
-          timestamp: Date.now(),
-        });
+        // Event disabled by admin — return empty so LiveDataService broadcasts empty
         return [];
       }
 
@@ -168,21 +162,15 @@ export const MarketPipelineService = {
     }
   },
 
-  /** Store in Redis live cache, push history snapshot, broadcast to WS */
+  /** Store in Redis live cache and push history snapshot.
+   *  Broadcasting is handled by LiveDataService — no direct WS send here. */
   async finalize(eventId: string, markets: any[]) {
-    // Store in Redis live cache + push snapshot — fire-and-forget (don't block broadcast)
+    // Store in Redis live cache + push snapshot — fire-and-forget (don't block)
     safeRedisOp(
       () => redis.setEx(`live:markets:${eventId}`, 10, JSON.stringify(markets)),
       undefined
     );
     this.pushOddsSnapshot(eventId, markets);
-
-    // Broadcast to WebSocket (same format as before) — this is the hot path
-    broadcastMarketUpdate(eventId, {
-      eventId,
-      markets,
-      timestamp: Date.now(),
-    });
   },
 
   // ── Helper: Get event admin overrides from Redis ──

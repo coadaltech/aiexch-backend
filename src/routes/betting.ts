@@ -81,14 +81,68 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         };
       }
 
-      const userData = await db
-        .select({
+      // ── STEP 0: Run independent checks in parallel ──
+      // These 3 DB queries + 1 Redis check are independent — run them concurrently
+      const ipAddress =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        request.headers.get("x-real-ip") ||
+        null;
+      const ua = parseUserAgent(request.headers.get("user-agent"));
+
+      // Fire all independent queries in parallel
+      const [userData, userRecord, [ledger], marketStatusResult] = await Promise.all([
+        // 1. User profile (betStatus check)
+        db.select({
           betStatus: profiles.betStatus,
           parentBetStatus: profiles.parentBetStatus,
-        })
-        .from(profiles)
-        .where(eq(profiles.userId, store.id))
-        .limit(1);
+        }).from(profiles).where(eq(profiles.userId, store.id)).limit(1),
+
+        // 2. User whitelabelId
+        db.select({ whitelabelId: users.whitelabelId })
+          .from(users).where(eq(users.id, store.id)).limit(1),
+
+        // 3. Ledger limits
+        db.select({ userLimit: ledgerLimit.userLimit, finalLimit: ledgerLimit.finalLimit })
+          .from(ledgerLimit).where(eq(ledgerLimit.userId, store.id)).limit(1),
+
+        // 4. Redis market status check (non-blocking)
+        (async () => {
+          let resolvedMinBet = 0;
+          let resolvedMaxBet = 0;
+          try {
+            if (redis.isReady) {
+              const liveJson = await redis.get(`live:markets:${matchId}`);
+              if (liveJson) {
+                const liveMarkets: any[] = JSON.parse(liveJson);
+                const targetMarket = liveMarkets.find((m: any) => m.marketId === marketId);
+                if (targetMarket) {
+                  if (targetMarket.status === "CLOSED" || targetMarket.status === "INACTIVE") {
+                    return { rejected: true, error: "Bet rejected: market is closed" };
+                  }
+                  if (targetMarket.status === "SUSPENDED") {
+                    return { rejected: true, error: "Bet rejected: market is suspended" };
+                  }
+                  if (targetMarket.sportingEvent) {
+                    return { rejected: true, error: "Bet rejected: ball is running" };
+                  }
+                  if (targetMarket.marketCondition?.betLock) {
+                    return { rejected: true, error: "Bet rejected: market is locked" };
+                  }
+                  if (targetMarket.marketCondition?.minBet) {
+                    resolvedMinBet = parseFloat(targetMarket.marketCondition.minBet) || 0;
+                  }
+                  if (targetMarket.marketCondition?.maxBet) {
+                    resolvedMaxBet = parseFloat(targetMarket.marketCondition.maxBet) || 0;
+                  }
+                }
+              }
+            }
+          } catch {
+            // Non-critical: if Redis check fails, allow the bet through
+          }
+          return { rejected: false, resolvedMinBet, resolvedMaxBet };
+        })(),
+      ]);
 
       if (!userData[0]) {
         set.status = 404;
@@ -101,42 +155,13 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "Betting is disabled for your account" };
       }
 
-      // Server-side market status + min/max bet validation
-      let resolvedMinBet = 0;
-      let resolvedMaxBet = 0;
-      try {
-        if (redis.isReady) {
-          const liveJson = await redis.get(`live:markets:${matchId}`);
-          if (liveJson) {
-            const liveMarkets: any[] = JSON.parse(liveJson);
-            const targetMarket = liveMarkets.find((m: any) => m.marketId === marketId);
-            if (targetMarket) {
-              if (targetMarket.status === "SUSPENDED") {
-                set.status = 400;
-                return { success: false, error: "Bet rejected: market is suspended" };
-              }
-              if (targetMarket.sportingEvent) {
-                set.status = 400;
-                return { success: false, error: "Bet rejected: ball is running" };
-              }
-              if (targetMarket.marketCondition?.betLock) {
-                set.status = 400;
-                return { success: false, error: "Bet rejected: market is locked" };
-              }
-              // Capture min/max from live market conditions
-              if (targetMarket.marketCondition?.minBet) {
-                resolvedMinBet = parseFloat(targetMarket.marketCondition.minBet) || 0;
-              }
-              if (targetMarket.marketCondition?.maxBet) {
-                resolvedMaxBet = parseFloat(targetMarket.marketCondition.maxBet) || 0;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        // Non-critical: if Redis check fails, allow the bet through
-        // (the DB trigger will still enforce limits)
+      // Check market status result from Redis
+      if (marketStatusResult.rejected) {
+        set.status = 400;
+        return { success: false, error: (marketStatusResult as any).error };
       }
+
+      let { resolvedMinBet = 0, resolvedMaxBet = 0 } = marketStatusResult as { rejected: false; resolvedMinBet: number; resolvedMaxBet: number };
 
       // Fallback: fetch min/max from market_settings DB when Redis didn't provide them
       if (resolvedMinBet === 0 && resolvedMaxBet === 0) {
@@ -150,7 +175,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             resolvedMinBet = parseFloat(mktSetting.minBet ?? "0") || 0;
             resolvedMaxBet = parseFloat(mktSetting.maxBet ?? "0") || 0;
           }
-        } catch (e) {
+        } catch {
           // Non-critical: DB lookup failed, skip min/max enforcement
         }
       }
@@ -165,28 +190,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: `Bet rejected: maximum bet is ${resolvedMaxBet}` };
       }
 
-      // Fetch whitelabelId from users table
-      const userRecord = await db
-        .select({ whitelabelId: users.whitelabelId })
-        .from(users)
-        .where(eq(users.id, store.id))
-        .limit(1);
-
       const whitelabelId = userRecord[0]?.whitelabelId ?? null;
-
-      const ipAddress =
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        request.headers.get("x-real-ip") ||
-        null;
-
-      const ua = parseUserAgent(request.headers.get("user-agent"));
-
-      // ── STEP 1: Validate ledger limits ──
-      const [ledger] = await db
-        .select({ userLimit: ledgerLimit.userLimit, finalLimit: ledgerLimit.finalLimit })
-        .from(ledgerLimit)
-        .where(eq(ledgerLimit.userId, store.id))
-        .limit(1);
 
       if (!ledger) {
         set.status = 400;

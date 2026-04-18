@@ -1,6 +1,14 @@
 // services/live-data-service.ts
 // Unified demand-driven live data service.
 // Manages per-event subscriber sets and polls external API only when users are watching.
+//
+// Performance architecture:
+//   - FAST PATH (continuous loop): match odds + sessions + score — fetched in parallel,
+//     broadcast immediately. Next poll starts as soon as current one finishes (no idle gap).
+//   - SLOW PATH (every 2s): bookmakers only — requires 2 sequential external API calls
+//     (getBookmakersList + getBookmarkOdds) so it's fetched in the background.
+//   - Self-scheduling loop: no setInterval. After each poll completes, the next one starts
+//     immediately (with a minimum 200ms gap to avoid hammering when APIs respond from cache).
 
 import { MarketPipelineService } from "./market-pipeline-service";
 import { SportsService } from "./sports";
@@ -9,14 +17,19 @@ type SendFn = (data: string) => void;
 
 interface EventState {
   subscribers: Map<string, SendFn>; // clientId -> send function
-  interval: ReturnType<typeof setInterval> | null;
-  lastData: string | null; // last JSON broadcast (for dedup + new subscriber)
+  loopRunning: boolean; // whether the poll loop is active
+  lastMessage: string | null; // last full JSON broadcast (for new subscriber catch-up)
   eventTypeId: string;
+  // Slow-path cache (bookmakers only — the slow 2-call API)
+  cachedBookmakers: any[];
+  lastBookmakerFetch: number;
+  isBookmakerFetching: boolean;
 }
 
 const activeEvents = new Map<string, EventState>();
 
-const POLL_INTERVAL_MS = 330; // 250ms (4x per second)
+const MIN_POLL_GAP_MS = 200; // minimum gap between polls (max ~5/sec when APIs respond from cache)
+const BOOKMAKER_INTERVAL_MS = 2000; // bookmakers every 2 seconds
 
 export const LiveDataService = {
   subscribe(clientId: string, send: SendFn, eventId: string, eventTypeId: string) {
@@ -25,9 +38,12 @@ export const LiveDataService = {
     if (!state) {
       state = {
         subscribers: new Map(),
-        interval: null,
-        lastData: null,
+        loopRunning: false,
+        lastMessage: null,
         eventTypeId,
+        cachedBookmakers: [],
+        lastBookmakerFetch: 0,
+        isBookmakerFetching: false,
       };
       activeEvents.set(eventId, state);
     }
@@ -35,15 +51,15 @@ export const LiveDataService = {
     state.subscribers.set(clientId, send);
 
     // Send last cached data immediately to new subscriber
-    if (state.lastData) {
-      try { send(state.lastData); } catch { /* ignore */ }
+    if (state.lastMessage) {
+      try { send(state.lastMessage); } catch { /* ignore */ }
     }
 
-    // Start polling if first subscriber
-    if (!state.interval) {
-      console.log(`[Live] Polling started: event=${eventId}, subscribers=${state.subscribers.size}`);
-      this._poll(eventId);
-      state.interval = setInterval(() => this._poll(eventId), POLL_INTERVAL_MS);
+    // Start poll loop if not already running
+    if (!state.loopRunning) {
+      console.log(`[Live] Poll loop started: event=${eventId}, subscribers=${state.subscribers.size}`);
+      state.loopRunning = true;
+      this._pollLoop(eventId);
     }
   },
 
@@ -54,11 +70,8 @@ export const LiveDataService = {
     state.subscribers.delete(clientId);
 
     if (state.subscribers.size === 0) {
-      console.log(`[Live] Polling stopped: event=${eventId}`);
-      if (state.interval) {
-        clearInterval(state.interval);
-        state.interval = null;
-      }
+      console.log(`[Live] Poll loop stopped: event=${eventId}`);
+      // Loop will exit on next iteration when it sees 0 subscribers
       activeEvents.delete(eventId);
     }
   },
@@ -71,50 +84,86 @@ export const LiveDataService = {
     }
   },
 
-  async _poll(eventId: string) {
-    const state = activeEvents.get(eventId);
-    if (!state || state.subscribers.size === 0) return;
-
-    try {
-      const eventTypeId = state.eventTypeId;
-
-      // Fetch all live data in parallel
-      const [matchOdds, bookmakers, sessions, score] = await Promise.all([
-        MarketPipelineService.processEvent(eventId),
-        SportsService.getBookmakersWithOdds({ eventTypeId, eventId }).catch(() => []),
-        SportsService.getSessions({ eventTypeId, matchId: eventId }).catch(() => []),
-        SportsService.getScore({ eventTypeId, matchId: eventId }).catch(() => null),
-      ]);
-
-      const message = JSON.stringify({
-        type: "live-update",
-        eventId,
-        matchOdds,
-        bookmakers,
-        sessions,
-        score,
-        timestamp: Date.now(),
-      });
-
-      // Skip broadcast if data hasn't changed
-      if (message === state.lastData) return;
-      state.lastData = message;
-
-      // Broadcast to all subscribers, remove dead ones
-      const deadClients: string[] = [];
-      for (const [clientId, send] of state.subscribers) {
-        try {
-          send(message);
-        } catch {
-          deadClients.push(clientId);
-        }
+  /**
+   * Continuous poll loop — runs as long as subscribers exist.
+   * Each iteration: fetch data → broadcast → immediately start next fetch.
+   * No setInterval gap between poll completion and next poll start.
+   */
+  async _pollLoop(eventId: string) {
+    while (true) {
+      const state = activeEvents.get(eventId);
+      if (!state || state.subscribers.size === 0) {
+        // No more subscribers — exit loop
+        if (state) state.loopRunning = false;
+        return;
       }
 
-      for (const clientId of deadClients) {
-        this.cleanup(clientId);
+      const start = Date.now();
+
+      try {
+        await this._poll(eventId, state);
+      } catch (error) {
+        console.error(`[Live] Poll error for event ${eventId}:`, (error as Error)?.message);
       }
-    } catch (error) {
-      console.error(`[Live] Poll error for event ${eventId}:`, (error as Error)?.message);
+
+      // Enforce minimum gap so we don't hammer APIs when they respond from cache
+      const elapsed = Date.now() - start;
+      if (elapsed < MIN_POLL_GAP_MS) {
+        await new Promise((r) => setTimeout(r, MIN_POLL_GAP_MS - elapsed));
+      }
+    }
+  },
+
+  async _poll(eventId: string, state: EventState) {
+    const eventTypeId = state.eventTypeId;
+
+    // ── FAST PATH: fetch match odds + sessions + score in parallel ──
+    const [matchOdds, sessions, score] = await Promise.all([
+      MarketPipelineService.processEvent(eventId),
+      SportsService.getSessions({ eventTypeId, matchId: eventId }).catch(() => []),
+      SportsService.getScore({ eventTypeId, matchId: eventId }).catch(() => null),
+    ]);
+
+    // ── SLOW PATH: bookmakers fetched in background every 2s ──
+    const now = Date.now();
+    if (now - state.lastBookmakerFetch >= BOOKMAKER_INTERVAL_MS && !state.isBookmakerFetching) {
+      state.lastBookmakerFetch = now;
+      state.isBookmakerFetching = true;
+
+      SportsService.getBookmakersWithOdds({ eventTypeId, eventId })
+        .then((bookmakers) => {
+          state.cachedBookmakers = bookmakers || [];
+        })
+        .catch(() => {})
+        .finally(() => {
+          state.isBookmakerFetching = false;
+        });
+    }
+
+    // ── Build and broadcast message ──
+    const message = JSON.stringify({
+      type: "live-update",
+      eventId,
+      matchOdds,
+      bookmakers: state.cachedBookmakers,
+      sessions: sessions || [],
+      score: score ?? null,
+      timestamp: now,
+    });
+    state.lastMessage = message;
+
+    // Broadcast to all subscribers, remove dead ones
+    const deadClients: string[] = [];
+    for (const [clientId, send] of state.subscribers) {
+      try {
+        send(message);
+      } catch {
+        deadClients.push(clientId);
+      }
+    }
+
+    for (const clientId of deadClients) {
+      this.cleanup(clientId);
     }
   },
 
