@@ -9,6 +9,7 @@ import {
   ledgerLimit,
   users,
   profiles,
+  declareResult,
 } from "../db/schema";
 import { eq, and, desc, sql, ne, gte, lte } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
@@ -64,7 +65,60 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         return now < endToday;
       });
 
-      return { success: true, data: [...activeCarryOvers, ...todayShifts] };
+      // Shifts whose result was just declared are parked at 1970-01-01
+      // until the daily cron rolls them to the next date. Surface them so
+      // the UI can show the shift name + declared number in place of the
+      // countdown.
+      const declaredShifts = await db
+        .select()
+        .from(matkaShifts)
+        .where(
+          and(
+            eq(matkaShifts.isActive, true),
+            eq(matkaShifts.recordStatus, RecordStatus.Active),
+            eq(matkaShifts.shiftDate, "1970-01-01")
+          )
+        )
+        .orderBy(matkaShifts.shiftOrder);
+
+      // Attach the latest declared number to each parked shift. One query
+      // covers them all; map by shift_id client-side.
+      let declaredByShift = new Map<string, number>();
+      if (declaredShifts.length > 0) {
+        const declaredRows = await db
+          .select({
+            shiftId: declareResult.shiftId,
+            declareNumber: declareResult.declareNumber,
+            addedDate: declareResult.addedDate,
+          })
+          .from(declareResult)
+          .where(
+            and(
+              eq(declareResult.recordStatus, RecordStatus.Active),
+              sql`${declareResult.shiftId} IN (${sql.join(
+                declaredShifts.map((s) => sql`${s.id}::uuid`),
+                sql`, `
+              )})`
+            )
+          )
+          .orderBy(desc(declareResult.addedDate));
+
+        for (const row of declaredRows) {
+          if (!declaredByShift.has(row.shiftId)) {
+            declaredByShift.set(row.shiftId, row.declareNumber);
+          }
+        }
+      }
+
+      const declaredWithResult = declaredShifts.map((s) => ({
+        ...s,
+        result: declaredByShift.get(s.id) ?? null,
+      }));
+
+      return {
+        success: true,
+        data: [...declaredWithResult, ...activeCarryOvers, ...todayShifts],
+      };
     } catch (error) {
       set.status = 500;
       return {
@@ -200,13 +254,34 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Shift not found or inactive" };
         }
 
-        // Check if shift time has passed
+        // Shift's date was reset (result already declared). Block any bet.
+        if (shift.shiftDate === "1970-01-01") {
+          set.status = 400;
+          return { success: false, error: "Shift is closed (result declared)" };
+        }
+
+        // Block betting once the shift end_time has passed — even by one
+        // second. `end_time` is HH:MM local to the shift_date (extended to
+        // the next day when nextDayAllow is true).
+        if (shift.endTime) {
+          const [endH, endM] = shift.endTime.split(":").map(Number);
+          const endAt = new Date(shift.shiftDate);
+          endAt.setHours(endH, endM, 0, 0);
+          if (shift.nextDayAllow) {
+            endAt.setDate(endAt.getDate() + 1);
+          }
+          if (new Date().getTime() >= endAt.getTime()) {
+            set.status = 400;
+            return { success: false, error: "Shift betting time has closed" };
+          }
+        }
+
+        // Additional main-jantri cutoff (kept for shifts that use it).
         if (shift.mainJantriTime) {
           const now = new Date();
           const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
           const shiftTime = new Date(shift.shiftDate);
           shiftTime.setHours(hours, minutes, 0, 0);
-          // If nextDayAllow is true, the cutoff extends to the next day
           if (shift.nextDayAllow) {
             shiftTime.setDate(shiftTime.getDate() + 1);
           }

@@ -628,6 +628,60 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Shift not found" };
         }
 
+        if (shift.shiftDate === "1970-01-01") {
+          set.status = 400;
+          return {
+            success: false,
+            error: "Result already declared for this shift",
+          };
+        }
+
+        // Block declaring before main_jantri_time. End-user-facing UX shows
+        // a countdown; this enforces it on the server so the UI can't be
+        // bypassed. End time is HH:MM local to shift_date (extended by one
+        // day when nextDayAllow is true).
+        if (shift.mainJantriTime) {
+          const [jH, jM] = shift.mainJantriTime.split(":").map(Number);
+          const jantriAt = new Date(shift.shiftDate);
+          jantriAt.setHours(jH, jM, 0, 0);
+          if (shift.nextDayAllow) {
+            jantriAt.setDate(jantriAt.getDate() + 1);
+          }
+          const msLeft = jantriAt.getTime() - Date.now();
+          if (msLeft > 0) {
+            set.status = 400;
+            return {
+              success: false,
+              error: "Main jantri time not reached",
+              msLeft,
+              mainJantriAt: jantriAt.toISOString(),
+            };
+          }
+        }
+
+        // Run the full matka declare flow: creates vouchers + voucher_details,
+        // archives matka_transactions* rows into their _declare counterparts,
+        // deletes them from the live tables, and inserts declare_result.
+        // Defined in triggers/all_matks_procedures_functions.sql.
+        await db.execute(sql`
+          CALL public.declare_process_matka(
+            ${params.shiftId}::uuid,
+            CURRENT_DATE,
+            ${shift.shiftDate}::date,
+            ${num}::int
+          )
+        `);
+
+        // Park the shift at the epoch sentinel so it's clear the result is
+        // out and the daily cron knows to roll it forward to a fresh date.
+        await db
+          .update(matkaShifts)
+          .set({
+            shiftDate: "1970-01-01",
+            updateBy: (store as any).id || SYSTEM_USER_ID,
+          })
+          .where(eq(matkaShifts.id, params.shiftId));
+
         // marketId must be unique numeric — use epoch microseconds.
         const uniqueMarketId = String(Date.now() * 1000 + Math.floor(Math.random() * 1000));
         const ownerId = (store as any).id || SYSTEM_USER_ID;
