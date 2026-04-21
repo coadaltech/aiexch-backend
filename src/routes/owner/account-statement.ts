@@ -34,13 +34,18 @@ export const ownerAccountStatementRoutes = new Elysia()
       const result = await db.execute(sql`
         SELECT
           s.*,
-          ou.username AS opposite_username,
-          wl.name     AS whitelabel_name
+          ou.username    AS opposite_username,
+          wl.name        AS whitelabel_name,
+          mr.winner_name,
+          mr.runs        AS winner_runs,
+          mr.market_type AS result_market_type
         FROM get_user_account_ledger_statement(
           ${userId}::uuid, ${fromDate}::date, ${toDate}::date
         ) s
-        LEFT JOIN users       ou ON ou.id = s.opposite_user_id
-        LEFT JOIN whitelabels wl ON wl.id = s.whitelabel_id
+        LEFT JOIN users          ou ON ou.id          = s.opposite_user_id
+        LEFT JOIN whitelabels    wl ON wl.id          = s.whitelabel_id
+        LEFT JOIN market_results mr ON mr.market_id   = s.market_id
+                                    AND mr.record_status = 0
       `);
 
       const rows = Array.isArray(result)

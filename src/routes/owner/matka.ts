@@ -459,7 +459,9 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
             user_id::text  AS user_id,
             name,
             amount::text   AS sale,
-            profit::text   AS profit
+            profit::text   AS profit,
+            COALESCE(streak, 0)::int AS streak,
+            streak_type
           FROM get_matka_sel_user_sale_profit(
             ${params.shiftId}::uuid,
             ${shift.shiftDate}::date,

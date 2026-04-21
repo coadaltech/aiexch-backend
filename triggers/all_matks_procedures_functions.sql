@@ -66,25 +66,67 @@ DROP FUNCTION IF EXISTS public.get_matka_sel_user_sale_profit(varshift_id uuid,
 	varnumber int);
 
 CREATE OR REPLACE FUNCTION public.get_matka_sel_user_sale_profit(
-    varshift_id uuid, 
+    varshift_id uuid,
 	vartransaction_date date,
 	varnumber int
 )
 RETURNS TABLE(user_id uuid, name varchar(255),amount numeric,profit numeric,totalsale numeric
-)  -- added 'run' column
+	,streak int, streak_type int
+)
 LANGUAGE plpgsql
 AS $function$
 BEGIN
     RETURN QUERY
 	WITH mt AS (
-        SELECT matka_transactions.id,matka_transactions.user_id 
+        SELECT matka_transactions.id,matka_transactions.user_id
         FROM matka_transactions
 		where matka_transactions.shift_id = varshift_id
 		and matka_transactions.transaction_date = vartransaction_date
 		and matka_transactions.record_status = 0
-    )
+    ),
+	-- per-user outcome (won=1, lost=0) for each past declaration on this shift (last 30 days)
+	user_outcomes AS (
+		SELECT
+			mt_h.user_id,
+			dr.declare_id,
+			CASE WHEN SUM(
+				CASE WHEN mtd_h.number_type = 1 THEN
+					(CASE WHEN mtd_h.number::integer = dr.declare_number THEN mtd_h.amount * mtd_h.rate ELSE - mtd_h.amount END)
+				WHEN mtd_h.number_type = 2 THEN
+					(CASE WHEN mtd_h.number::integer = (dr.declare_number % 10) * 111 THEN mtd_h.amount * mtd_h.rate ELSE - mtd_h.amount END)
+				WHEN mtd_h.number_type = 3 THEN
+					(CASE WHEN mtd_h.number::integer = (round((dr.declare_number / 10),0)) * 1111 THEN mtd_h.amount * mtd_h.rate ELSE - mtd_h.amount END)
+				ELSE 0 END
+			) > 0 THEN 1 ELSE 0 END AS won,
+			ROW_NUMBER() OVER (PARTITION BY mt_h.user_id ORDER BY dr.declare_date DESC, dr.declare_id DESC) AS rn
+		FROM declare_result dr
+		JOIN matka_transactions mt_h ON mt_h.shift_id = dr.shift_id
+			AND mt_h.transaction_date = dr.declare_date
+			AND mt_h.record_status = 0
+		JOIN matka_transaction_details mtd_h ON mtd_h.transaction_id = mt_h.id
+			AND mtd_h.record_status = 0
+		WHERE dr.record_status = 0
+			AND dr.shift_id = varshift_id
+			AND dr.declare_date BETWEEN vartransaction_date - INTERVAL '1 months' AND vartransaction_date - INTERVAL '1 days'
+		GROUP BY mt_h.user_id, dr.declare_id, dr.declare_date
+	),
+	-- gaps-and-islands: rn - row_number()OVER(user,won) groups consecutive same-won runs
+	outcomes_ranked AS (
+		SELECT uo.user_id, uo.rn, uo.won,
+			uo.rn - ROW_NUMBER() OVER (PARTITION BY uo.user_id, uo.won ORDER BY uo.rn) AS grp
+		FROM user_outcomes uo
+	),
+	-- pick the run that starts at rn=1 (most recent) → current streak
+	user_streak AS (
+		SELECT oru.user_id,
+			MAX(oru.won)::int AS streak_type,
+			COUNT(*)::int AS streak
+		FROM outcomes_ranked oru
+		WHERE oru.grp = 0
+		GROUP BY oru.user_id
+	)
     SELECT mt.user_id, users.username
-		,round(sum((case when number_type = 1 then 
+		,round(sum((case when number_type = 1 then
 			(case when matka_transaction_details.number::integer = varnumber then matka_transaction_details.amount else 0 end)
 		when number_type = 2 then
 			(case when matka_transaction_details.number::integer = (varnumber % 10) * 111 then matka_transaction_details.amount/10 else 0 end)
@@ -92,26 +134,31 @@ BEGIN
 			(case when matka_transaction_details.number::integer = (round((varnumber / 10),0)) * 1111 then matka_transaction_details.amount/10 else 0 end)
 		else 0 end)),0) as amount
 
-		,round((sum((case when number_type = 1 then 
+		-- owner's P&L from this user when varnumber is declared
+		-- user's net P&L is negated so green(+) = owner wins, red(-) = owner pays
+		,- round((sum((case when number_type = 1 then
 			(case when matka_transaction_details.number::integer = varnumber then matka_transaction_details.amount * matka_transaction_details.rate else - matka_transaction_details.amount end)
 		when number_type = 2 then
 			(case when matka_transaction_details.number::integer = (varnumber % 10) * 111 then matka_transaction_details.amount * matka_transaction_details.rate else - matka_transaction_details.amount end)
 		when number_type = 3 then
 			(case when matka_transaction_details.number::integer = (round((varnumber / 10),0)) * 1111 then matka_transaction_details.amount * matka_transaction_details.rate else - matka_transaction_details.amount end)
-		else 0 end) 
+		else 0 end)
 	  	* (
 			(mtc.owner_percent)
 		/ 100)
 		)),2) as profit
-		
+
 		,round(sum(matka_transaction_details.amount ),0) as totalsale
-	FROM mt  
+		,COALESCE(us.streak, 0) AS streak
+		,us.streak_type AS streak_type
+	FROM mt
 	join matka_transaction_details on mt.id = matka_transaction_details.transaction_id
 		and matka_transaction_details.record_status = 0
-	join users on users.id = mt.user_id 
+	join users on users.id = mt.user_id
 	join matka_transaction_commissions mtc on mt.id = mtc.matka_transaction_id
 		and mtc.record_status = 0
-	group by mt.user_id, users.username
+	left join user_streak us on us.user_id = mt.user_id
+	group by mt.user_id, users.username, us.streak, us.streak_type
 	order by amount desc
 	;
 END;
@@ -121,9 +168,9 @@ ALTER function public.get_matka_sel_user_sale_profit(uuid,date,int)
     OWNER TO postgres;
 
     
-    DROP FUNCTION IF EXISTS public.get_matka_sel_whitelabel_sale( varshift_id uuid, 
-	vartransaction_date date,
-	varnumber int);
+DROP FUNCTION IF EXISTS public.get_matka_sel_whitelabel_sale( varshift_id uuid, 
+vartransaction_date date,
+varnumber int);
 
 
 

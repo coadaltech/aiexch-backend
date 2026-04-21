@@ -710,9 +710,17 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
 
     try {
       const result = await db.execute(sql`
-        SELECT * FROM get_user_account_ledger_statement(
+        SELECT
+          s.*,
+          mr.winner_name,
+          mr.runs        AS winner_runs,
+          mr.market_type AS result_market_type
+        FROM get_user_account_ledger_statement(
           ${userId}::uuid, ${fromDate}::date, ${toDate}::date
-        )
+        ) s
+        LEFT JOIN market_results mr
+          ON mr.market_id     = s.market_id
+         AND mr.record_status = 0
       `);
 
       const rows = Array.isArray(result)
