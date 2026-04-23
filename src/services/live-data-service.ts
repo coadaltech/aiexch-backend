@@ -186,7 +186,17 @@ export const LiveDataService = {
     }
 
     const structure = state.structure;
-    if (!structure || (structure.openMarketIds.length === 0 && structure.customMarkets.length === 0)) {
+    if (!structure) {
+      return;
+    }
+
+    // Custom markets are owner-controlled and must reflect create/update/delete
+    // instantly on the user's match page. Fetch fresh from Redis every tick
+    // (cheap: a single SMEMBERS + HGETALL per custom market) instead of using
+    // the 60s-stale structure.customMarkets snapshot.
+    const customMarkets = await MarketPipelineService.getCustomMarkets(eventId);
+
+    if (structure.openMarketIds.length === 0 && customMarkets.length === 0) {
       const message = JSON.stringify({
         type: "live-update",
         eventId,
@@ -207,7 +217,7 @@ export const LiveDataService = {
       : {};
 
     // ── Merge: cached structure + fresh odds (CPU only) ──
-    const { eventOverrides, openMarkets, marketOverridesMap, customMarkets } = structure;
+    const { eventOverrides, openMarkets, marketOverridesMap } = structure;
 
     const processedMarkets = openMarkets.map((market: any) => {
       const marketOdds = oddsObject[market.marketId];

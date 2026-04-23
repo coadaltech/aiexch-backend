@@ -6,6 +6,7 @@ import { authRoutes } from "./routes/auth";
 import { profileRoutes } from "./routes/profile";
 import { ownerRoutes } from "./routes/owner";
 import { publicRoutes } from "./routes/public";
+import { favoritesRoutes } from "./routes/favorites";
 import { sportsRoutes } from "./routes/sports";
 import { bettingRoutes } from "./routes/betting";
 import { casinoAggregatorRoutes } from "./routes/casino/aggregator";
@@ -17,6 +18,7 @@ import { AdminMarketService } from "@services/admin-market-service";
 import { OddsHistoryWorker } from "@services/odds-history-worker";
 import { seriesRoutes } from "./routes/series-route";
 import { matkaRoutes } from "./routes/matka";
+import { jamboRoutes } from "./routes/jambo";
 import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
@@ -83,6 +85,7 @@ const app = new Elysia()
   .use(ownerRoutes)
   .use(gamesRoutes)
   .use(publicRoutes)
+  .use(favoritesRoutes)
   .use(sportsRoutes)
   .use(bettingRoutes)
   .use(casinoAggregatorRoutes)
@@ -90,6 +93,7 @@ const app = new Elysia()
   .use(casinoGamesRoutes)
   .use(websocketRoutes)
   .use(matkaRoutes)
+  .use(jamboRoutes)
   .listen(port);
 
 

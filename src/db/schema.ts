@@ -623,6 +623,7 @@ export const competitions = pgTable("competitions", {
   name: varchar("name", { length: 200 }).notNull(),
   provider: varchar("provider", { length: 50 }),
   is_active: boolean("is_active").default(false),
+  is_top_competition: boolean("is_top_competition").default(false).notNull(),
   is_archived: boolean("is_archived").default(false),
   metadata: jsonb("metadata").default({}),
   // ── Audit ──
@@ -764,6 +765,7 @@ export const events = pgTable("events", {
   whitelabelId: uuid("whitelabel_id"),
   isActive: boolean("is_active").default(true).notNull(),
   isVisible: boolean("is_visible").default(true).notNull(),
+  isRecommended: boolean("is_recommended").default(false).notNull(),
   suspended: boolean("suspended").default(false).notNull(),
   betDelay: integer("bet_delay").default(0).notNull(),
   maxMarketProfit: decimal("max_market_profit", { precision: 15, scale: 2 }),
@@ -991,9 +993,12 @@ export const transactionLogsDeclare = pgTable("transaction_logs_declare", {
 });
 
 // ── Matka Shifts ────────────────────────────────────────────────────────────
+// `sport_type` differentiates shift families that share this table:
+//   1001 = Matka (numbers 1-100), 1004 = Jambo (numbers 1-1000).
 export const matkaShifts = pgTable("matka_shifts", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 100 }).notNull(),
+  sportType: integer("sport_type").default(1001).notNull(),
   shiftDate: date("shift_date").notNull(),
   endTime: varchar("end_time", { length: 30 }).notNull(),        // e.g. "14:00"
   shiftOrder: integer("shift_order").default(0).notNull(),
@@ -1237,6 +1242,26 @@ export const declareResult = pgTable("declare_result", {
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
+
+// ── User Favorite Matches ────────────────────────────────────────────────────
+// Per-user saved matches. Displayed in the user-facing sidebar's
+// "Favorite matches" dropdown. event_id references the `event_id` bigint on
+// the events table (same identifier used in match URLs).
+export const userFavoriteMatches = pgTable("user_favorite_matches", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  eventId: bigint("event_id", { mode: "number" }).notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+}, (table) => [
+  unique("uq_user_favorite_match").on(table.userId, table.eventId),
+]);
 
 // ── Indexes ──────────────────────────────────────────────────────────────────
 export const currencyValueHistoryIndex = { table: currencyValueHistory, columns: [currencyValueHistory.currencyId] as const };

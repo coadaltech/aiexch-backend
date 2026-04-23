@@ -138,9 +138,9 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
         }
       }
 
-      // Insert voucher (no amount — amounts go in voucher_details only)
-      // If status is 'approved' and voucher_details are inserted,
-      // the DB trigger on voucher_details updates ledger_limit automatically.
+      // Insert voucher (no amount — amounts go in voucher_details only).
+      // ledger_limit is updated explicitly below; the matching DB trigger
+      // is currently not attached to voucher_details, so we do it here.
       const result = await db.transaction(async (tx) => {
         const [voucher] = await tx
           .insert(vouchers)
@@ -192,16 +192,33 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
           });
         }
 
-        // Update fixLimit for limit vouchers
-        if (isLimitVoucher) {
-          if (isDebit) {
+        // Update ledger_limit for limit vouchers.
+        //   target user: ± amount on fix_limit, user_limit, final_limit
+        //   source user: ∓ amount on user_limit, final_limit (fix_limit
+        //                belongs to the recipient only)
+        if (isLimitVoucher && voucherStatus === VoucherStatus.Approved) {
+          const delta = isDebit
+            ? sql`-${body.amount}::numeric`
+            : sql`${body.amount}::numeric`;
+          const inverseDelta = isDebit
+            ? sql`${body.amount}::numeric`
+            : sql`-${body.amount}::numeric`;
+
+          await tx.update(ledgerLimit)
+            .set({
+              fixLimit:   sql`${ledgerLimit.fixLimit}   + ${delta}`,
+              userLimit:  sql`${ledgerLimit.userLimit}  + ${delta}`,
+              finalLimit: sql`${ledgerLimit.finalLimit} + ${delta}`,
+            })
+            .where(eq(ledgerLimit.userId, body.userId));
+
+          if (sourceAccountId) {
             await tx.update(ledgerLimit)
-              .set({ fixLimit: sql`${ledgerLimit.fixLimit} - ${body.amount}::numeric` })
-              .where(eq(ledgerLimit.userId, body.userId));
-          } else {
-            await tx.update(ledgerLimit)
-              .set({ fixLimit: sql`${ledgerLimit.fixLimit} + ${body.amount}::numeric` })
-              .where(eq(ledgerLimit.userId, body.userId));
+              .set({
+                userLimit:  sql`${ledgerLimit.userLimit}  + ${inverseDelta}`,
+                finalLimit: sql`${ledgerLimit.finalLimit} + ${inverseDelta}`,
+              })
+              .where(eq(ledgerLimit.userId, sourceAccountId));
           }
         }
 

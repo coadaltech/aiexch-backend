@@ -1,6 +1,20 @@
 // routes/websocket.ts
 import { Elysia, t } from "elysia";
 import { LiveDataService } from "@services/live-data-service";
+import {
+  addSubscriber,
+  removeSubscriber,
+  removeClientFromAllChannels,
+  type BroadcastChannel,
+} from "@services/sports-broadcast";
+
+const KNOWN_CHANNELS: readonly BroadcastChannel[] = [
+  "sports-list",
+  "top-competitions",
+  "recommended-events",
+];
+const isKnownChannel = (v: any): v is BroadcastChannel =>
+  typeof v === "string" && (KNOWN_CHANNELS as readonly string[]).includes(v);
 
 let clientIdCounter = 0;
 
@@ -46,6 +60,14 @@ export const websocketRoutes = new Elysia({ prefix: "/ws" }).ws("/markets", {
           LiveDataService.unsubscribe(clientId, eventId);
         }
       }
+      // ── Global sidebar channels (sports-list, top-competitions, recommended-events) ──
+      else if (data.action === "subscribe-channel" && isKnownChannel(data.channel)) {
+        addSubscriber(data.channel, clientId, send);
+        ws.send(JSON.stringify({ type: "channel-subscribed", channel: data.channel }));
+      } else if (data.action === "unsubscribe-channel" && isKnownChannel(data.channel)) {
+        removeSubscriber(data.channel, clientId);
+        ws.send(JSON.stringify({ type: "channel-unsubscribed", channel: data.channel }));
+      }
     } catch (error) {
       console.error("[WS] Message error:", (error as Error)?.message);
     }
@@ -54,6 +76,7 @@ export const websocketRoutes = new Elysia({ prefix: "/ws" }).ws("/markets", {
     const clientId = (ws.data as any)?._clientId as string | undefined;
     if (clientId) {
       LiveDataService.cleanup(clientId);
+      removeClientFromAllChannels(clientId);
     }
   },
 });

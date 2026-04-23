@@ -8,22 +8,47 @@ import {
   matkaTransactionCommissions,
   ledgerLimit,
   users,
-  profiles,
   declareResult,
 } from "../db/schema";
-import { eq, and, desc, sql, ne, gte, lte } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
 import { parseUserAgent } from "../utils/parse-ua";
 import { RecordStatus, UserRole, MatkaSportType } from "../types/enums";
 
-export const matkaRoutes = new Elysia({ prefix: "/matka" })
+// ── Jambo number-type enum ───────────────────────────────────────────────
+// 0 - triple            (full 3-digit number, incl. 1000)
+// 1 - bhar ki jodi      (2-digit, 0-99)
+// 2 - andar ki jodi     (2-digit, 0-99)
+// 3 - akhar bahar       (single digit, 0-9)
+// 4 - akhar andar       (single digit, 0-9)
+// 5 - middle akhar      (single digit, 0-9)
+//
+// Validation lives here so invalid bets are rejected before reaching the DB.
+function validateJamboNumber(numberType: number, number: string): string | null {
+  const n = parseInt(number, 10);
+  if (!Number.isFinite(n) || n < 0) return "Invalid number";
+  switch (numberType) {
+    case 0:
+      return n >= 1 && n <= 1000 ? null : "Triple must be 1-1000";
+    case 1:
+    case 2:
+      return n >= 0 && n <= 99 ? null : "Jodi must be 0-99";
+    case 3:
+    case 4:
+    case 5:
+      return n >= 0 && n <= 9 ? null : "Akhar must be 0-9";
+    default:
+      return "Invalid number type (0-5)";
+  }
+}
 
-  // ── Public: list active shifts (today) ────────────────────────────────────
+export const jamboRoutes = new Elysia({ prefix: "/jambo" })
+
+  // ── Public: list active shifts for Jambo ──────────────────────────────────
   .get("/shifts", async ({ set, query }) => {
     try {
       const dateFilter = query?.date || new Date().toISOString().split("T")[0];
 
-      // Get shifts for the requested date
       const todayShifts = await db
         .select()
         .from(matkaShifts)
@@ -31,14 +56,12 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           and(
             eq(matkaShifts.isActive, true),
             eq(matkaShifts.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.Matka),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo),
             eq(matkaShifts.shiftDate, dateFilter)
           )
         )
         .orderBy(matkaShifts.shiftOrder);
 
-      // Also get yesterday's shifts that have nextDayAllow enabled
-      // (they extend into today, e.g. end time 3 AM means tomorrow 3 AM)
       const yesterday = new Date(dateFilter);
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = yesterday.toISOString().split("T")[0];
@@ -50,14 +73,13 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           and(
             eq(matkaShifts.isActive, true),
             eq(matkaShifts.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.Matka),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo),
             eq(matkaShifts.shiftDate, yesterdayStr),
             eq(matkaShifts.nextDayAllow, true)
           )
         )
         .orderBy(matkaShifts.shiftOrder);
 
-      // Filter carry-over shifts: only include if the end time hasn't passed yet today
       const now = new Date();
       const activeCarryOvers = carryOverShifts.filter((s) => {
         if (!s.endTime) return false;
@@ -67,10 +89,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         return now < endToday;
       });
 
-      // Shifts whose result was just declared are parked at 1970-01-01
-      // until the daily cron rolls them to the next date. Surface them so
-      // the UI can show the shift name + declared number in place of the
-      // countdown.
       const declaredShifts = await db
         .select()
         .from(matkaShifts)
@@ -78,14 +96,12 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           and(
             eq(matkaShifts.isActive, true),
             eq(matkaShifts.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.Matka),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo),
             eq(matkaShifts.shiftDate, "1970-01-01")
           )
         )
         .orderBy(matkaShifts.shiftOrder);
 
-      // Attach the latest declared number to each parked shift. One query
-      // covers them all; map by shift_id client-side.
       let declaredByShift = new Map<string, number>();
       if (declaredShifts.length > 0) {
         const declaredRows = await db
@@ -131,7 +147,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
-  // ── Public: get single shift details ──────────────────────────────────────
+  // ── Public: single jambo shift ───────────────────────────────────────────
   .get("/shifts/:id", async ({ params, set }) => {
     try {
       const [shift] = await db
@@ -140,7 +156,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .where(
           and(
             eq(matkaShifts.id, params.id),
-            eq(matkaShifts.sportType, MatkaSportType.Matka),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo),
             eq(matkaShifts.recordStatus, RecordStatus.Active)
           )
         );
@@ -160,12 +176,25 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
-  // ── Public: get jantri totals for a shift ─────────────────────────────────
-  // Returns aggregated bet amounts per number for display in the grid
-  // Optional ?date=YYYY-MM-DD to filter by transactionDate
+  // ── Public: aggregated jantri totals for a jambo shift ───────────────────
   .get("/shifts/:id/jantri", async ({ params, set, query }) => {
     try {
       const dateFilter = (query as any)?.date as string | undefined;
+
+      const [shift] = await db
+        .select()
+        .from(matkaShifts)
+        .where(
+          and(
+            eq(matkaShifts.id, params.id),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo)
+          )
+        );
+
+      if (!shift) {
+        set.status = 404;
+        return { success: false, error: "Shift not found" };
+      }
 
       const whereConditions = [
         eq(matkaTransactions.shiftId, params.id),
@@ -201,7 +230,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
-  // ── Protected routes ──────────────────────────────────────────────────────
+  // ── Protected routes ─────────────────────────────────────────────────────
   .state({ id: "" as string, role: 0 as number })
   .guard({
     async beforeHandle({ cookie, headers, set, store }) {
@@ -213,7 +242,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     },
   })
 
-  // ── Place bet (submit jantri) ─────────────────────────────────────────────
+  // ── Place jambo bet ───────────────────────────────────────────────────────
   .post(
     "/place",
     async ({ body, store, set, request }) => {
@@ -230,7 +259,15 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Shift ID and bets are required" };
         }
 
-        // Resolve whitelabelId from the user's record if not provided
+        // Validate each bet's numberType + number combination
+        for (const bet of bets) {
+          const err = validateJamboNumber(bet.numberType, bet.number);
+          if (err) {
+            set.status = 400;
+            return { success: false, error: `${err} (got ${bet.number})` };
+          }
+        }
+
         let resolvedWhitelabelId = whitelabelId;
         if (!resolvedWhitelabelId) {
           const [betUser] = await db
@@ -241,7 +278,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           resolvedWhitelabelId = betUser?.whitelabelId ?? undefined;
         }
 
-        // Validate shift exists and is active
         const [shift] = await db
           .select()
           .from(matkaShifts)
@@ -249,7 +285,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             and(
               eq(matkaShifts.id, shiftId),
               eq(matkaShifts.isActive, true),
-              eq(matkaShifts.sportType, MatkaSportType.Matka),
+              eq(matkaShifts.sportType, MatkaSportType.Jambo),
               eq(matkaShifts.recordStatus, RecordStatus.Active)
             )
           );
@@ -259,15 +295,11 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           return { success: false, error: "Shift not found or inactive" };
         }
 
-        // Shift's date was reset (result already declared). Block any bet.
         if (shift.shiftDate === "1970-01-01") {
           set.status = 400;
           return { success: false, error: "Shift is closed (result declared)" };
         }
 
-        // Block betting once the shift end_time has passed — even by one
-        // second. `end_time` is HH:MM local to the shift_date (extended to
-        // the next day when nextDayAllow is true).
         if (shift.endTime) {
           const [endH, endM] = shift.endTime.split(":").map(Number);
           const endAt = new Date(shift.shiftDate);
@@ -281,7 +313,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           }
         }
 
-        // Additional main-jantri cutoff (kept for shifts that use it).
         if (shift.mainJantriTime) {
           const now = new Date();
           const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
@@ -296,10 +327,9 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           }
         }
 
-        // Check capping (per-number bet limit for this shift per day)
+        // Capping (per-number daily limit)
         const cappingLimit = Number(shift.capping);
         if (cappingLimit > 0) {
-          // Get amount already bet per number by this user on this shift TODAY
           const existingPerNumber = await db
             .select({
               number: matkaTransactionDetails.number,
@@ -307,7 +337,10 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
               total: sql<string>`COALESCE(SUM(CAST(${matkaTransactionDetails.amount} AS NUMERIC)), 0)`,
             })
             .from(matkaTransactionDetails)
-            .innerJoin(matkaTransactions, eq(matkaTransactionDetails.transactionId, matkaTransactions.id))
+            .innerJoin(
+              matkaTransactions,
+              eq(matkaTransactionDetails.transactionId, matkaTransactions.id)
+            )
             .where(
               and(
                 eq(matkaTransactions.userId, store.id),
@@ -319,13 +352,11 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             )
             .groupBy(matkaTransactionDetails.number, matkaTransactionDetails.numberType);
 
-          // Build a map of existing amounts: "numberType:number" → amount
           const existingMap = new Map<string, number>();
           for (const row of existingPerNumber) {
             existingMap.set(`${row.numberType}:${row.number}`, Number(row.total));
           }
 
-          // Check each bet's number total doesn't exceed capping, collect all violations
           const exceeded: string[] = [];
           const allocatedMap = new Map(existingMap);
 
@@ -351,7 +382,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           }
         }
 
-        // Calculate totals
+        // Rate logic: numberType 0 (triple) → daraRate, others → akharRate.
+        // Commission follows the same split.
         const daraRate = Number(shift.daraRate);
         const daraCommission = Number(shift.daraCommission);
         const akharRate = Number(shift.akharRate);
@@ -361,9 +393,9 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         let totalCommission = 0;
 
         const detailRows = bets.map((bet, idx) => {
-          const isAkhar = bet.numberType === 2 || bet.numberType === 3;
-          const rate = isAkhar ? akharRate : daraRate;
-          const commPercent = isAkhar ? akharCommission : daraCommission;
+          const isTriple = bet.numberType === 0;
+          const rate = isTriple ? daraRate : akharRate;
+          const commPercent = isTriple ? daraCommission : akharCommission;
           const commission = (bet.amount * commPercent) / 100;
           const finalAmount = bet.amount - commission;
 
@@ -385,21 +417,18 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
 
         const finalAmount = totalAmount - totalCommission;
 
-        // Check user balance
         const [ledger] = await db
           .select()
           .from(ledgerLimit)
           .where(eq(ledgerLimit.userId, store.id));
 
         if (ledger) {
-          // const available = Number(ledger.creditLimit) - Number(ledger.limitConsumed);
           if (totalAmount > Number(ledger.finalLimit)) {
             set.status = 400;
             return { success: false, error: "Insufficient balance" };
           }
         }
 
-        // Create transaction + details in a single batch
         const [transaction] = await db
           .insert(matkaTransactions)
           .values({
@@ -420,7 +449,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           })
           .returning();
 
-        // Insert all bet details
         if (detailRows.length > 0) {
           await db.insert(matkaTransactionDetails).values(
             detailRows.map((row) => ({
@@ -430,10 +458,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           );
         }
 
-        // Recalculate exposure and update ledger_limit
         await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
 
-        // Insert matka transaction log
         const ipAddress =
           request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
           request.headers.get("x-real-ip") ||
@@ -448,8 +474,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           updateBy: store.id,
         });
 
-        // ── Commission snapshot ──
-        // Walk up the hierarchy: User → Agent → Master → Super → Admin → Owner
+        // Commission snapshot (same hierarchy walk as matka)
         const hierarchyRows = await db.execute(sql`
           WITH RECURSIVE hierarchy AS (
             SELECT
@@ -479,7 +504,9 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           ORDER BY depth ASC
         `);
 
-        const ancestors = Array.isArray(hierarchyRows) ? hierarchyRows : (hierarchyRows as any)?.rows || [];
+        const ancestors = Array.isArray(hierarchyRows)
+          ? hierarchyRows
+          : (hierarchyRows as any)?.rows || [];
 
         const snapshotData: typeof matkaTransactionCommissions.$inferInsert = {
           matkaTransactionId: transaction.id,
@@ -540,7 +567,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         bets: t.Array(
           t.Object({
             number: t.String(),
-            numberType: t.Number(),
+            numberType: t.Number({ minimum: 0, maximum: 5 }),
             amount: t.Number({ minimum: 1 }),
           })
         ),
@@ -550,11 +577,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     }
   )
 
-  // ── Get user's matka bet history ──────────────────────────────────────────
-  // Query params:
-  //   ?shiftId=uuid   – filter by shift
-  //   ?status=active  – only today's transactions (default)
-  //   ?status=inactive – only transactions before today
+  // ── User's own jambo bet history ─────────────────────────────────────────
   .get("/my-bets", async ({ store, set, query }) => {
     try {
       const today = new Date().toISOString().split("T")[0];
@@ -564,7 +587,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
       const whereConditions: any[] = [
         eq(matkaTransactions.userId, store.id),
         eq(matkaTransactions.recordStatus, RecordStatus.Active),
-        eq(matkaShifts.sportType, MatkaSportType.Matka),
+        eq(matkaShifts.sportType, MatkaSportType.Jambo),
       ];
 
       if (filterShiftId) {
@@ -574,7 +597,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
       if (filterStatus === "inactive") {
         whereConditions.push(sql`${matkaTransactions.transactionDate} < ${today}::date`);
       } else {
-        // default: active = today only
         whereConditions.push(eq(matkaTransactions.transactionDate, today));
       }
 
@@ -589,8 +611,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           totalCommission: matkaTransactions.totalCommission,
           finalAmount: matkaTransactions.finalAmount,
           addedDate: matkaTransactions.addedDate,
-          copyReferenceShiftId: matkaTransactions.copyReferenceShiftId,
-          whitelabelId: matkaTransactions.whitelabelId,
         })
         .from(matkaTransactions)
         .innerJoin(matkaShifts, eq(matkaTransactions.shiftId, matkaShifts.id))
@@ -598,28 +618,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .orderBy(desc(matkaTransactions.addedDate))
         .limit(200);
 
-      // Resolve copy-reference shift names in one extra query if needed
-      const refShiftIds = [...new Set(
-        txns.map((t) => t.copyReferenceShiftId).filter(Boolean) as string[]
-      )];
-
-      let refShiftMap: Record<string, string> = {};
-      if (refShiftIds.length > 0) {
-        const refRows = await db
-          .select({ id: matkaShifts.id, name: matkaShifts.name })
-          .from(matkaShifts)
-          .where(sql`${matkaShifts.id} = ANY(ARRAY[${sql.join(refShiftIds.map(id => sql`${id}::uuid`), sql`, `)}])`);
-        for (const r of refRows) refShiftMap[r.id] = r.name;
-      }
-
-      const data = txns.map((t) => ({
-        ...t,
-        copyReferenceShiftName: t.copyReferenceShiftId
-          ? refShiftMap[t.copyReferenceShiftId] ?? null
-          : null,
-      }));
-
-      return { success: true, data };
+      return { success: true, data: txns };
     } catch (error) {
       set.status = 500;
       return {
@@ -629,125 +628,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
-  // ── Live Prediction: per-number sale + P/L for the logged-in player ──────
-  // Numbers the user has placed bets on, plus the player-side profit if
-  // that number wins. Mirrors the math in public.get_user_matka_jantri so
-  // the page shows correct wins/losses for dara + bahar + ander.
-  .get("/live-prediction/:shiftId", async ({ params, store, set }) => {
-    try {
-      const userId = (store as any).id;
-
-      const [shift] = await db
-        .select()
-        .from(matkaShifts)
-        .where(eq(matkaShifts.id, params.shiftId));
-
-      if (!shift) {
-        set.status = 404;
-        return { success: false, error: "Shift not found" };
-      }
-
-      const rows = await db.execute(sql`
-        WITH all_nums AS (
-          SELECT generate_series AS nums, 1 AS num_type FROM generate_series(1, 100)
-          UNION ALL
-          SELECT generate_series * 111,  2 FROM generate_series(1, 9)
-          UNION ALL
-          SELECT generate_series * 1111, 3 FROM generate_series(1, 9)
-        ),
-        rows AS (
-          SELECT nums, num_type,
-            CASE num_type
-              WHEN 1 THEN nums
-              WHEN 2 THEN nums / 111
-              WHEN 3 THEN (nums / 1111) * 10
-            END AS r
-          FROM all_nums
-        )
-        SELECT
-          an.nums::int     AS nums,
-          an.num_type::int AS num_type,
-          COALESCE(SUM(CASE
-            WHEN mtd.number_type = an.num_type
-             AND mtd.number::integer = an.nums
-            THEN mtd.amount ELSE 0
-          END), 0)::text AS sale,
-          ROUND(COALESCE(SUM(CASE
-            WHEN mtd.number_type = 1 THEN
-              CASE WHEN mtd.number::integer = an.r
-                THEN mtd.amount * mtd.rate ELSE -mtd.amount END
-            WHEN mtd.number_type = 2 THEN
-              CASE WHEN mtd.number::integer = (an.r % 10) * 111
-                THEN mtd.amount * mtd.rate ELSE -mtd.amount END
-            WHEN mtd.number_type = 3 THEN
-              CASE WHEN mtd.number::integer = (an.r / 10) * 1111
-                THEN mtd.amount * mtd.rate ELSE -mtd.amount END
-            ELSE 0
-          END), 0), 2)::text AS profit
-        FROM rows an
-        LEFT JOIN matka_transactions mt
-          ON mt.user_id  = ${userId}::uuid
-         AND mt.shift_id = ${params.shiftId}::uuid
-         AND mt.record_status = 0
-        LEFT JOIN matka_transaction_details mtd
-          ON mtd.transaction_id = mt.id
-         AND mtd.record_status = 0
-        GROUP BY an.nums, an.num_type
-        ORDER BY an.num_type, an.nums
-      `);
-
-      const numbers = ((rows as any).rows ?? rows).map((r: any) => ({
-        nums: Number(r.nums),
-        num_type: Number(r.num_type),
-        sale: r.sale,
-        profit: r.profit,
-      }));
-
-      return { success: true, data: { shift, numbers } };
-    } catch (error) {
-      console.error("[user live-prediction] failed:", error);
-      set.status = 500;
-      return {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch live prediction",
-      };
-    }
-  })
-
-  // ── Declared matka results history (read-only for players) ────────────────
-  .get("/declared-history", async ({ query, set }) => {
-    try {
-      const limit = Math.min(Number((query as any)?.limit ?? 50), 200);
-      const rows = await db.execute(sql`
-        SELECT
-          id, runs, declared_at,
-          (api_response->>'shiftName') AS shift_name,
-          (api_response->>'shiftDate') AS shift_date,
-          (api_response->>'shiftId')   AS shift_id
-        FROM market_results
-        WHERE event_type_id = 999
-          AND status = 'DECLARED'
-          AND record_status = 0
-        ORDER BY declared_at DESC
-        LIMIT ${limit}
-      `);
-      return { success: true, data: (rows as any).rows ?? rows };
-    } catch (error) {
-      set.status = 500;
-      return {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch declared history",
-      };
-    }
-  })
-
-  // ── Get single transaction with details ───────────────────────────────────
+  // ── Single jambo transaction ─────────────────────────────────────────────
   .get("/transactions/:id", async ({ params, store, set }) => {
     try {
       const [txn] = await db
@@ -771,7 +652,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             eq(matkaTransactions.id, params.id),
             eq(matkaTransactions.userId, store.id),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.Matka)
+            eq(matkaShifts.sportType, MatkaSportType.Jambo)
           )
         );
 
@@ -807,18 +688,19 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
     }
   })
 
-  // ── Soft-delete a transaction ─────────────────────────────────────────────
+  // ── Soft-delete a jambo transaction ──────────────────────────────────────
   .delete("/transactions/:id", async ({ params, store, set }) => {
     try {
-      // Verify ownership
       const [txn] = await db
         .select()
         .from(matkaTransactions)
+        .innerJoin(matkaShifts, eq(matkaTransactions.shiftId, matkaShifts.id))
         .where(
           and(
             eq(matkaTransactions.id, params.id),
             eq(matkaTransactions.userId, store.id),
-            eq(matkaTransactions.recordStatus, RecordStatus.Active)
+            eq(matkaTransactions.recordStatus, RecordStatus.Active),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo)
           )
         );
 
@@ -827,7 +709,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         return { success: false, error: "Transaction not found" };
       }
 
-      // Soft-delete transaction and its details
       await db
         .update(matkaTransactions)
         .set({ recordStatus: RecordStatus.Deleted })
@@ -838,7 +719,6 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .set({ recordStatus: RecordStatus.Deleted })
         .where(eq(matkaTransactionDetails.transactionId, params.id));
 
-      // Recalculate exposure and update ledger_limit
       await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
 
       return { success: true };
@@ -849,160 +729,4 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         error: error instanceof Error ? error.message : "Failed to delete transaction",
       };
     }
-  })
-
-  // ── Update (edit) a transaction ───────────────────────────────────────────
-  .put(
-    "/transactions/:id",
-    async ({ params, store, set, body }) => {
-      try {
-        const { bets } = body as {
-          bets: { number: string; numberType: number; amount: number }[];
-        };
-
-        if (!bets || bets.length === 0) {
-          set.status = 400;
-          return { success: false, error: "Bets are required" };
-        }
-
-        // Verify ownership
-        const [txn] = await db
-          .select()
-          .from(matkaTransactions)
-          .where(
-            and(
-              eq(matkaTransactions.id, params.id),
-              eq(matkaTransactions.userId, store.id),
-              eq(matkaTransactions.recordStatus, RecordStatus.Active)
-            )
-          );
-
-        if (!txn) {
-          set.status = 404;
-          return { success: false, error: "Transaction not found" };
-        }
-
-        // Validate shift still open
-        if (!txn.shiftId) {
-          set.status = 400;
-          return { success: false, error: "Transaction has no associated shift" };
-        }
-
-        const [shift] = await db
-          .select()
-          .from(matkaShifts)
-          .where(
-            and(
-              eq(matkaShifts.id, txn.shiftId),
-              eq(matkaShifts.isActive, true),
-              eq(matkaShifts.recordStatus, RecordStatus.Active)
-            )
-          );
-
-        if (!shift) {
-          set.status = 400;
-          return { success: false, error: "Shift not found or inactive" };
-        }
-
-        if (shift.mainJantriTime) {
-          const now = new Date();
-          const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
-          const shiftTime = new Date(shift.shiftDate);
-          shiftTime.setHours(hours, minutes, 0, 0);
-          if (shift.nextDayAllow) {
-            shiftTime.setDate(shiftTime.getDate() + 1);
-          }
-          if (now > shiftTime) {
-            set.status = 400;
-            return { success: false, error: "Shift betting time has closed" };
-          }
-        }
-
-        // Calculate new totals
-        const daraRate = Number(shift.daraRate);
-        const daraCommission = Number(shift.daraCommission);
-        const akharRate = Number(shift.akharRate);
-        const akharCommission = Number(shift.akharCommission);
-
-        let newTotalAmount = 0;
-        let newTotalCommission = 0;
-
-        const newDetailRows = bets.map((bet, idx) => {
-          const isAkhar = bet.numberType === 2 || bet.numberType === 3;
-          const rate = isAkhar ? akharRate : daraRate;
-          const commPercent = isAkhar ? akharCommission : daraCommission;
-          const commission = (bet.amount * commPercent) / 100;
-          const finalAmt = bet.amount - commission;
-
-          newTotalAmount += bet.amount;
-          newTotalCommission += commission;
-
-          return {
-            transactionId: params.id,
-            numberType: bet.numberType,
-            number: bet.number,
-            amount: String(bet.amount),
-            rate: String(rate),
-            commission: String(commission),
-            finalAmount: String(finalAmt),
-            orderNumber: idx + 1,
-            addedBy: store.id,
-            updateBy: store.id,
-          };
-        });
-
-        const newFinalAmount = newTotalAmount - newTotalCommission;
-
-        // Recalculate exposure and update ledger_limit
-        await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
-
-        // Soft-delete existing details
-        await db
-          .update(matkaTransactionDetails)
-          .set({ recordStatus: RecordStatus.Deleted })
-          .where(eq(matkaTransactionDetails.transactionId, params.id));
-
-        // Insert new details
-        await db.insert(matkaTransactionDetails).values(newDetailRows);
-
-        // Update transaction header
-        await db
-          .update(matkaTransactions)
-          .set({
-            totalAmount: String(newTotalAmount),
-            totalCommission: String(newTotalCommission),
-            finalAmount: String(newFinalAmount),
-            updateBy: store.id,
-          })
-          .where(eq(matkaTransactions.id, params.id));
-
-        return {
-          success: true,
-          data: {
-            transactionId: params.id,
-            totalAmount: newTotalAmount,
-            totalCommission: newTotalCommission,
-            finalAmount: newFinalAmount,
-            betCount: bets.length,
-          },
-        };
-      } catch (error) {
-        set.status = 500;
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Failed to update transaction",
-        };
-      }
-    },
-    {
-      body: t.Object({
-        bets: t.Array(
-          t.Object({
-            number: t.String(),
-            numberType: t.Number(),
-            amount: t.Number({ minimum: 1 }),
-          })
-        ),
-      }),
-    }
-  );
+  });

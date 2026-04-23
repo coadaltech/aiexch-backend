@@ -1,8 +1,10 @@
 import { Elysia, t } from "elysia";
 import { db } from "../../db";
-import { sports, sportsGames, competitions, SYSTEM_USER_ID } from "../../db/schema";
+import { sports, sportsGames, competitions, events, SYSTEM_USER_ID } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { CacheService } from "../../services/cache";
+import { invalidateSportsListCache } from "../../services/sports-service";
+import { broadcastChange } from "../../services/sports-broadcast";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { resolveOwnerScope } from "../../utils/ownerScope";
 import { UserRole } from "../../types/enums";
@@ -136,7 +138,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         }
 
         // Bust the sports list cache so the sidebar reflects the new order immediately
-        await CacheService.del("sports:list");
+        await invalidateSportsListCache();
 
         set.status = 200;
         return { success: true };
@@ -144,6 +146,156 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         set.status = 500;
         return { success: false, error: "Failed to reorder sports" };
       }
+    },
+  )
+
+  // ── Toggle sport active/inactive (owner only) ─────────────────────────
+  .post(
+    "/toggle-active/:sportId",
+    async ({ params, body, set }) => {
+      try {
+        const sportId = Number(params.sportId);
+        if (!Number.isFinite(sportId)) {
+          set.status = 400;
+          return { success: false, error: "Invalid sportId" };
+        }
+
+        const { isActive } = body as { isActive: boolean };
+
+        const [updated] = await db
+          .update(sports)
+          .set({
+            is_active: isActive,
+            updateBy: SYSTEM_USER_ID,
+            updateDate: new Date(),
+          })
+          .where(eq(sports.sport_id, sportId))
+          .returning({ sport_id: sports.sport_id, is_active: sports.is_active });
+
+        if (!updated) {
+          set.status = 404;
+          return { success: false, error: "Sport not found" };
+        }
+
+        await invalidateSportsListCache();
+
+        set.status = 200;
+        return {
+          success: true,
+          data: { sportId: updated.sport_id, isActive: updated.is_active },
+        };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to update sport status" };
+      }
+    },
+    {
+      params: t.Object({ sportId: t.String() }),
+      body: t.Object({ isActive: t.Boolean() }),
+    },
+  )
+
+  // ── Toggle a competition's "top competition" flag (owner only) ────────
+  .post(
+    "/toggle-top-competition/:competitionId",
+    async ({ params, body, set }) => {
+      try {
+        const competitionId = Number(params.competitionId);
+        if (!Number.isFinite(competitionId)) {
+          set.status = 400;
+          return { success: false, error: "Invalid competitionId" };
+        }
+
+        const { isTop } = body as { isTop: boolean };
+
+        const [updated] = await db
+          .update(competitions)
+          .set({
+            is_top_competition: isTop,
+            updateBy: SYSTEM_USER_ID,
+            updateDate: new Date(),
+          })
+          .where(eq(competitions.competition_id, competitionId))
+          .returning({
+            competition_id: competitions.competition_id,
+            is_top_competition: competitions.is_top_competition,
+          });
+
+        if (!updated) {
+          set.status = 404;
+          return { success: false, error: "Competition not found" };
+        }
+
+        broadcastChange("top-competitions");
+
+        set.status = 200;
+        return {
+          success: true,
+          data: {
+            competitionId: updated.competition_id,
+            isTop: updated.is_top_competition,
+          },
+        };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to update top-competition flag" };
+      }
+    },
+    {
+      params: t.Object({ competitionId: t.String() }),
+      body: t.Object({ isTop: t.Boolean() }),
+    },
+  )
+
+  // ── Toggle an event's "recommended" flag (owner only) ─────────────────
+  .post(
+    "/toggle-recommended-event/:eventId",
+    async ({ params, body, set }) => {
+      try {
+        const eventId = Number(params.eventId);
+        if (!Number.isFinite(eventId)) {
+          set.status = 400;
+          return { success: false, error: "Invalid eventId" };
+        }
+
+        const { isRecommended } = body as { isRecommended: boolean };
+
+        const [updated] = await db
+          .update(events)
+          .set({
+            isRecommended,
+            updateBy: SYSTEM_USER_ID,
+            updateDate: new Date(),
+          })
+          .where(eq(events.eventId, eventId))
+          .returning({
+            eventId: events.eventId,
+            isRecommended: events.isRecommended,
+          });
+
+        if (!updated) {
+          set.status = 404;
+          return { success: false, error: "Event not found" };
+        }
+
+        broadcastChange("recommended-events");
+
+        set.status = 200;
+        return {
+          success: true,
+          data: {
+            eventId: updated.eventId,
+            isRecommended: updated.isRecommended,
+          },
+        };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to update recommended flag" };
+      }
+    },
+    {
+      params: t.Object({ eventId: t.String() }),
+      body: t.Object({ isRecommended: t.Boolean() }),
     },
   )
 

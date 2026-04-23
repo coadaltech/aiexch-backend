@@ -7,23 +7,10 @@ import {
   customMarketOdds,
   users,
 } from "@db/schema";
-import { eq, and, ilike, or, desc, sql } from "drizzle-orm";
+import { eq, and, or, desc } from "drizzle-orm";
 import { parseMarketType, marketTypeToString } from "../types/enums";
 import { SportsService } from "./sports";
 import dummysports from "../dummy/sportsevents.json";
-
-// Helper: convert runner's back/lay arrays to Redis JSON format
-function buildRunnerRedisJson(
-  name: string,
-  back: { price: number; size: number }[],
-  lay: { price: number; size: number }[]
-) {
-  return JSON.stringify({
-    name,
-    back: back.length > 0 ? back : null,
-    lay: lay.length > 0 ? lay : null,
-  });
-}
 
 // Helper: get whitelabelId for a user
 async function getUserWhitelabelId(userId: string): Promise<string | null> {
@@ -232,26 +219,14 @@ export const AdminMarketService = {
     betDelay?: number;
     whitelabelId?: string;
   }) {
-    // Generate a numeric marketId in Betfair-like format: "9.<eventId><timestamp>"
-    // Prefix "9." distinguishes custom markets from real Betfair markets (which use "1.")
     const timestamp = Date.now();
     const marketId = `9.${params.eventId}${timestamp}`;
-    try {
-      // Validate: at least 1 runner
-      if (!params.runners || params.runners.length === 0) {
-        return { success: false, error: "At least 1 runner is required" };
-      }
-      // Validate: max 3 back and 3 lay per runner
-      for (const r of params.runners) {
-        if (r.back && r.back.length > 3) {
-          return { success: false, error: "Max 3 back prices per runner" };
-        }
-        if (r.lay && r.lay.length > 3) {
-          return { success: false, error: "Max 3 lay prices per runner" };
-        }
-      }
 
-      // Insert market to DB
+    if (!params.runners || params.runners.length === 0) {
+      return { success: false, error: "At least 1 runner is required" };
+    }
+
+    try {
       await db.insert(marketSettings).values({
         marketId,
         eventId: Number(params.eventId),
@@ -267,14 +242,15 @@ export const AdminMarketService = {
         betDelay: params.betDelay ?? 0,
         minBet: params.minBet != null ? String(params.minBet) : "100",
         maxBet: params.maxBet != null ? String(params.maxBet) : "50000",
-        maxProfit: params.maxProfit != null ? String(params.maxProfit) : "100000",
+        maxProfit:
+          params.maxProfit != null ? String(params.maxProfit) : "100000",
       });
 
-      // Insert runners to DB + set custom odds in Redis
+      // One DB row per runner, one DB row per runner's odds.
+      // selectionId = 1, 2, 3... scoped by marketId.
       for (let i = 0; i < params.runners.length; i++) {
         const r = params.runners[i];
-        // Generate numeric selectionId: timestamp * 100 + runner index (unique per ms)
-        const selectionId = timestamp * 100 + (i + 1);
+        const selectionId = i + 1;
         const back = (r.back || []).slice(0, 3);
         const lay = (r.lay || []).slice(0, 3);
 
@@ -285,26 +261,19 @@ export const AdminMarketService = {
           sortPriority: i,
         });
 
-        // Save custom odds in DB (JSONB format)
         await db.insert(customMarketOdds).values({
           marketId,
           selectionId,
           backPrices: back,
           layPrices: lay,
         });
-
-        // Set custom odds in Redis for instant use
-        if (redis.isOpen) {
-          await redis.hSet(
-            `custom:odds:${marketId}`,
-            String(selectionId),
-            buildRunnerRedisJson(r.name, back, lay)
-          );
-        }
       }
 
-      // Set market overrides in Redis
       if (redis.isOpen) {
+        // Clear any prior state for this marketId (paranoia — fresh create
+        // should never collide, but leaves no ambiguity if it did).
+        await redis.del(`custom:ballrunning:${marketId}`);
+
         await redis.hSet(`admin:market:${marketId}`, {
           isActive: "true",
           isVisible: "true",
@@ -318,14 +287,12 @@ export const AdminMarketService = {
           maxProfit: String(params.maxProfit || 100000),
           betDelay: String(params.betDelay || 0),
         });
-
-        // Add to event's custom market set
         await redis.sAdd(`custom:markets:${params.eventId}`, marketId);
       }
 
       return { success: true, marketId };
     } catch (e) {
-      console.error("[AdminMarketService] createCustomMarket error:", e);
+      console.error("[createCustomMarket] error:", e);
       return { success: false, error: "Failed to create custom market" };
     }
   },
@@ -334,15 +301,32 @@ export const AdminMarketService = {
   //  CUSTOM MARKET ODDS UPDATE
   // ═══════════════════════════════════════════════════════════
 
+  /**
+   * Toggle a custom market's "ball running" flag. This is MARKET-level: it
+   * sets `admin:market:<marketId>.ballRunning = "true"/"false"` in Redis.
+   * The pipeline reads the flag and emits `sportingEvent: true` on the
+   * market so the frontend draws the striped "Ball Running" overlay on top
+   * of every runner (prices stay visible underneath).
+   */
+  async setCustomMarketBallRunning(marketId: string, ballRunning: boolean) {
+    if (!redis.isOpen) return { success: true };
+    await redis.hSet(
+      `admin:market:${marketId}`,
+      "ballRunning",
+      ballRunning ? "true" : "false"
+    );
+    return { success: true };
+  },
+
   async updateCustomOdds(
     marketId: string,
     selectionId: string,
     odds: {
-      back?: { price: number; size: number }[];
-      lay?: { price: number; size: number }[];
+      back?: { price: number; size: number; line?: number }[];
+      lay?: { price: number; size: number; line?: number }[];
+      ballRunning?: boolean;
     }
   ) {
-    // Validate max 3 each
     if (odds.back && odds.back.length > 3) {
       return { success: false, error: "Max 3 back prices per runner" };
     }
@@ -350,58 +334,36 @@ export const AdminMarketService = {
       return { success: false, error: "Max 3 lay prices per runner" };
     }
 
-    // Check if exists
-    const existing = await db
-      .select()
-      .from(customMarketOdds)
-      .where(
-        and(
-          eq(customMarketOdds.marketId, marketId),
-          eq(customMarketOdds.selectionId, Number(selectionId))
-        )
-      )
-      .limit(1);
+    const sid = Number(selectionId);
+    if (!Number.isFinite(sid)) {
+      return { success: false, error: "Invalid selectionId" };
+    }
 
+    // Update the prices for this single runner only.
     const updateData: any = {};
     if (odds.back !== undefined) updateData.backPrices = odds.back;
     if (odds.lay !== undefined) updateData.layPrices = odds.lay;
 
-    if (existing.length > 0) {
+    if (Object.keys(updateData).length > 0) {
       await db
         .update(customMarketOdds)
         .set(updateData)
         .where(
           and(
             eq(customMarketOdds.marketId, marketId),
-            eq(customMarketOdds.selectionId, Number(selectionId))
+            eq(customMarketOdds.selectionId, sid)
           )
         );
-    } else {
-      await db.insert(customMarketOdds).values({
-        marketId,
-        selectionId: Number(selectionId),
-        backPrices: odds.back || [],
-        layPrices: odds.lay || [],
-      });
     }
 
-    // Update Redis (instant effect on next 1s cycle)
-    if (redis.isOpen) {
-      const existingJson = await redis.hGet(
-        `custom:odds:${marketId}`,
-        selectionId
-      );
-      const current = existingJson ? JSON.parse(existingJson) : {};
-      const updated = {
-        ...current,
-        back: odds.back !== undefined ? odds.back : current.back,
-        lay: odds.lay !== undefined ? odds.lay : current.lay,
-      };
-      await redis.hSet(
-        `custom:odds:${marketId}`,
-        selectionId,
-        JSON.stringify(updated)
-      );
+    // Per-runner ball-running flag (Redis only, keyed by selectionId).
+    if (redis.isOpen && odds.ballRunning !== undefined) {
+      const key = `custom:ballrunning:${marketId}`;
+      if (odds.ballRunning) {
+        await redis.hSet(key, String(sid), "true");
+      } else {
+        await redis.hDel(key, String(sid));
+      }
     }
 
     return { success: true };
@@ -424,6 +386,7 @@ export const AdminMarketService = {
       .select()
       .from(runnerSettings)
       .where(eq(runnerSettings.marketId, marketId));
+    runners.sort((a, b) => (a.sortPriority ?? 0) - (b.sortPriority ?? 0));
 
     const odds = await db
       .select()
@@ -473,6 +436,7 @@ export const AdminMarketService = {
     if (redis.isOpen) {
       await redis.del(`admin:market:${marketId}`);
       await redis.del(`custom:odds:${marketId}`);
+      await redis.del(`custom:ballrunning:${marketId}`);
       await redis.sRem(`custom:markets:${eventId}`, marketId);
     }
 
@@ -833,33 +797,11 @@ export const AdminMarketService = {
       }
     }
 
-    // Sync custom odds (new JSONB format)
-    const allCustomOdds = await db.select().from(customMarketOdds);
-    for (const co of allCustomOdds) {
-      // Get runner name
-      const runner = await db
-        .select()
-        .from(runnerSettings)
-        .where(
-          and(
-            eq(runnerSettings.marketId, co.marketId),
-            eq(runnerSettings.selectionId, co.selectionId)
-          )
-        )
-        .limit(1);
-
-      const back = (co.backPrices as { price: number; size: number }[]) || [];
-      const lay = (co.layPrices as { price: number; size: number }[]) || [];
-
-      await redis.hSet(
-        `custom:odds:${co.marketId}`,
-        String(co.selectionId),
-        buildRunnerRedisJson(runner[0]?.name || String(co.selectionId), back, lay)
-      );
-    }
+    // Custom market odds live in the DB only (pipeline reads them fresh
+    // each tick). No Redis hash to sync.
 
     console.log(
-      `[AdminSync] Synced ${allEvents.length} events, ${allMarkets.length} markets, ${allCustomOdds.length} custom odds to Redis`
+      `[AdminSync] Synced ${allEvents.length} events, ${allMarkets.length} markets`
     );
   },
 };

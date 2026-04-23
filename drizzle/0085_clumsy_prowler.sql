@@ -1,0 +1,1 @@
+ALTER TABLE "matka_shifts" ADD COLUMN "sport_type" integer DEFAULT 1001 NOT NULL;

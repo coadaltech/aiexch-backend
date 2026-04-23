@@ -5,10 +5,12 @@ import { marketOddsHistory, marketSettings, events } from "@db/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { UserRole } from "../../types/enums";
 
-// Price entry schema: {price, size}
+// Price entry schema: {price, size, line?}
+// `line` is only present for LINE markets — it's the over/under value.
 const PriceEntry = t.Object({
   price: t.Number(),
   size: t.Number(),
+  line: t.Optional(t.Number()),
 });
 
 export const marketManagementRoutes = new Elysia({
@@ -326,6 +328,30 @@ export const marketManagementRoutes = new Elysia({
     }
   )
 
+  // PUT /owner/market-management/custom-markets/:marketId/ball-running
+  .put(
+    "/custom-markets/:marketId/ball-running",
+    async ({ params, body, set }) => {
+      try {
+        const result = await AdminMarketService.setCustomMarketBallRunning(
+          params.marketId,
+          body.ballRunning
+        );
+        return { success: true, data: result };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error: "Failed to toggle ball running",
+        };
+      }
+    },
+    {
+      params: t.Object({ marketId: t.String() }),
+      body: t.Object({ ballRunning: t.Boolean() }),
+    }
+  )
+
   // PUT /owner/market-management/custom-markets/:marketId/odds
   .put(
     "/custom-markets/:marketId/odds",
@@ -337,6 +363,7 @@ export const marketManagementRoutes = new Elysia({
           {
             back: body.back,
             lay: body.lay,
+            ballRunning: body.ballRunning,
           }
         );
         if (!result.success) {
@@ -355,6 +382,7 @@ export const marketManagementRoutes = new Elysia({
         selectionId: t.String(),
         back: t.Optional(t.Array(PriceEntry)),
         lay: t.Optional(t.Array(PriceEntry)),
+        ballRunning: t.Optional(t.Boolean()),
       }),
     }
   )

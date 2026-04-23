@@ -40,7 +40,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000001',
   0, 0, 0, 0, 0,
@@ -71,7 +71,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000002',
   0, 0, 0, 0, 0,
@@ -104,7 +104,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000003',
   25000, 25000, 0, 0, 25000,
@@ -135,7 +135,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000004',
   0, 0, 0, 0, 0,
@@ -166,7 +166,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000005',
   0, 0, 0, 0, 0,
@@ -197,7 +197,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000006',
   0, 0, 0, 0, 0,
@@ -228,7 +228,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000007',
   0, 0, 0, 0, 0,
@@ -259,7 +259,7 @@ VALUES (
 )
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, limit_consumed_after_declare, final_limit, added_by, added_date, update_by, update_date, record_status)
+INSERT INTO ledger_limit (user_id, user_balance, user_limit, limit_consumed, fix_limit, final_limit, added_by, added_date, update_by, update_date, record_status)
 VALUES (
   '00000000-0000-0000-0000-000000000008',
   0, 0, 0, 0, 0,

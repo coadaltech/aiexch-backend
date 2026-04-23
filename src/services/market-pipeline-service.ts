@@ -1,4 +1,7 @@
 import { redis, redisIsHealthy } from "@db/redis";
+import { db } from "@db/index";
+import { runnerSettings, customMarketOdds } from "@db/schema";
+import { eq } from "drizzle-orm";
 import { SportsService } from "./sports";
 import crypto from "crypto";
 
@@ -217,7 +220,9 @@ export const MarketPipelineService = {
     return map;
   },
 
-  // ── Helper: Load custom markets for an event from Redis ──
+  // ── Helper: Load custom markets for an event from the DB ──
+  // DB is source of truth: runner_settings gives the list, customMarketOdds
+  // gives the prices, Redis only stores per-runner ball-running flags.
   async getCustomMarkets(eventId: string): Promise<any[]> {
     try {
       const customMarketIds = await safeRedisOp(
@@ -231,24 +236,40 @@ export const MarketPipelineService = {
         const overrides = await redis.hGetAll(`admin:market:${marketId}`);
         if (!overrides) continue;
 
-        const adminDisabled = overrides.isActive === "false";
-        const adminHidden = overrides.isVisible === "false";
-
-        const oddsData = await redis.hGetAll(`custom:odds:${marketId}`);
-
-        // Build runners from custom odds entries
-        const runners = Object.entries(oddsData).map(
-          ([selectionId, oddsJson]) => {
-            const odds = JSON.parse(oddsJson);
-            return {
-              selectionId: parseInt(selectionId) || selectionId,
-              name: odds.name || selectionId,
-              status: "ACTIVE",
-              back: odds.back || null,
-              lay: odds.lay || null,
-            };
-          }
+        const runnerRows = await db
+          .select()
+          .from(runnerSettings)
+          .where(eq(runnerSettings.marketId, marketId));
+        if (runnerRows.length === 0) continue;
+        runnerRows.sort(
+          (a, b) => (a.sortPriority ?? 0) - (b.sortPriority ?? 0)
         );
+
+        const oddsRows = await db
+          .select()
+          .from(customMarketOdds)
+          .where(eq(customMarketOdds.marketId, marketId));
+
+        const ballRunningHash = await redis.hGetAll(
+          `custom:ballrunning:${marketId}`
+        );
+
+        const runners = runnerRows.map((r) => {
+          const odds = oddsRows.find((o) => o.selectionId === r.selectionId);
+          const back =
+            (odds?.backPrices as { price: number; size: number }[]) || [];
+          const lay =
+            (odds?.layPrices as { price: number; size: number }[]) || [];
+          const suspended =
+            ballRunningHash[String(r.selectionId)] === "true";
+          return {
+            selectionId: r.selectionId,
+            name: r.name,
+            status: suspended ? "SUSPENDED" : "ACTIVE",
+            back: back.length > 0 ? back : null,
+            lay: lay.length > 0 ? lay : null,
+          };
+        });
 
         results.push({
           marketId,
@@ -258,8 +279,8 @@ export const MarketPipelineService = {
           inPlay: true,
           bettingType: overrides.bettingType || "ODDS",
           isCustom: true,
-          adminDisabled,
-          adminHidden,
+          adminDisabled: overrides.isActive === "false",
+          adminHidden: overrides.isVisible === "false",
           marketCondition: {
             marketId,
             betDelay: parseInt(overrides.betDelay || "0"),
@@ -272,12 +293,20 @@ export const MarketPipelineService = {
             volume: 0,
             mtp: 0,
           },
-          sportingEvent: false,
+          // Market-level ball running: the owner clicked "Bowl Chalu" on the
+          // manage-prices modal. The frontend's existing overlay logic turns
+          // `sportingEvent: true` into a striped "Ball Running" overlay on
+          // top of the runners (prices stay visible underneath).
+          sportingEvent: overrides.ballRunning === "true",
           runners,
         });
       }
       return results;
-    } catch {
+    } catch (error) {
+      console.error(
+        "[Pipeline] getCustomMarkets error:",
+        (error as Error)?.message
+      );
       return [];
     }
   },

@@ -256,6 +256,12 @@ export function drCrToString(value: DrCr | number): string {
   return value === DrCr.Debit ? "DEBIT" : "CREDIT";
 }
 
+/** Sport type — stored in `matka_shifts.sport_type` to differentiate Matka vs Jambo shifts. */
+export enum MatkaSportType {
+  Matka = 1001,
+  Jambo = 1004,
+}
+
 /** Profile membership tier — stored in `profiles.membership`. */
 export enum MembershipType {
   Bronze = 0,

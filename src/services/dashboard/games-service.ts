@@ -5,6 +5,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { UserRole } from "../../types/enums";
 import { syncEventsForCompetition, deactivateEventsForCompetition } from "../event-sync-service";
 import { CacheService } from "../cache";
+import { broadcastChange } from "../sports-broadcast";
 
 export const getCompetitionsBySportId = async (sportId: string) => {
   try {
@@ -99,6 +100,10 @@ export const updateCompetitionsStatus = async (
       console.error("⚠️ Failed to clear cache (non-fatal):", cacheError);
     }
 
+    // A competition's active state feeds the sidebar "top competitions" list
+    // (which only shows active ones), so nudge any open tabs to refetch.
+    broadcastChange("top-competitions");
+
     return {
       success: true,
       message: `Updated ${updates.length} competition(s) successfully`,
@@ -136,6 +141,7 @@ export const getCompetitionsWithOverrides = async (
           name: competitions.name,
           provider: competitions.provider,
           is_active: competitions.is_active,
+          is_top_competition: competitions.is_top_competition,
           is_archived: competitions.is_archived,
           metadata: competitions.metadata,
           whitelabelActive: competitionWhitelabelOverrides.isActive,
@@ -274,6 +280,7 @@ export const getEventsWithOverrides = async (
           openDate: events.openDate,
           isActive: events.isActive,
           isVisible: events.isVisible,
+          isRecommended: events.isRecommended,
           suspended: events.suspended,
           defaultMarketId: events.defaultMarketId,
           metadata: events.metadata,
@@ -355,6 +362,10 @@ export const updateEventsStatus = async (
         await CacheService.invalidatePattern(`sports:seriesWithMatches:${sportId}:*`);
       }
     } catch (_) { /* non-fatal */ }
+
+    // Recommended-events feed hides inactive events, so changes here may
+    // affect the sidebar — notify open tabs to refetch.
+    broadcastChange("recommended-events");
 
     return { success: true, message: `Updated ${updates.length} event(s) successfully` };
   } catch (error) {

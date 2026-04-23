@@ -8,7 +8,7 @@ import {
   SYSTEM_USER_ID,
 } from "../../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { RecordStatus, UserRole } from "../../types/enums";
+import { RecordStatus, UserRole, MatkaSportType } from "../../types/enums";
 
 // Synthetic event_type_id used to mark matka result rows in market_results.
 const MATKA_EVENT_TYPE_ID = 999;
@@ -83,7 +83,10 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // ── List all shifts (with optional date filter) ───────────────────────────
   .get("/shifts", async ({ set, query }) => {
     try {
-      const conditions = [eq(matkaShifts.recordStatus, RecordStatus.Active)];
+      const conditions = [
+        eq(matkaShifts.recordStatus, RecordStatus.Active),
+        eq(matkaShifts.sportType, MatkaSportType.Matka),
+      ];
 
       if (query?.date) {
         conditions.push(eq(matkaShifts.shiftDate, query.date));
@@ -114,7 +117,12 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         const [maxOrder] = await db
           .select({ max: sql<number>`COALESCE(MAX(${matkaShifts.shiftOrder}), 0)` })
           .from(matkaShifts)
-          .where(eq(matkaShifts.recordStatus, RecordStatus.Active));
+          .where(
+            and(
+              eq(matkaShifts.recordStatus, RecordStatus.Active),
+              eq(matkaShifts.sportType, MatkaSportType.Matka)
+            )
+          );
 
         const nextOrder = (maxOrder?.max ?? 0) + 1;
 
@@ -122,6 +130,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           .insert(matkaShifts)
           .values({
             name: body.name,
+            sportType: MatkaSportType.Matka,
             shiftDate: body.shiftDate,
             endTime: body.endTime,
             shiftOrder: nextOrder,
