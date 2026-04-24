@@ -71,7 +71,13 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
             shiftDate: body.shiftDate,
             endTime: body.endTime,
             shiftOrder: nextOrder,
-            daraRate: String(body.daraRate ?? 800),
+            // Jambo rate mapping:
+            //   triple_rate  → number_type 0 (default 1000)
+            //   dara_rate    → number_type 1,2 (jodi, default 100)
+            //   akhar_rate   → number_type 3,4,5 (akhar, default 10)
+            tripleRate: String(body.tripleRate ?? 1000),
+            tripleCommission: String(body.tripleCommission ?? 0),
+            daraRate: String(body.daraRate ?? 100),
             daraCommission: String(body.daraCommission ?? 0),
             akharRate: String(body.akharRate ?? 10),
             akharCommission: String(body.akharCommission ?? 0),
@@ -100,6 +106,8 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
         name: t.String({ minLength: 1, maxLength: 100 }),
         shiftDate: t.String(),
         endTime: t.String(),
+        tripleRate: t.Optional(t.Number()),
+        tripleCommission: t.Optional(t.Number()),
         daraRate: t.Optional(t.Number()),
         daraCommission: t.Optional(t.Number()),
         akharRate: t.Optional(t.Number()),
@@ -184,6 +192,8 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
         if (body.shiftDate !== undefined) updateData.shiftDate = body.shiftDate;
         if (body.endTime !== undefined) updateData.endTime = body.endTime;
         if (body.shiftOrder !== undefined) updateData.shiftOrder = body.shiftOrder;
+        if (body.tripleRate !== undefined) updateData.tripleRate = String(body.tripleRate);
+        if (body.tripleCommission !== undefined) updateData.tripleCommission = String(body.tripleCommission);
         if (body.daraRate !== undefined) updateData.daraRate = String(body.daraRate);
         if (body.daraCommission !== undefined) updateData.daraCommission = String(body.daraCommission);
         if (body.akharRate !== undefined) updateData.akharRate = String(body.akharRate);
@@ -215,6 +225,8 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
         shiftDate: t.Optional(t.String()),
         endTime: t.Optional(t.String()),
         shiftOrder: t.Optional(t.Number()),
+        tripleRate: t.Optional(t.Number()),
+        tripleCommission: t.Optional(t.Number()),
         daraRate: t.Optional(t.Number()),
         daraCommission: t.Optional(t.Number()),
         akharRate: t.Optional(t.Number()),

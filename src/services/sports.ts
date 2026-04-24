@@ -9,7 +9,7 @@ import {
 } from "../types/sports/lists";
 import { MatchResult } from "../types/sports/results";
 import { CacheService } from "./cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { competitions, competitionWhitelabelOverrides, events, eventWhitelabelOverrides } from "@db/schema";
 import { db } from "@db/index";
 
@@ -25,6 +25,9 @@ function validateArray<T>(data: unknown, defaultValue: T[] = []): T[] {
 // Deduplication: if getSeriesWithMatches is already running for an eventTypeId,
 // subsequent calls will wait for the same promise instead of firing new DB/Redis/API calls
 const inFlightSeriesFetches = new Map<string, Promise<any[]>>();
+
+// Same dedupe idea for the flat matches-list endpoint.
+const inFlightMatchesListFetches = new Map<string, Promise<any[]>>();
 
 export const SportsService = {
   async getSeriesWithMatches(eventTypeId: string, whitelabelId?: string): Promise<any[]> {
@@ -45,6 +48,84 @@ export const SportsService = {
     }
   },
 
+  // Flat match list powering the homepage CricketMatchesList (and its football/
+  // tennis/etc. twins). Returns [{id, name, openDate, status, inPlay,
+  // defaultMarketId, seriesId, seriesName, betCount}]. Odds are NOT included —
+  // the client streams them over /ws/markets.
+  //
+  // betCount is user-scoped (the current user's matched bet count on each
+  // match), so the cache key includes userId. Anonymous callers share a single
+  // cache entry keyed by "anon".
+  async getMatchesWithDefaultMarkets(
+    eventTypeId: string,
+    whitelabelId?: string,
+    userId?: string,
+  ): Promise<any[]> {
+    const userKey = userId ?? "anon";
+    const dedupeKey = whitelabelId
+      ? `${eventTypeId}:${whitelabelId}:${userKey}`
+      : `${eventTypeId}::${userKey}`;
+    const existing = inFlightMatchesListFetches.get(dedupeKey);
+    if (existing) return existing;
+
+    const promise = this._fetchMatchesWithDefaultMarkets(eventTypeId, whitelabelId, userId);
+    inFlightMatchesListFetches.set(dedupeKey, promise);
+    try {
+      return await promise;
+    } finally {
+      inFlightMatchesListFetches.delete(dedupeKey);
+    }
+  },
+
+  async _fetchMatchesWithDefaultMarkets(
+    eventTypeId: string,
+    whitelabelId?: string,
+    userId?: string,
+  ): Promise<any[]> {
+    const userKey = userId ?? "anon";
+    const cacheKey = whitelabelId
+      ? `sports:matchesList:${eventTypeId}:${whitelabelId}:${userKey}`
+      : `sports:matchesList:${eventTypeId}::${userKey}`;
+
+    try {
+      const cached = await CacheService.get<any[]>(cacheKey);
+      if (cached) return cached;
+
+      const sportIdNum = Number(eventTypeId);
+      if (!Number.isFinite(sportIdNum)) {
+        console.warn(`[MatchesList] Invalid eventTypeId: ${eventTypeId}`);
+        return [];
+      }
+
+      const runQuery = () => db.execute(sql`
+        SELECT fn_get_matches_with_default_markets(
+          ${sportIdNum}::bigint,
+          ${whitelabelId ?? null}::uuid,
+          ${userId ?? null}::uuid
+        ) AS data
+      `);
+
+      let rows: any;
+      try {
+        rows = await runQuery();
+      } catch (err) {
+        console.warn(`[MatchesList] DB call failed for sport ${eventTypeId}, retrying in 3s...`, err);
+        await new Promise(r => setTimeout(r, 3000));
+        rows = await runQuery();
+      }
+
+      const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+      const result: any[] = (rowArray[0]?.data as any[] | null) ?? [];
+
+      // Short TTL — betCount needs to reflect new bets quickly.
+      await CacheService.set(cacheKey, result, 15);
+      return result;
+    } catch (error) {
+      console.error(`[MatchesList] Failed for ${eventTypeId}:`, error);
+      return [];
+    }
+  },
+
   async _fetchSeriesWithMatches(eventTypeId: string, whitelabelId?: string): Promise<any[]> {
     const cacheKey = whitelabelId
       ? `sports:seriesWithMatches:${eventTypeId}:${whitelabelId}`
@@ -57,46 +138,40 @@ export const SportsService = {
         return mainCachedData;
       }
 
-      // Step 2: Fetch Series List (competitions from DB, with whitelabel filtering)
-      const seriesList = await SportsService.getSeriesList({
-        eventTypeId: eventTypeId,
-        whitelabelId,
-      });
+      // Step 2: Fetch the whole tree (competitions + events, whitelabel-filtered)
+      // in a single DB round trip via the SQL function fn_get_series_with_matches.
+      // Replaces the old 1 + N query pattern (getSeriesList + per-series getEventsFromDb).
+      const sportIdNum = Number(eventTypeId);
+      if (!Number.isFinite(sportIdNum)) {
+        console.warn(`[Series] Invalid eventTypeId: ${eventTypeId}`);
+        return [];
+      }
 
-      if (!seriesList || seriesList.length === 0) {
+      const runQuery = () => db.execute(sql`
+        SELECT fn_get_series_with_matches(
+          ${sportIdNum}::bigint,
+          ${whitelabelId ?? null}::uuid
+        ) AS data
+      `);
+
+      let rows: any;
+      try {
+        rows = await runQuery();
+      } catch (err) {
+        console.warn(`[Series] DB call failed for sport ${eventTypeId}, retrying in 3s...`, err);
+        await new Promise(r => setTimeout(r, 3000));
+        rows = await runQuery();
+      }
+
+      const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+      const allSeriesResults: any[] = (rowArray[0]?.data as any[] | null) ?? [];
+
+      if (allSeriesResults.length === 0) {
         console.log(`[Series] No series found for eventType ${eventTypeId}`);
         return [];
       }
 
-      console.log(`[Series] Fetching events from DB for ${seriesList.length} series (eventType ${eventTypeId})`);
-
-      // Step 3: Fetch events from DB for ALL series in parallel
-      const seriesPromises = seriesList.map(async (series) => {
-        const seriesId = series.id || series.competition_id;
-        const seriesName = series.name || series.competition?.name || "Unknown Series";
-
-        try {
-          const dbEvents = await SportsService.getEventsFromDb({
-            competitionId: String(seriesId),
-            whitelabelId,
-          });
-
-          return {
-            id: seriesId,
-            name: seriesName,
-            eventTypeId: eventTypeId,
-            matches: dbEvents,
-          };
-        } catch (error) {
-          console.error(`[Series] Error fetching events for series ${seriesId}:`, error);
-          return null;
-        }
-      });
-
-      const results = await Promise.all(seriesPromises);
-      const allSeriesResults = results.filter((r): r is NonNullable<typeof r> => r !== null);
-
-      console.log(`[Series] Got ${allSeriesResults.length}/${seriesList.length} series with events for eventType ${eventTypeId}`);
+      console.log(`[Series] Got ${allSeriesResults.length} series with events for eventType ${eventTypeId}`);
 
       // Cache final result
       await CacheService.set(cacheKey, allSeriesResults, 45);

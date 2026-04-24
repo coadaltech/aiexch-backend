@@ -60,6 +60,18 @@ export const websocketRoutes = new Elysia({ prefix: "/ws" }).ws("/markets", {
           LiveDataService.unsubscribe(clientId, eventId);
         }
       }
+      // ── Multimarket: pin subscription across multiple events ──
+      else if (data.action === "subscribe-multimarket") {
+        const items = Array.isArray(data.items) ? data.items : [];
+        const eventTypeId = data.eventTypeId || "4";
+        if (items.length === 0) return;
+        console.log(`[WS] Subscribe-multimarket: ${clientId} -> ${items.length} markets`);
+        LiveDataService.subscribeMultimarket(clientId, send, items, eventTypeId);
+        ws.send(JSON.stringify({ type: "multimarket-subscribed", count: items.length }));
+      } else if (data.action === "unsubscribe-multimarket") {
+        LiveDataService.unsubscribeMultimarket(clientId);
+        ws.send(JSON.stringify({ type: "multimarket-unsubscribed" }));
+      }
       // ── Global sidebar channels (sports-list, top-competitions, recommended-events) ──
       else if (data.action === "subscribe-channel" && isKnownChannel(data.channel)) {
         addSubscriber(data.channel, clientId, send);
@@ -76,6 +88,7 @@ export const websocketRoutes = new Elysia({ prefix: "/ws" }).ws("/markets", {
     const clientId = (ws.data as any)?._clientId as string | undefined;
     if (clientId) {
       LiveDataService.cleanup(clientId);
+      LiveDataService.unsubscribeMultimarket(clientId);
       removeClientFromAllChannels(clientId);
     }
   },

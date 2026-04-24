@@ -6,7 +6,7 @@ import { authRoutes } from "./routes/auth";
 import { profileRoutes } from "./routes/profile";
 import { ownerRoutes } from "./routes/owner";
 import { publicRoutes } from "./routes/public";
-import { favoritesRoutes } from "./routes/favorites";
+import { multimarketsRoutes } from "./routes/multimarkets";
 import { sportsRoutes } from "./routes/sports";
 import { bettingRoutes } from "./routes/betting";
 import { casinoAggregatorRoutes } from "./routes/casino/aggregator";
@@ -85,7 +85,7 @@ const app = new Elysia()
   .use(ownerRoutes)
   .use(gamesRoutes)
   .use(publicRoutes)
-  .use(favoritesRoutes)
+  .use(multimarketsRoutes)
   .use(sportsRoutes)
   .use(bettingRoutes)
   .use(casinoAggregatorRoutes)

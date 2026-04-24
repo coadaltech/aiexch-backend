@@ -10,6 +10,7 @@ import {
 import { eq, and, or, desc } from "drizzle-orm";
 import { parseMarketType, marketTypeToString } from "../types/enums";
 import { SportsService } from "./sports";
+import { LiveDataService } from "./live-data-service";
 import dummysports from "../dummy/sportsevents.json";
 
 // Helper: get whitelabelId for a user
@@ -315,6 +316,32 @@ export const AdminMarketService = {
       "ballRunning",
       ballRunning ? "true" : "false"
     );
+
+    // Push an immediate patched broadcast so subscribed user match pages flip
+    // the Ball Running overlay on the next frame instead of waiting for the
+    // next poll tick (the poll has to await the external getOdds call which
+    // typically adds 1–2s of latency).
+    try {
+      const rows = await db
+        .select({ eventId: marketSettings.eventId })
+        .from(marketSettings)
+        .where(eq(marketSettings.marketId, marketId))
+        .limit(1);
+      const eventId = rows[0]?.eventId;
+      if (eventId != null) {
+        LiveDataService.patchMarketBallRunning(
+          String(eventId),
+          marketId,
+          ballRunning
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "[setCustomMarketBallRunning] instant broadcast skipped:",
+        (e as Error)?.message
+      );
+    }
+
     return { success: true };
   },
 

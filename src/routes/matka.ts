@@ -557,67 +557,25 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   //   ?status=inactive – only transactions before today
   .get("/my-bets", async ({ store, set, query }) => {
     try {
-      const today = new Date().toISOString().split("T")[0];
       const filterShiftId = (query as any)?.shiftId as string | undefined;
-      const filterStatus = (query as any)?.status as string | undefined;
+      const filterStatus = ((query as any)?.status as string | undefined) ?? "active";
 
-      const whereConditions: any[] = [
-        eq(matkaTransactions.userId, store.id),
-        eq(matkaTransactions.recordStatus, RecordStatus.Active),
-        eq(matkaShifts.sportType, MatkaSportType.Matka),
-      ];
+      // Single SQL function handles: matka-only sport_type filter, optional
+      // shiftId, active/inactive date window, order+limit, and the copy-
+      // reference shift name LEFT JOIN. Replaces the 1 header query + 1
+      // follow-up refShift query + JS-side merging.
+      const rows = await db.execute(sql`
+        SELECT fn_get_user_matka_bets(
+          ${store.id}::uuid,
+          ${MatkaSportType.Matka}::int,
+          ${filterShiftId ?? null}::uuid,
+          ${filterStatus}::text,
+          ${200}::int
+        ) AS data
+      `);
 
-      if (filterShiftId) {
-        whereConditions.push(eq(matkaTransactions.shiftId, filterShiftId));
-      }
-
-      if (filterStatus === "inactive") {
-        whereConditions.push(sql`${matkaTransactions.transactionDate} < ${today}::date`);
-      } else {
-        // default: active = today only
-        whereConditions.push(eq(matkaTransactions.transactionDate, today));
-      }
-
-      const txns = await db
-        .select({
-          id: matkaTransactions.id,
-          shiftId: matkaTransactions.shiftId,
-          shiftName: matkaShifts.name,
-          shiftDate: matkaShifts.shiftDate,
-          transactionDate: matkaTransactions.transactionDate,
-          totalAmount: matkaTransactions.totalAmount,
-          totalCommission: matkaTransactions.totalCommission,
-          finalAmount: matkaTransactions.finalAmount,
-          addedDate: matkaTransactions.addedDate,
-          copyReferenceShiftId: matkaTransactions.copyReferenceShiftId,
-          whitelabelId: matkaTransactions.whitelabelId,
-        })
-        .from(matkaTransactions)
-        .innerJoin(matkaShifts, eq(matkaTransactions.shiftId, matkaShifts.id))
-        .where(and(...whereConditions))
-        .orderBy(desc(matkaTransactions.addedDate))
-        .limit(200);
-
-      // Resolve copy-reference shift names in one extra query if needed
-      const refShiftIds = [...new Set(
-        txns.map((t) => t.copyReferenceShiftId).filter(Boolean) as string[]
-      )];
-
-      let refShiftMap: Record<string, string> = {};
-      if (refShiftIds.length > 0) {
-        const refRows = await db
-          .select({ id: matkaShifts.id, name: matkaShifts.name })
-          .from(matkaShifts)
-          .where(sql`${matkaShifts.id} = ANY(ARRAY[${sql.join(refShiftIds.map(id => sql`${id}::uuid`), sql`, `)}])`);
-        for (const r of refRows) refShiftMap[r.id] = r.name;
-      }
-
-      const data = txns.map((t) => ({
-        ...t,
-        copyReferenceShiftName: t.copyReferenceShiftId
-          ? refShiftMap[t.copyReferenceShiftId] ?? null
-          : null,
-      }));
+      const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+      const data: any[] = (rowArray[0]?.data as any[] | null) ?? [];
 
       return { success: true, data };
     } catch (error) {

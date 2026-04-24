@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { users, profiles, whitelabels, ledgerLimit, SYSTEM_USER_ID } from "../../db/schema";
-import { eq, and, inArray, ne, gt, gte } from "drizzle-orm";
+import { eq, and, inArray, ne, sql } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
 import { generateHashPassword, comparePassword } from "../../utils/password";
@@ -182,90 +182,31 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     }
   )
   .get("/", async ({ set, db, whitelabel, store }) => {
+    // Scope resolution stays in TS — it reads headers, cookies, and the
+    // whitelabel middleware result. The SQL function applies the actual
+    // visibility rules and enrichment joins in one query.
     const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
-    const isOwnerNoScope = scope.currentUserRole === UserRole.Owner && scope.scopeWhitelabelId == null;
-    let visibleUsers: { id: string; username: string; email: string;[k: string]: unknown }[];
-    if (isOwnerNoScope) {
-      // Owner with no whitelabel scope: sees all users except self
-      // Filter out system accounts (groupId 0-2: capital, pnl, limit accounts)
-      visibleUsers = await db.select().from(users).where(and(ne(users.id, scope.currentUserId), gte(users.groupId, 3)));
-    } else if (scope.scopeWhitelabelId == null) {
+
+    // Early-exit for non-owner callers without a whitelabel scope, same as
+    // the old logic (these users have no business seeing anyone).
+    if (scope.currentUserRole !== UserRole.Owner && scope.scopeWhitelabelId == null) {
       set.status = 200;
       return { success: true, data: [] };
-    } else {
-      const conditions = [
-        eq(users.whitelabelId, scope.scopeWhitelabelId),
-        ne(users.id, scope.currentUserId),
-        gte(users.groupId, 3), // Exclude system accounts (groupId 0-2: capital, pnl, limit)
-      ];
-      // Role-hierarchy filter:
-      // - owner (with scope) / admin: see all users of the whitelabel
-      // - super (groupId 4): sees master, agent, user (groupId > 4)
-      // - master (groupId 5): sees agent, user (groupId > 5)
-      // - agent (groupId 6): sees user only (groupId > 6)
-      const currentGroupId = scope.currentUserRole;
-      if (scope.currentUserRole !== UserRole.Owner && scope.currentUserRole !== UserRole.Admin) {
-        conditions.push(gt(users.groupId, currentGroupId));
-      }
-      visibleUsers = await db.select().from(users).where(and(...conditions));
     }
-    const creatorIds = [...new Set(visibleUsers.map((u) => u.createdBy ?? u.addedBy).filter((id): id is string => id != null && id !== SYSTEM_USER_ID))];
-    const whitelabelIds = [...new Set(visibleUsers.map((u) => u.whitelabelId).filter((id): id is string => id != null))];
-    const creators =
-      creatorIds.length > 0
-        ? await db.select({ id: users.id, username: users.username }).from(users).where(inArray(users.id, creatorIds))
-        : [];
-    const wls =
-      whitelabelIds.length > 0
-        ? await db.select({ id: whitelabels.id, name: whitelabels.name }).from(whitelabels).where(inArray(whitelabels.id, whitelabelIds))
-        : [];
-    const creatorMap = new Map(creators.map((c) => [c.id, c.username]));
-    const wlMap = new Map(wls.map((w) => [w.id, w.name]));
 
-    // Fetch ledger_limit balances for all visible users
-    const userIds = visibleUsers.map((u) => u.id);
-    const ledgerRows =
-      userIds.length > 0
-        ? await db.select().from(ledgerLimit).where(inArray(ledgerLimit.userId, userIds))
-        : [];
-    const ledgerMap = new Map(ledgerRows.map((l) => [l.userId, l]));
+    const rows = await db.execute(sql`
+      SELECT fn_list_owner_users(
+        ${scope.currentUserId}::uuid,
+        ${scope.currentUserRole}::int,
+        ${scope.scopeWhitelabelId ?? null}::uuid
+      ) AS data
+    `);
 
-    const usersWithProfiles = [];
-    for (const user of visibleUsers) {
-      const [profile] = await db
-        .select()
-        .from(profiles)
-        .where(eq(profiles.userId, user.id))
-        .limit(1);
-      const ledger = ledgerMap.get(user.id);
-      usersWithProfiles.push({
-        ...user,
-        membership: profile?.membership ?? MembershipType.Bronze,
-        betStatus: profile?.betStatus ?? true,
-        parentBetStatus: profile?.parentBetStatus ?? true,
-        upline: profile?.upline ?? "0.00",
-        downline: profile?.downline ?? "0.00",
-        currencyId: profile?.currencyId ?? null,
-        lastLoginIp: profile?.lastLoginIp ?? null,
-        lastLoginAt: profile?.lastLoginAt ?? null,
-        firstName: profile?.firstName || null,
-        lastName: profile?.lastName || null,
-        phone: profile?.phone || null,
-        country: profile?.country || null,
-        createdBy: user.createdBy ?? null,
-        addedByUsername: (user.createdBy ?? user.addedBy) != null && (user.createdBy ?? user.addedBy) !== SYSTEM_USER_ID
-          ? (creatorMap.get((user.createdBy ?? user.addedBy) as string) ?? "System")
-          : "System",
-        whitelabelName: user.whitelabelId != null ? (wlMap.get(user.whitelabelId as string) ?? null) : null,
-        balance: ledger?.userBalance ?? "0.00",
-        userLimit: ledger?.userLimit ?? "0.00",
-        limitConsumed: ledger?.limitConsumed ?? "0.00",
-        fixLimit: ledger?.fixLimit ?? "0.00",
-        finalLimit: ledger?.finalLimit ?? "0.00",
-      });
-    }
+    const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+    const data: any[] = (rowArray[0]?.data as any[] | null) ?? [];
+
     set.status = 200;
-    return { success: true, data: usersWithProfiles };
+    return { success: true, data };
   })
 
   .get("/:id/created-users", async ({ params, set, db, whitelabel, store }) => {

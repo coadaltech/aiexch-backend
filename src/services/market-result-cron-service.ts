@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import { db } from "../db";
-import { transactions, marketResults, events, sports, competitions } from "../db/schema";
-import { eq, and, inArray, ne, sql } from "drizzle-orm";
+import { transactions } from "../db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { SportsService } from "./sports";
 import { MarketType } from "../types/enums";
 
@@ -18,102 +18,48 @@ export interface UndeclaredMarket {
 }
 
 /**
- * Fetch undeclared markets from transactions table grouped by marketId.
- * Only returns markets whose result has not been declared in market_results yet.
+ * Fetch undeclared markets from the `transactions` table grouped by marketId,
+ * enriched with sport / competition / event names.
+ *
+ * All of the logic — GROUP BY on transactions, "not yet declared" filter
+ * against market_results, and the three enrichment LEFT JOINs — lives in the
+ * SQL function fn_get_undeclared_markets. This replaces 5 queries + JS maps
+ * with a single round trip.
  */
 export async function getUndeclaredMarkets(
   marketTypes: number[]
 ): Promise<UndeclaredMarket[]> {
   try {
-    const unsettledMarkets = await db
-      .select({
-        marketId: transactions.marketId,
-        matchId: transactions.matchId,
-        eventTypeId: transactions.eventTypeId,
-        competitionId: transactions.competitionId,
-        marketType: transactions.marketType,
-        marketName: transactions.marketName,
-      })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.status, "matched"),
-          inArray(transactions.marketType, marketTypes)
-        )
-      )
-      .groupBy(
-        transactions.marketId,
-        transactions.matchId,
-        transactions.eventTypeId,
-        transactions.competitionId,
-        transactions.marketType,
-        transactions.marketName
-      );
+    // postgres.js doesn't auto-serialize a JS number[] as an int[]; build the
+    // Postgres array literal ourselves. Inputs are compile-time MarketType ints,
+    // so there's no injection risk — but we still narrow to integers to be safe.
+    const arrayLiteral = `{${marketTypes.map((n) => Number(n) | 0).join(",")}}`;
 
-    if (unsettledMarkets.length === 0) return [];
+    const result = await db.execute(sql`
+      SELECT * FROM fn_get_undeclared_markets(${arrayLiteral}::int[])
+    `);
 
-    // Filter out markets that already have a declared/void/rollback result
-    const marketIds = unsettledMarkets.map((m) => m.marketId);
+    const rows: Array<Record<string, any>> = Array.isArray(result)
+      ? (result as any[])
+      : (result as any)?.rows ?? [];
 
-    const alreadyDeclared = await db
-      .select({ marketId: marketResults.marketId })
-      .from(marketResults)
-      .where(
-        and(
-          inArray(marketResults.marketId, marketIds),
-          ne(marketResults.status, "PENDING")
-        )
-      );
-
-    const declaredSet = new Set(alreadyDeclared.map((r) => r.marketId));
-    const filtered = unsettledMarkets.filter(
-      (m) => !declaredSet.has(m.marketId)
-    );
-
-    if (filtered.length === 0) return [];
-
-    // Enrich with names from sports / competitions / events tables
-    return await enrichWithNames(filtered as any);
+    // Map snake_case SQL columns back to the UndeclaredMarket (camelCase) shape
+    // the rest of the cron service expects.
+    return rows.map((r) => ({
+      marketId: String(r.market_id),
+      matchId: Number(r.match_id),
+      eventTypeId: Number(r.event_type_id),
+      competitionId: r.competition_id != null ? Number(r.competition_id) : null,
+      marketType: Number(r.market_type),
+      marketName: r.market_name ?? null,
+      eventTypeName: r.event_type_name ?? "",
+      competitionName: r.competition_name ?? "",
+      eventName: r.event_name ?? "",
+    }));
   } catch (error) {
     console.error("[MarketResultCron] Error fetching undeclared markets:", error);
     return [];
   }
-}
-
-async function enrichWithNames(
-  markets: Omit<UndeclaredMarket, "eventTypeName" | "competitionName" | "eventName">[]
-): Promise<UndeclaredMarket[]> {
-  const eventTypeIds = [...new Set(markets.map((m) => m.eventTypeId))];
-  const competitionIds = [...new Set(markets.map((m) => m.competitionId).filter(Boolean))] as number[];
-  const matchIds = [...new Set(markets.map((m) => m.matchId))];
-
-  const [sportsRows, competitionRows, eventRows] = await Promise.all([
-    db
-      .select({ sportId: sports.sport_id, name: sports.name })
-      .from(sports)
-      .where(inArray(sports.sport_id, eventTypeIds)),
-    competitionIds.length > 0
-      ? db
-          .select({ competitionId: competitions.competition_id, name: competitions.name })
-          .from(competitions)
-          .where(inArray(competitions.competition_id, competitionIds))
-      : Promise.resolve([]),
-    db
-      .select({ eventId: events.eventId, name: events.name })
-      .from(events)
-      .where(inArray(events.eventId, matchIds)),
-  ]);
-
-  const sportMap = new Map(sportsRows.map((r) => [r.sportId, r.name]));
-  const competitionMap = new Map(competitionRows.map((r) => [r.competitionId, r.name]));
-  const eventMap = new Map(eventRows.map((r) => [r.eventId, r.name]));
-
-  return markets.map((m) => ({
-    ...m,
-    eventTypeName: sportMap.get(m.eventTypeId) ?? "",
-    competitionName: m.competitionId ? (competitionMap.get(m.competitionId) ?? "") : "",
-    eventName: eventMap.get(m.matchId) ?? "",
-  }));
 }
 
 /**

@@ -101,6 +101,59 @@ export const LiveDataService = {
     }
   },
 
+  // ── Multimarket subscription ──────────────────────────────────────────────
+  // A multimarket subscriber pins specific markets across multiple events.
+  // We piggyback on the existing per-event poll loop: for each unique eventId
+  // in the list we register a synthetic subscriber (`${clientId}:${eventId}`)
+  // whose send() filters matchOdds down to only the pinned marketIds and
+  // relabels the envelope as `multimarket-update`. The client then merges
+  // updates across events by eventId.
+  subscribeMultimarket(
+    clientId: string,
+    send: SendFn,
+    items: { eventId: string; marketId: string }[],
+    eventTypeId: string,
+  ) {
+    const byEvent = new Map<string, Set<string>>();
+    for (const it of items) {
+      if (!it?.eventId || !it?.marketId) continue;
+      if (!byEvent.has(it.eventId)) byEvent.set(it.eventId, new Set());
+      byEvent.get(it.eventId)!.add(it.marketId);
+    }
+
+    for (const [eventId, allowed] of byEvent) {
+      const wrappedSend: SendFn = (message) => {
+        try {
+          const msg = JSON.parse(message);
+          if (msg.type !== "live-update" || msg.eventId !== eventId) return;
+          const filtered = (msg.matchOdds || []).filter((m: any) =>
+            allowed.has(m.marketId),
+          );
+          send(
+            JSON.stringify({
+              type: "multimarket-update",
+              eventId,
+              matchOdds: filtered,
+              timestamp: msg.timestamp,
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+      };
+      this.subscribe(`${clientId}:${eventId}`, wrappedSend, eventId, eventTypeId);
+    }
+  },
+
+  unsubscribeMultimarket(clientId: string) {
+    const prefix = `${clientId}:`;
+    for (const [eventId, state] of activeEvents) {
+      for (const cid of Array.from(state.subscribers.keys())) {
+        if (cid.startsWith(prefix)) this.unsubscribe(cid, eventId);
+      }
+    }
+  },
+
   async _pollLoop(eventId: string, loopId: number) {
     while (true) {
       const state = activeEvents.get(eventId);
@@ -291,6 +344,33 @@ export const LiveDataService = {
 
     // Fire-and-forget: update Redis live cache for bet validation
     MarketPipelineService.finalize(eventId, allProcessed);
+  },
+
+  // Instant patch path for admin toggles (e.g. ball-running). Mutates the
+  // cached lastMessage for the event so the overlay flips on the user's
+  // match page without waiting for the next full poll tick. Safe to call
+  // fire-and-forget; if the event has no live subscribers (no cached
+  // lastMessage yet) this is a no-op and the next normal poll will pick up
+  // the Redis flag.
+  patchMarketBallRunning(eventId: string, marketId: string, ballRunning: boolean) {
+    const state = activeEvents.get(eventId);
+    if (!state || !state.lastMessage) return;
+    try {
+      const msg = JSON.parse(state.lastMessage);
+      const list: any[] = Array.isArray(msg.matchOdds) ? msg.matchOdds : [];
+      const market = list.find((m: any) => m.marketId === marketId);
+      if (!market) return;
+      market.sportingEvent = ballRunning;
+      msg.timestamp = Date.now();
+      const patched = JSON.stringify(msg);
+      state.lastMessage = patched;
+      this._broadcast(state, patched);
+    } catch (e) {
+      console.warn(
+        `[Live] patchMarketBallRunning failed for ${eventId}/${marketId}:`,
+        (e as Error)?.message
+      );
+    }
   },
 
   _broadcast(state: EventState, message: string) {

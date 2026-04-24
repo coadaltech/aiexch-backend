@@ -1,13 +1,13 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings, sports, competitions, events } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings } from "../db/schema";
 // Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
-import { eq, and, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { addResultToQueue } from "../queues/betting";
 import { app_middleware } from "../middleware/auth";
 import { redis } from "../db/redis";
-import { parseBetType, UserRole, MarketType, parseMarketType, marketTypeToString } from "../types/enums";
+import { parseBetType, UserRole, MarketType, parseMarketType } from "../types/enums";
 
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
   .state({ id: "" as string, role: 0 as number })
@@ -404,80 +404,31 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
-  // Get user's bets
+  // Get user's bets — delegated to the SQL function fn_get_user_sports_bets,
+  // which folds the transactions / transaction_details / sports / competitions
+  // / events joins into a single query. Keeps the old response shape.
   .get("/my-bets", async ({ store, query, set }) => {
     try {
       const status = (query?.status as string) || "all";
       const limit = parseInt((query?.limit as string) || "50");
       const offset = parseInt((query?.offset as string) || "0");
 
-      let whereClause = eq(transactions.userId, store.id);
-      if (status !== "all") {
-        whereClause =
-          and(eq(transactions.userId, store.id), eq(transactions.status, status)) ||
-          eq(transactions.userId, store.id);
-      }
+      const rows = await db.execute(sql`
+        SELECT fn_get_user_sports_bets(
+          ${store.id}::uuid,
+          ${status}::text,
+          ${limit}::int,
+          ${offset}::int
+        ) AS data
+      `);
 
-      const userTransactions = await db
-        .select()
-        .from(transactions)
-        .where(whereClause)
-        .orderBy(desc(transactions.addedDate))
-        .limit(limit)
-        .offset(offset);
-
-      // Fetch details for each transaction
-      const txnIds = userTransactions.map((t) => t.id);
-      const details =
-        txnIds.length > 0
-          ? await db
-            .select()
-            .from(transactionDetails)
-            .where(inArray(transactionDetails.transactionId, txnIds))
-          : [];
-
-      // Group details by transactionId
-      const detailsMap = details.reduce<Record<string, typeof details>>((acc, d) => {
-        const key = d.transactionId;
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(d);
-        return acc;
-      }, {});
-
-      // Fetch sport, competition, and event names
-      const sportIds = [...new Set(userTransactions.map((t) => t.eventTypeId).filter(Boolean))];
-      const competitionIds = [...new Set(userTransactions.map((t) => t.competitionId).filter(Boolean))] as number[];
-      const matchIds = [...new Set(userTransactions.map((t) => t.matchId).filter(Boolean))];
-
-      const [sportsRows, competitionsRows, eventsRows] = await Promise.all([
-        sportIds.length > 0
-          ? db.select({ sport_id: sports.sport_id, name: sports.name }).from(sports).where(inArray(sports.sport_id, sportIds))
-          : [],
-        competitionIds.length > 0
-          ? db.select({ competition_id: competitions.competition_id, name: competitions.name }).from(competitions).where(inArray(competitions.competition_id, competitionIds))
-          : [],
-        matchIds.length > 0
-          ? db.select({ eventId: events.eventId, name: events.name }).from(events).where(inArray(events.eventId, matchIds))
-          : [],
-      ]);
-
-      const sportMap = new Map((sportsRows as { sport_id: number; name: string }[]).map((r) => [r.sport_id, r.name]));
-      const competitionMap = new Map((competitionsRows as { competition_id: number; name: string }[]).map((r) => [r.competition_id, r.name]));
-      const eventMap = new Map((eventsRows as { eventId: number; name: string }[]).map((r) => [r.eventId, r.name]));
-
-      const result = userTransactions.map((t) => ({
-        ...t,
-        marketType: marketTypeToString(t.marketType),
-        details: detailsMap[t.id] || [],
-        sportName: sportMap.get(t.eventTypeId) ?? null,
-        competitionName: t.competitionId ? (competitionMap.get(t.competitionId) ?? null) : null,
-        eventName: eventMap.get(t.matchId) ?? null,
-      }));
+      const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+      const result: any[] = (rowArray[0]?.data as any[] | null) ?? [];
 
       set.status = 200;
       return { success: true, data: result };
     } catch (error) {
-      console.error("Failed to fetch bets:");
+      console.error("Failed to fetch bets:", error);
       set.status = 500;
       return { success: false, error: "Failed to fetch bets" };
     }

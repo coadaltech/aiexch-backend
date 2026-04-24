@@ -1002,10 +1002,14 @@ export const matkaShifts = pgTable("matka_shifts", {
   shiftDate: date("shift_date").notNull(),
   endTime: varchar("end_time", { length: 30 }).notNull(),        // e.g. "14:00"
   shiftOrder: integer("shift_order").default(0).notNull(),
+  // Matka: dara=main (1-100). Jambo: dara=jodi (types 1,2). akhar is shared.
   daraRate: decimal("dara_rate", { precision: 10, scale: 2 }).default("0").notNull(),
   daraCommission: decimal("dara_commission", { precision: 10, scale: 2 }).default("0").notNull(),
   akharRate: decimal("akhar_rate", { precision: 10, scale: 2 }).default("0").notNull(),
   akharCommission: decimal("akhar_commission", { precision: 10, scale: 2 }).default("0").notNull(),
+  // Jambo-only: triple (number_type 0). Unused for matka.
+  tripleRate: decimal("triple_rate", { precision: 10, scale: 2 }).default("0").notNull(),
+  tripleCommission: decimal("triple_commission", { precision: 10, scale: 2 }).default("0").notNull(),
   mainJantriTime: varchar("main_jantri_time", { length: 30 }),
   isActive: boolean("is_active").default(true).notNull(),
   nextDayAllow: boolean("next_day_allow").default(false).notNull(),
@@ -1031,6 +1035,9 @@ export const matkaTransactions = pgTable("matka_transactions", {
   daraCommission: decimal("dara_commission", { precision: 10, scale: 2 }).notNull(),
   akharRate: decimal("akhar_rate", { precision: 10, scale: 2 }).notNull(),
   akharCommission: decimal("akhar_commission", { precision: 10, scale: 2 }).notNull(),
+  // Jambo-only rate snapshot (type 0). Stays "0" for matka transactions.
+  tripleRate: decimal("triple_rate", { precision: 10, scale: 2 }).default("0").notNull(),
+  tripleCommission: decimal("triple_commission", { precision: 10, scale: 2 }).default("0").notNull(),
   totalAmount: decimal("total_amount", { precision: 15, scale: 2 }).default("0").notNull(),
   totalCommission: decimal("total_commission", { precision: 15, scale: 2 }).default("0").notNull(),
   finalAmount: decimal("final_amount", { precision: 15, scale: 2 }).default("0").notNull(),
@@ -1243,16 +1250,28 @@ export const declareResult = pgTable("declare_result", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
-// ── User Favorite Matches ────────────────────────────────────────────────────
-// Per-user saved matches. Displayed in the user-facing sidebar's
-// "Favorite matches" dropdown. event_id references the `event_id` bigint on
-// the events table (same identifier used in match URLs).
-export const userFavoriteMatches = pgTable("user_favorite_matches", {
+// ── User Multimarkets ────────────────────────────────────────────────────────
+// Per-user pinned markets. A user can pin individual markets from multiple
+// events; the /multimarket page surfaces just those markets with live odds.
+// Market identity (market_id, name, type) is cached here because the market
+// catalog is not persisted — it lives in the external sports API.
+// Event / competition / sport names are cached too so the page still renders
+// if the parent rows are later removed.
+export const userMultimarkets = pgTable("user_multimarkets", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
+  sportId: bigint("sport_id", { mode: "number" }).notNull(),
+  sportName: varchar("sport_name", { length: 100 }).notNull(),
+  competitionId: bigint("competition_id", { mode: "number" }).notNull(),
+  competitionName: varchar("competition_name", { length: 200 }).notNull(),
   eventId: bigint("event_id", { mode: "number" }).notNull(),
+  eventName: varchar("event_name", { length: 255 }).notNull(),
+  openDate: timestamp("open_date"),
+  marketId: varchar("market_id", { length: 50 }).notNull(),
+  marketName: varchar("market_name", { length: 200 }).notNull(),
+  marketType: varchar("market_type", { length: 50 }).notNull(),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
@@ -1260,7 +1279,7 @@ export const userFavoriteMatches = pgTable("user_favorite_matches", {
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 }, (table) => [
-  unique("uq_user_favorite_match").on(table.userId, table.eventId),
+  unique("uq_user_multimarket").on(table.userId, table.marketId),
 ]);
 
 // ── Indexes ──────────────────────────────────────────────────────────────────

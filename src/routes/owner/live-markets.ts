@@ -186,90 +186,20 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
   })
 
   // GET /owner/live-markets/summary
-  // Returns per-market P&L for the logged-in user based on their commission share.
-  // Uses get_hissa_of_group (non-fancy) and get_hissa_of_group_fancy.
-  // P&L is worst-case (min runner scenario) for odds markets; worst-case run for fancy.
+  // Returns one row per (market, runner) with the logged-in owner's P&L share
+  // plus the event / competition / runner meta the UI groups on. All logic
+  // lives in the SQL function fn_get_live_markets_summary, which wraps the
+  // existing helpers get_hissa_of_group + get_hissa_of_group_fancy.
   .get("/summary", async ({ set, store }) => {
     try {
       const userId = (store as { id: string }).id;
       const userRole = (store as { role: number }).role;
 
       const result = await db.execute(sql`
-        WITH
-        -- All non-fancy runner rows (per runner, no aggregation)
-        non_fancy_pnl AS (
-          SELECT h.market_id, h.runner_id, h.runner_profit AS pnl
-          FROM public.get_hissa_of_group(${userId}::uuid, NULL::numeric, ${userRole}::int) h
-        ),
-        -- Fancy markets
-        fancy_pnl AS (
-          SELECT h.market_id, NULL::bigint AS runner_id, h.runner_profit AS pnl
-          FROM public.get_hissa_of_group_fancy(${userId}::uuid, NULL::numeric, ${userRole}::int) h
-        ),
-        all_pnl AS (
-          SELECT market_id, runner_id, pnl FROM non_fancy_pnl
-          UNION ALL
-          SELECT market_id, runner_id, pnl FROM fancy_pnl
-        ),
-        market_meta AS (
-          SELECT DISTINCT ON (t.market_id)
-            t.market_id,
-            t.event_type_id,
-            t.match_id,
-            t.market_name,
-            t.market_type,
-            t.competition_id,
-            e.name  AS event_name,
-            c.name  AS competition_name
-          FROM transactions t
-          LEFT JOIN events       e ON e.event_id        = t.match_id
-          LEFT JOIN competitions c ON c.competition_id  = t.competition_id
-          WHERE t.status = 'matched'
-            AND COALESCE(t.record_status, 0) = 0
-          ORDER BY t.market_id
-        ),
-        match_teams AS (
-          SELECT
-            match_id,
-            string_agg(DISTINCT selection_name, ' v ') AS team_names
-          FROM transactions
-          WHERE market_type = 0
-            AND selection_name IS NOT NULL
-            AND selection_name <> ''
-            AND COALESCE(record_status, 0) = 0
-          GROUP BY match_id
-        ),
-        -- Runner names from transaction_details (joined to transactions for market_id)
-        runner_names AS (
-          SELECT DISTINCT ON (t.market_id, td.runner_id)
-            t.market_id, td.runner_id, td.runner_name
-          FROM transaction_details td
-          JOIN transactions t ON t.id = td.transaction_id
-          WHERE t.status = 'matched'
-            AND COALESCE(t.record_status, 0) = 0
-            AND COALESCE(td.record_status, 0) = 0
-            AND td.runner_name IS NOT NULL
-            AND td.runner_name <> ''
-          ORDER BY t.market_id, td.runner_id
+        SELECT * FROM fn_get_live_markets_summary(
+          ${userId}::uuid,
+          ${userRole}::int
         )
-        SELECT
-          p.market_id,
-          p.runner_id,
-          p.pnl,
-          r.runner_name,
-          m.event_type_id,
-          m.match_id,
-          m.market_name,
-          m.market_type,
-          m.competition_id,
-          COALESCE(m.event_name, mt.team_names) AS event_name,
-          m.competition_name
-        FROM all_pnl p
-        LEFT JOIN market_meta  m  ON m.market_id  = p.market_id
-        LEFT JOIN runner_names r  ON r.market_id  = p.market_id
-                                 AND r.runner_id  = p.runner_id
-        LEFT JOIN match_teams  mt ON mt.match_id  = m.match_id
-        ORDER BY m.match_id NULLS LAST, p.market_id, p.runner_id NULLS LAST
       `);
 
       const rows = Array.isArray(result) ? result : (result as any)?.rows ?? [];

@@ -18,7 +18,7 @@ export const dynamicOrigins = new Set<string>([
   "https://aiexch-two.vercel.app",
   "https://aiexch.com",
   "https://www.aiexch.com",
-  "https://webroom.ai",
+  "https://www.webroom.ai",
 ]);
 
 /**

@@ -382,20 +382,29 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
           }
         }
 
-        // Rate logic: numberType 0 (triple) → daraRate, others → akharRate.
-        // Commission follows the same split.
+        // Jambo rate routing by numberType:
+        //   0           → tripleRate  (default 1000)
+        //   1 | 2       → daraRate    (jodi, default 100)
+        //   3 | 4 | 5   → akharRate   (default 10)
+        // Commission columns mirror the same split.
+        const tripleRate = Number(shift.tripleRate);
+        const tripleCommission = Number(shift.tripleCommission);
         const daraRate = Number(shift.daraRate);
         const daraCommission = Number(shift.daraCommission);
         const akharRate = Number(shift.akharRate);
         const akharCommission = Number(shift.akharCommission);
 
+        const resolveRate = (numberType: number) => {
+          if (numberType === 0) return { rate: tripleRate, commPercent: tripleCommission };
+          if (numberType === 1 || numberType === 2) return { rate: daraRate, commPercent: daraCommission };
+          return { rate: akharRate, commPercent: akharCommission };
+        };
+
         let totalAmount = 0;
         let totalCommission = 0;
 
         const detailRows = bets.map((bet, idx) => {
-          const isTriple = bet.numberType === 0;
-          const rate = isTriple ? daraRate : akharRate;
-          const commPercent = isTriple ? daraCommission : akharCommission;
+          const { rate, commPercent } = resolveRate(bet.numberType);
           const commission = (bet.amount * commPercent) / 100;
           const finalAmount = bet.amount - commission;
 
@@ -435,6 +444,8 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
             userId: store.id,
             shiftId,
             transactionDate: shift.shiftDate,
+            tripleRate: String(tripleRate),
+            tripleCommission: String(tripleCommission),
             daraRate: String(daraRate),
             daraCommission: String(daraCommission),
             akharRate: String(akharRate),
