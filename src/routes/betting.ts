@@ -8,6 +8,137 @@ import { addResultToQueue } from "../queues/betting";
 import { app_middleware } from "../middleware/auth";
 import { redis } from "../db/redis";
 import { parseBetType, UserRole, MarketType, parseMarketType } from "../types/enums";
+import { SportsService } from "../services/sports";
+
+// Bound the upstream odds re-fetch so a slow provider can't stall bet placement.
+// Typical books/bookmaker calls return in 150-400ms; getSessions can be heavier.
+const FRESH_ODDS_TIMEOUT_MS = 1500;
+
+// Pull the freshest price for the exact slot the user clicked
+// (runner × back/lay × priceIndex). Returns:
+//   { suspended: true,  reason }  → reject the bet
+//   { suspended: false, rawPrice } → override odds with this price
+//   null                            → provider failed/timed out, keep request odds
+async function fetchFreshSelectionPrice(args: {
+  matchId: string | number;
+  marketId: string;
+  eventTypeId: string | number;
+  selectionId: number;
+  isFancy: boolean;
+  isBookmaker: boolean;
+  isLay: boolean;
+  priceIndex: number;
+  timeoutMs: number;
+}): Promise<
+  | { suspended: true; reason: string }
+  | { suspended: false; rawPrice: number }
+  | null
+> {
+  const timeoutPromise = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), args.timeoutMs),
+  );
+
+  const fetchPromise = (async () => {
+    try {
+      if (args.isFancy) {
+        const sessions = await SportsService.getSessions({
+          eventTypeId: String(args.eventTypeId),
+          matchId: String(args.matchId),
+        });
+        const item = (sessions as any[])?.find(
+          (s) => String(s.SelectionId) === String(args.selectionId),
+        );
+        if (!item) return null;
+
+        const gs = (item.GameStatus || "").toUpperCase();
+        const ballRunning = gs === "BALL RUNNING" || item.ballsess === 1 || item.ballsess === "1";
+        if (gs === "SUSPENDED") return { suspended: true as const, reason: "Bet rejected: market is suspended" };
+        if (ballRunning) return { suspended: true as const, reason: "Bet rejected: ball is running" };
+        if (gs === "CLOSED" || gs === "INACTIVE") return { suspended: true as const, reason: "Bet rejected: market is closed" };
+
+        const raw = args.isLay ? item.LayPrice1 : item.BackPrice1;
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num <= 0) return null;
+        return { suspended: false as const, rawPrice: num };
+      }
+
+      if (args.isBookmaker) {
+        const list = await SportsService.getBookmakers({
+          eventTypeId: String(args.eventTypeId),
+          marketId: String(args.marketId),
+        });
+        const market = (list as any[])?.[0];
+        if (!market) return null;
+
+        const mStatus = (market.status || "").toUpperCase();
+        if (mStatus === "SUSPENDED") return { suspended: true as const, reason: "Bet rejected: market is suspended" };
+        if (mStatus === "CLOSED" || mStatus === "INACTIVE") return { suspended: true as const, reason: "Bet rejected: market is closed" };
+
+        const runner = market.runners?.find(
+          (r: any) => String(r.selectionId) === String(args.selectionId),
+        );
+        if (!runner) return null;
+        const rStatus = (runner.status || "").toUpperCase();
+        if (rStatus === "SUSPENDED") return { suspended: true as const, reason: "Bet rejected: runner is suspended" };
+
+        const side = args.isLay ? runner.lay : runner.back;
+        const slot = Array.isArray(side) ? side[args.priceIndex] : null;
+        const raw = slot?.price ?? (Array.isArray(slot) ? slot[0] : null);
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num <= 0) return null;
+        return { suspended: false as const, rawPrice: num };
+      }
+
+      // Default: ODDS markets — /sports/books/{marketId}
+      const oddsObj = await SportsService.getOdds({ marketId: String(args.marketId) });
+      const market = (oddsObj as any)?.[String(args.marketId)];
+      if (!market) return null;
+
+      const mStatus = (market.status || "").toUpperCase();
+      if (mStatus === "SUSPENDED") return { suspended: true as const, reason: "Bet rejected: market is suspended" };
+      if (mStatus === "CLOSED" || mStatus === "INACTIVE") return { suspended: true as const, reason: "Bet rejected: market is closed" };
+      if (market.sportingEvent) return { suspended: true as const, reason: "Bet rejected: ball is running" };
+
+      const runner = market.runners?.find(
+        (r: any) => String(r.selectionId) === String(args.selectionId),
+      );
+      if (!runner) return null;
+      const rStatus = (runner.status || "").toUpperCase();
+      if (rStatus === "SUSPENDED") return { suspended: true as const, reason: "Bet rejected: runner is suspended" };
+      if (rStatus === "REMOVED") return { suspended: true as const, reason: "Bet rejected: runner is removed" };
+
+      const side = args.isLay ? runner.lay : runner.back;
+      const slot = Array.isArray(side) ? side[args.priceIndex] : null;
+      // ODDS shape supports both [price,size] tuples and {price,size} objects
+      const raw = Array.isArray(slot) ? slot[0] : slot?.price;
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num <= 0) return null;
+      return { suspended: false as const, rawPrice: num };
+    } catch {
+      return null;
+    }
+  })();
+
+  return await Promise.race([fetchPromise, timeoutPromise]);
+}
+
+// Mirror the client's toDecimalOdds / toDecimalfancyOdds so the stored odds
+// match the format the user saw on screen.
+function rawPriceToDecimalOdds(
+  raw: number,
+  provider: string | undefined,
+  marketType: string | undefined,
+  isFancy: boolean,
+): number {
+  const isBetfair = provider?.toUpperCase() === "BETFAIR";
+  if (isFancy) {
+    if (isBetfair && raw < 10) return raw;
+    return raw / 100;
+  }
+  if (isBetfair) return raw;
+  if (marketType?.toUpperCase() === "WINNING_ODDS") return raw;
+  return raw / 100;
+}
 
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
   .state({ id: "" as string, role: 0 as number })
@@ -42,6 +173,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         type,
         runners,
         provider,
+        priceIndex,
       } = body as {
         matchId: string | number;
         marketId: string | number;
@@ -58,6 +190,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         type: "back" | "lay";
         runners: { id: string | number; name: string; price: number }[];
         provider?: string;
+        priceIndex?: number;
       };
 
       // Validate input
@@ -211,9 +344,46 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       // This allows e.g. a lay bet with stake 5000 if the worst-case loss is only 800 and
       // the user's limit covers that.
 
+      // ── STEP 1.5: Re-fetch authoritative odds from upstream provider ──
+      // The client's odds may be stale (especially live fancy where the line
+      // moves every second). Pull the fresh price for the exact runner+side
+      // +slot the user clicked, and use it as the bet's odds.
+      const numericSelectionId = Number(selectionId);
+      const isLayBet = type === "lay";
+      const isBookmaker = marketTypeInt === MarketType.Bookmaker;
+      const slotIndex = Number.isFinite(Number(priceIndex)) ? Number(priceIndex) : 0;
+
+      const fresh = await fetchFreshSelectionPrice({
+        matchId,
+        marketId: String(marketId),
+        eventTypeId: eventTypeId ?? 4,
+        selectionId: numericSelectionId,
+        isFancy: isFancyBet,
+        isBookmaker,
+        isLay: isLayBet,
+        priceIndex: slotIndex,
+        timeoutMs: FRESH_ODDS_TIMEOUT_MS,
+      });
+
+      let finalOdds = odds;
+      let finalRun: number | null | undefined = run;
+
+      if (fresh && fresh.suspended) {
+        set.status = 400;
+        return { success: false, error: fresh.reason };
+      }
+
+      if (fresh && !fresh.suspended) {
+        finalOdds = rawPriceToDecimalOdds(fresh.rawPrice, provider, marketType, isFancyBet);
+        if (isFancyBet) {
+          // Fancy: client-sent `run` is the raw line value (e.g. 61) and `odds`
+          // is line/100 — keep both in sync with the fresh upstream price.
+          finalRun = fresh.rawPrice;
+        }
+      }
+
       // ── STEP 2: Insert bet + details in a single transaction ──
       const today = new Date();
-      const numericSelectionId = Number(selectionId);
 
       const [txn] = await db.transaction(async (tx) => {
         // Insert into transactions
@@ -232,7 +402,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             selectionName: selectionName || null,
             betType: parseBetType(type),
             stake: stake.toString(),
-            odds: odds.toString(),
+            odds: finalOdds.toString(),
             status: "matched",
             ipAddress,
             matchedAt: today,
@@ -252,10 +422,11 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         const detailRows = runners.map((runner) => {
           const runnerId = Number(runner.id);
           const isSelected = runnerId === numericSelectionId;
-          // For the selected runner, use the authoritative `odds` from the transaction
-          // to guarantee transaction_details.price matches transactions.odds exactly.
-          // For other runners, use their own price from the runners array.
-          const runnerOdds = isSelected ? odds : (runner.price ?? 0);
+          // For the selected runner, use the authoritative `finalOdds` (which
+          // has already been replaced with the upstream-fresh price when
+          // available) to guarantee transaction_details.price matches
+          // transactions.odds exactly. Other runners keep their request prices.
+          const runnerOdds = isSelected ? finalOdds : (runner.price ?? 0);
           // Betfair fancy (LINE) markets: odds are already the raw run value (e.g. 1), never subtract 1.
           // Betfair non-fancy and WINNING_ODDS: odds are decimal (e.g. 1.98), subtract 1 for profit ratio.
           const storedPrice = (isBetfair && isFancy) ? runnerOdds : (isBetfair || isWinningOdds) ? runnerOdds - 1 : runnerOdds;
@@ -278,7 +449,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             betType: parseBetType(type),
             price: storedPrice.toString(),
             basePrice: runnerOdds.toString(),
-            run: isSelected && run != null ? Math.round(run) : 0,
+            run: isSelected && finalRun != null ? Math.round(finalRun) : 0,
             stake: stake.toString(),
             potentialReturn: runnerPotentialReturn.toFixed(2),
             addedBy: store.id,
