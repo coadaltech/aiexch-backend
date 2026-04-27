@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
 import { decodeToken, generateTokens } from "@services/token";
 import { getCurrentIP } from "@utils/user-ip";
+import { lookupGeo } from "@utils/geo";
 import { parseUserAgent } from "@utils/parse-ua";
 import { comparePassword, generateHashPassword } from "@utils/password";
 import { whitelabel_middleware } from "@middleware/whitelabel";
@@ -131,6 +132,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         const { username, password } = body;
 
         const clientIP = getCurrentIP(headers, request);
+        const geo = lookupGeo(clientIP);
         const ua = parseUserAgent(request.headers.get("user-agent"));
 
         const [user] = await db
@@ -257,6 +259,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             downline: profile?.downline ?? "0.00",
             groupId: user.groupId,
             currencyId: profile?.currencyId ?? null,
+            country: geo.country ?? profile?.country ?? null,
+            timezone: geo.timezone ?? null,
           },
         };
       } catch (e) {

@@ -544,6 +544,38 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
+  // Get the user's per-row exposure usage (event/market/shift + amount).
+  // Backed by get_limituse_of_user_detail() which returns one row per market
+  // (or matka shift) with the worst-case loss already negated.
+  .get("/exposure-usage", async ({ store, set }) => {
+    try {
+      const rows = await db.execute(
+        sql`
+          SELECT
+            lu.market_id         AS "marketId",
+            lu.shift_id          AS "shiftId",
+            lu."intflag"         AS "intFlag",
+            lu.limit_use         AS "limitUse",
+            lu."sportname"       AS "sportName",
+            lu.market_name       AS "marketName",
+            lu."competitionname" AS "competitionName",
+            lu."eventname"       AS "eventName",
+            lu."shiftname"       AS "shiftName"
+          FROM get_limituse_of_user_detail(${store.id}::uuid) lu
+          WHERE COALESCE(lu.limit_use, 0) <> 0
+          ORDER BY lu.limit_use DESC
+        `
+      );
+      const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
+      set.status = 200;
+      return { success: true, data };
+    } catch (error) {
+      console.error("Failed to fetch exposure usage:", error);
+      set.status = 500;
+      return { success: false, error: "Failed to fetch exposure usage" };
+    }
+  })
+
   // Get detailed run-by-run exposure chart for a single fancy market
   .get("/fancy-exposure-chart", async ({ store, query, set }) => {
     try {

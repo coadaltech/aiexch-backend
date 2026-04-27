@@ -15,6 +15,8 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
 import { increment } from "../utils/numbers";
 import { uploadFile } from "../services/s3";
+import { getCurrentIP } from "../utils/user-ip";
+import { lookupGeo } from "../utils/geo";
 import { comparePassword, generateHashPassword } from "../utils/password";
 import { whitelabel_middleware } from "../middleware/whitelabel";
 import { DbType } from "../types";
@@ -57,7 +59,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }
   })
 
-  .get("/me", async ({ store, set, db }) => {
+  .get("/me", async ({ store, set, db, headers, request }) => {
     const [user] = await db
       .select()
       .from(users)
@@ -76,6 +78,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       .where(eq(profiles.userId, store.id))
       .limit(1);
 
+    const geo = lookupGeo(getCurrentIP(headers, request));
+
     set.status = 200;
     return {
       loggedIn: true,
@@ -89,6 +93,8 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         downline: profile?.downline ?? "0.00",
         groupId: user.groupId,
         currencyId: profile?.currencyId ?? null,
+        country: geo.country ?? profile?.country ?? null,
+        timezone: geo.timezone ?? null,
       },
     };
   })
