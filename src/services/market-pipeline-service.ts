@@ -171,19 +171,22 @@ export const MarketPipelineService = {
   },
 
   // ── Helper: Get event admin overrides from Redis ──
+  // betDelay is null when no admin override is set, so consumers can fall
+  // back to the API-supplied value via `??`. Returning 0 here would
+  // short-circuit that chain (`0 ?? x` is `0`) and mask the real value.
   async getEventOverrides(
     eventId: string
   ): Promise<{
     isActive: boolean;
     isVisible: boolean;
     suspended: boolean;
-    betDelay: number;
+    betDelay: number | null;
   }> {
     const defaults = {
       isActive: true,
       isVisible: true,
       suspended: false,
-      betDelay: 0,
+      betDelay: null,
     };
     const data = await safeRedisOp(
       () => redis.hGetAll(`admin:event:${eventId}`),
@@ -194,7 +197,7 @@ export const MarketPipelineService = {
       isActive: data.isActive !== "false",
       isVisible: data.isVisible !== "false",
       suspended: data.suspended === "true",
-      betDelay: data.betDelay ? parseInt(data.betDelay) : 0,
+      betDelay: data.betDelay != null && data.betDelay !== "" ? parseInt(data.betDelay) : null,
     };
   },
 

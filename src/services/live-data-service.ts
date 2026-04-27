@@ -26,7 +26,7 @@ interface MarketStructure {
     isActive: boolean;
     isVisible: boolean;
     suspended: boolean;
-    betDelay: number;
+    betDelay: number | null;
   };
   openMarkets: any[];
   openMarketIds: string[];
