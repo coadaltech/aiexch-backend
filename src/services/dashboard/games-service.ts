@@ -118,6 +118,78 @@ export const updateCompetitionsStatus = async (
 };
 
 /**
+ * Paged version of getCompetitionsWithOverrides backed by the SQL function
+ * fn_get_competitions_paged. Returns competitions with their event counts
+ * already attached, sorted by event_count DESC then name ASC.
+ *
+ * Search (by competition name) is applied server-side across all matching
+ * competitions for the sport, then paginated.
+ */
+export const getCompetitionsPaged = async (
+  sportId: string,
+  role: number,
+  whitelabelId: string | null,
+  search: string,
+  limit: number,
+  offset: number,
+): Promise<{ items: any[]; totalCount: number }> => {
+  const sportIdNum = Number(sportId);
+  const isOwner = role === UserRole.Owner;
+  const trimmedSearch = (search ?? "").trim();
+
+  const rows = await db.execute(sql`
+    SELECT fn_get_competitions_paged(
+      ${sportIdNum}::bigint,
+      ${whitelabelId ?? null}::uuid,
+      ${isOwner}::boolean,
+      ${trimmedSearch || null}::text,
+      ${limit}::int,
+      ${offset}::int
+    ) AS data
+  `);
+
+  const rowArray: any[] = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+  const payload = rowArray[0]?.data ?? { totalCount: 0, items: [] };
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const totalCount = Number(payload.totalCount ?? 0);
+  return { items, totalCount };
+};
+
+/**
+ * Paged version of getEventsWithOverrides backed by the SQL function
+ * fn_get_events_paged. Sorted by active-first (per role), then openDate.
+ */
+export const getEventsPaged = async (
+  competitionId: string,
+  role: number,
+  whitelabelId: string | null,
+  search: string,
+  limit: number,
+  offset: number,
+): Promise<{ items: any[]; totalCount: number }> => {
+  const compIdNum = Number(competitionId);
+  const isOwner = role === UserRole.Owner;
+  const trimmedSearch = (search ?? "").trim();
+
+  const rows = await db.execute(sql`
+    SELECT fn_get_events_paged(
+      ${compIdNum}::bigint,
+      ${whitelabelId ?? null}::uuid,
+      ${isOwner}::boolean,
+      ${trimmedSearch || null}::text,
+      ${limit}::int,
+      ${offset}::int
+    ) AS data
+  `);
+
+  const rowArray: any[] = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+  const payload = rowArray[0]?.data ?? { totalCount: 0, items: [] };
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const totalCount = Number(payload.totalCount ?? 0);
+  return { items, totalCount };
+};
+
+/**
  * Fetch competitions with per-whitelabel override status.
  * - Owner: returns ALL competitions; if whitelabelId provided, includes override status.
  * - Non-owner: returns only globally active competitions, excluding those overridden inactive for the whitelabel.

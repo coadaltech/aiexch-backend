@@ -11,9 +11,11 @@ import { UserRole } from "../../types/enums";
 import { DbType } from "../../types";
 import {
   getCompetitionsWithOverrides,
+  getCompetitionsPaged,
   updateCompetitionsStatus,
   upsertCompetitionWhitelabelOverrides,
   getEventsWithOverrides,
+  getEventsPaged,
   updateEventsStatus,
   upsertEventWhitelabelOverrides,
 } from "../../services/dashboard/games-service";
@@ -313,7 +315,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
 
   // ── Competition endpoints (role + whitelabel aware) ─────────────────────
 
-  .get("/competitions/:sportId", async ({ params, set, store, whitelabel }) => {
+  .get("/competitions/:sportId", async ({ params, query, set, store, whitelabel }) => {
     try {
       const scope = await resolveOwnerScope(
         db as DbType,
@@ -321,10 +323,19 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         store as { id?: string; role?: string },
       );
 
-      const data = await getCompetitionsWithOverrides(
+      const limitRaw = Number((query as any)?.limit);
+      const offsetRaw = Number((query as any)?.offset);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+      const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
+      const search = typeof (query as any)?.search === "string" ? (query as any).search : "";
+
+      const { items, totalCount } = await getCompetitionsPaged(
         params.sportId,
         scope.currentUserRole,
         scope.scopeWhitelabelId,
+        search,
+        limit,
+        offset,
       );
 
       // Get sport name
@@ -336,10 +347,13 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
 
       return {
         success: true,
-        data,
+        data: items,
         sportName: sport?.name ?? "",
         role: scope.currentUserRole,
-        count: data.length,
+        count: items.length,
+        totalCount,
+        limit,
+        offset,
       };
     } catch (error) {
       set.status = 500;
@@ -347,6 +361,13 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     }
   }, {
     params: t.Object({ sportId: t.String() }),
+    query: t.Optional(
+      t.Object({
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+      }),
+    ),
   })
 
   .post("/competitions/:sportId/update-status", async ({ params, body, set, store, whitelabel }) => {
@@ -399,7 +420,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
 
   // ── Event endpoints (per-competition, role + whitelabel aware) ─────────────
 
-  .get("/events/:competitionId", async ({ params, set, store, whitelabel }) => {
+  .get("/events/:competitionId", async ({ params, query, set, store, whitelabel }) => {
     try {
       const scope = await resolveOwnerScope(
         db as DbType,
@@ -407,10 +428,19 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         store as { id?: string; role?: string },
       );
 
-      const data = await getEventsWithOverrides(
+      const limitRaw = Number((query as any)?.limit);
+      const offsetRaw = Number((query as any)?.offset);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+      const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
+      const search = typeof (query as any)?.search === "string" ? (query as any).search : "";
+
+      const { items, totalCount } = await getEventsPaged(
         params.competitionId,
         scope.currentUserRole,
         scope.scopeWhitelabelId,
+        search,
+        limit,
+        offset,
       );
 
       // Get competition name
@@ -422,11 +452,14 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
 
       return {
         success: true,
-        data,
+        data: items,
         competitionName: comp?.name ?? "",
         sportId: comp?.sport_id ?? 0,
         role: scope.currentUserRole,
-        count: data.length,
+        count: items.length,
+        totalCount,
+        limit,
+        offset,
       };
     } catch (error) {
       set.status = 500;
@@ -434,6 +467,13 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     }
   }, {
     params: t.Object({ competitionId: t.String() }),
+    query: t.Optional(
+      t.Object({
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+      }),
+    ),
   })
 
   .post("/events/:competitionId/update-status", async ({ params, body, set, store, whitelabel }) => {

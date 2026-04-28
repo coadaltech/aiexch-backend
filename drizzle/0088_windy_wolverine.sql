@@ -1,0 +1,23 @@
+CREATE TABLE "declared_events" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"event_id" bigint NOT NULL,
+	"competition_id" bigint NOT NULL,
+	"sport_id" bigint NOT NULL,
+	"name" varchar(255) NOT NULL,
+	"open_date" timestamp,
+	"whitelabel_id" uuid,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"is_visible" boolean DEFAULT true NOT NULL,
+	"is_recommended" boolean DEFAULT false NOT NULL,
+	"suspended" boolean DEFAULT false NOT NULL,
+	"bet_delay" integer DEFAULT 0 NOT NULL,
+	"max_market_profit" numeric(15, 2),
+	"default_market_id" varchar(50),
+	"metadata" jsonb DEFAULT '{}'::jsonb,
+	"added_by" uuid DEFAULT '00000000-0000-0000-0000-000000000000' NOT NULL,
+	"added_date" timestamp DEFAULT now() NOT NULL,
+	"update_by" uuid DEFAULT '00000000-0000-0000-0000-000000000000' NOT NULL,
+	"update_date" timestamp DEFAULT now() NOT NULL,
+	"record_status" integer DEFAULT 0 NOT NULL,
+	CONSTRAINT "declared_events_event_id_unique" UNIQUE("event_id")
+);

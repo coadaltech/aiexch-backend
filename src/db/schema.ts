@@ -779,6 +779,34 @@ export const events = pgTable("events", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
+// ── Declared Events ─────────────────────────────────────────────────────────
+// Archive table mirroring `events`. Once an event is declared/settled and is
+// no longer relevant to the live `events` table, the row is moved here. Same
+// shape as `events` so callers can swap reads with minimal changes.
+export const declaredEvents = pgTable("declared_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventId: bigint("event_id", { mode: "number" }).notNull().unique(),
+  competitionId: bigint("competition_id", { mode: "number" }).notNull(),
+  sportId: bigint("sport_id", { mode: "number" }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  openDate: timestamp("open_date"),
+  whitelabelId: uuid("whitelabel_id"),
+  isActive: boolean("is_active").default(true).notNull(),
+  isVisible: boolean("is_visible").default(true).notNull(),
+  isRecommended: boolean("is_recommended").default(false).notNull(),
+  suspended: boolean("suspended").default(false).notNull(),
+  betDelay: integer("bet_delay").default(0).notNull(),
+  maxMarketProfit: decimal("max_market_profit", { precision: 15, scale: 2 }),
+  defaultMarketId: varchar("default_market_id", { length: 50 }),
+  metadata: jsonb("metadata").default({}),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
 // ── Event Whitelabel Overrides ──────────────────────────────────────────────
 // Per-whitelabel visibility override for events (matches).
 export const eventWhitelabelOverrides = pgTable("event_whitelabel_overrides", {
