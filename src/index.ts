@@ -19,6 +19,7 @@ import { OddsHistoryWorker } from "@services/odds-history-worker";
 import { seriesRoutes } from "./routes/series-route";
 import { matkaRoutes } from "./routes/matka";
 import { jamboRoutes } from "./routes/jambo";
+import { qtechRoutes } from "./routes/qtech";
 import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
@@ -94,6 +95,7 @@ const app = new Elysia()
   .use(websocketRoutes)
   .use(matkaRoutes)
   .use(jamboRoutes)
+  .use(qtechRoutes)
   .listen(port);
 
 
