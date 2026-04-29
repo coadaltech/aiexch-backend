@@ -747,6 +747,60 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
+  // Drill-down for the Exposure Usage modal — sports market row.
+  // Returns the user's active (status='matched') bets on that market with
+  // runner detail and the placement log. Backed by fn_get_user_market_active_bets.
+  .get("/exposure-usage/market", async ({ store, query, set }) => {
+    try {
+      const marketId = query?.marketId ? String(query.marketId) : "";
+      if (!marketId) {
+        set.status = 400;
+        return { success: false, error: "marketId is required" };
+      }
+      const rows = await db.execute(sql`
+        SELECT fn_get_user_market_active_bets(
+          ${store.id}::uuid,
+          ${marketId}::numeric
+        ) AS data
+      `);
+      const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+      const data = rowArray[0]?.data ?? null;
+      set.status = 200;
+      return { success: true, data };
+    } catch (error) {
+      console.error("Failed to fetch exposure market detail:", error);
+      set.status = 500;
+      return { success: false, error: "Failed to fetch exposure market detail" };
+    }
+  })
+
+  // Drill-down for the Exposure Usage modal — matka/jambo shift row.
+  // Returns the user's consolidated jantri (per-number totals) for that shift.
+  // Backed by fn_get_user_shift_consolidated_jantri.
+  .get("/exposure-usage/shift", async ({ store, query, set }) => {
+    try {
+      const shiftId = query?.shiftId ? String(query.shiftId) : "";
+      if (!shiftId) {
+        set.status = 400;
+        return { success: false, error: "shiftId is required" };
+      }
+      const rows = await db.execute(sql`
+        SELECT fn_get_user_shift_consolidated_jantri(
+          ${store.id}::uuid,
+          ${shiftId}::uuid
+        ) AS data
+      `);
+      const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+      const data = rowArray[0]?.data ?? null;
+      set.status = 200;
+      return { success: true, data };
+    } catch (error) {
+      console.error("Failed to fetch exposure shift detail:", error);
+      set.status = 500;
+      return { success: false, error: "Failed to fetch exposure shift detail" };
+    }
+  })
+
   // Get detailed run-by-run exposure chart for a single fancy market
   .get("/fancy-exposure-chart", async ({ store, query, set }) => {
     try {

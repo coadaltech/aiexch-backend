@@ -1,21 +1,24 @@
+-- PROCEDURE: public.declare_process(numeric, integer, bigint, bigint, bigint, character varying, character varying, character varying, character varying, bigint, integer, character varying, jsonb, character varying, jsonb)
+
+-- DROP PROCEDURE IF EXISTS public.declare_process(numeric, integer, bigint, bigint, bigint, character varying, character varying, character varying, character varying, bigint, integer, character varying, jsonb, character varying, jsonb);
+
 CREATE OR REPLACE PROCEDURE public.declare_process(
-    varmarket_id NUMERIC,
-    varmarket_type INT,
-    varEventTypeId bigint,
-	varCompetitionId bigint,
-	varEventId bigint,
-	varEventTypeName varchar(200), 
-	varCompetitionName varchar(200), 
-	varEventName varchar(200), 
-	varMarketName varchar(200),
-	varwin_runner_id BIGINT,
-    varwin_run INT 
-	, varwin_TeamName varchar(200)
-	, varrunners jsonb
-	, varsource varchar(200)
-	, varapi_response jsonb
-	)
-LANGUAGE plpgsql
+	IN varmarket_id numeric,
+	IN varmarket_type integer,
+	IN vareventtypeid bigint,
+	IN varcompetitionid bigint,
+	IN vareventid bigint,
+	IN vareventtypename character varying,
+	IN varcompetitionname character varying,
+	IN vareventname character varying,
+	IN varmarketname character varying,
+	IN varwin_runner_id bigint,
+	IN varwin_run integer,
+	IN varwin_teamname character varying,
+	IN varrunners jsonb,
+	IN varsource character varying,
+	IN varapi_response jsonb)
+LANGUAGE 'plpgsql'
 AS $BODY$
 DECLARE
     varVoucherId UUID;
@@ -146,7 +149,6 @@ BEGIN
 		GROUP BY tp.user_id, tp.whitelabel_id, tp.admin_id, tp.super_id, tp.master_id, tp.agent_id
 		;
 
-
 	-- 3. Insert voucher details for User ↔ Company (role 7)
     INSERT INTO public.voucher_details (
         id, voucher_id, user_id, opposite_user_id, role,
@@ -271,7 +273,6 @@ BEGIN
 		and admin_id is not null
 		;
 
-
     -- 5. User ↔ Super (role 6) – using super_commission
     INSERT INTO public.voucher_details (
         id, voucher_id, user_id, opposite_user_id, role,
@@ -395,7 +396,6 @@ BEGIN
     WHERE ROUND(COALESCE(master_commission, 0), 2) <> 0
 		and master_id is not null
 		;
-
 
     -- 5. User ↔ Agent (role 6) – using agent_commission
     INSERT INTO public.voucher_details (
@@ -530,7 +530,17 @@ BEGIN
     ,varSystemUserId, CURRENT_TIMESTAMP, varSystemUserId, CURRENT_TIMESTAMP, 0
 	, varwin_run)
 	;
-	
+	if varmarket_type = 0 THEN
+		INSERT INTO public.declared_events(
+		id, event_id, competition_id, sport_id, name, open_date, whitelabel_id, is_active, is_visible, is_recommended, suspended, bet_delay, max_market_profit, default_market_id, metadata, added_by, added_date, update_by, update_date, record_status)
+		select id, event_id, competition_id, sport_id, name, open_date, whitelabel_id, is_active, is_visible, is_recommended, suspended, bet_delay, max_market_profit, default_market_id, metadata, added_by, added_date, update_by, update_date, record_status
+		from events
+		where event_id = varEventId
+		;	
+		DELETE from events
+		where event_id = varEventId
+		;
+	end if;
 	
 	-- Optional: commit or raise notice if varwin_run = 0 (test mode)
     /*
@@ -542,21 +552,5 @@ BEGIN
     
 END;
 $BODY$;
-
-ALTER PROCEDURE public.declare_process(NUMERIC,
-    INT,
-    bigint,
-	bigint,
-	bigint,
-	varchar(200), 
-	varchar(200), 
-	varchar(200), 
-	varchar(200),
-	BIGINT,
-    INT 
-	,varchar(200)
-	,jsonb
-	,varchar(200)
-	,jsonb
-)
+ALTER PROCEDURE public.declare_process(numeric, integer, bigint, bigint, bigint, character varying, character varying, character varying, character varying, bigint, integer, character varying, jsonb, character varying, jsonb)
     OWNER TO postgres;
