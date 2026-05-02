@@ -36,11 +36,13 @@ const PRICE_CHANGED_MESSAGE =
 
 // Verify the user's submitted odds still match upstream at the exact slot they
 // clicked. Hits /sports/books/{marketId}. Returns:
-//   { ok: true }                    → odds match, proceed
-//   { ok: false, reason }           → reject the bet (price moved / suspended)
-//   { ok: true, unverified: true }  → upstream had no data for this market
-//                                     (e.g. fancy/bookmaker not in books feed,
-//                                      or provider timeout) — allow through.
+//   { ok: true }          → odds match, proceed
+//   { ok: false, reason } → reject the bet (price moved / suspended / no data)
+//
+// Provider timeout is the only non-rejection escape hatch — a slow upstream
+// must not silently block legitimate placements. Every other "we couldn't
+// confirm the price" outcome is treated as a price change and rejected, so a
+// stale-snapshot client can't lock in an old price.
 async function verifyOddsUnchanged(args: {
   marketId: string;
   selectionId: number;
@@ -51,7 +53,7 @@ async function verifyOddsUnchanged(args: {
   marketType: string | undefined;
   isFancy: boolean;
   timeoutMs: number;
-}): Promise<{ ok: true; unverified?: boolean } | { ok: false; reason: string }> {
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
   const timeoutPromise = new Promise<null>((resolve) =>
     setTimeout(() => resolve(null), args.timeoutMs),
   );
@@ -66,12 +68,12 @@ async function verifyOddsUnchanged(args: {
 
   const oddsObj = await Promise.race([fetchPromise, timeoutPromise]);
 
-  // Provider timed out or errored — we can't verify, allow through.
-  if (!oddsObj) return { ok: true, unverified: true };
+  // Provider timed out or errored — can't verify, allow through to avoid
+  // blanket-blocking placements during transient upstream issues.
+  if (!oddsObj) return { ok: true };
 
   const market = (oddsObj as any)?.[String(args.marketId)];
-  // Market not in the books feed (typical for fancy/session/bookmaker IDs).
-  if (!market) return { ok: true, unverified: true };
+  if (!market) return { ok: false, reason: PRICE_CHANGED_MESSAGE };
 
   const mStatus = (market.status || "").toUpperCase();
   if (mStatus === "SUSPENDED") return { ok: false, reason: "Bet rejected: market is suspended" };
@@ -82,7 +84,7 @@ async function verifyOddsUnchanged(args: {
   const runner = market.runners?.find(
     (r: any) => String(r.selectionId) === String(args.selectionId),
   );
-  if (!runner) return { ok: true, unverified: true };
+  if (!runner) return { ok: false, reason: PRICE_CHANGED_MESSAGE };
 
   const rStatus = (runner.status || "").toUpperCase();
   if (rStatus === "SUSPENDED") return { ok: false, reason: "Bet rejected: runner is suspended" };
@@ -94,8 +96,6 @@ async function verifyOddsUnchanged(args: {
   const rawPrice = Array.isArray(slot) ? slot[0] : slot?.price;
   const rawNum = Number(rawPrice);
 
-  // Slot doesn't exist anymore (book thinned out) — the price the user saw is
-  // gone, so the bet must be re-placed.
   if (!Number.isFinite(rawNum) || rawNum <= 0) {
     return { ok: false, reason: PRICE_CHANGED_MESSAGE };
   }
@@ -172,6 +172,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         set.status = 400;
         return { success: false, error: "Invalid stake or odds values" };
       }
+
+      const canonicalMarketId = String(marketId);
 
       const marketTypeInt = parseMarketType(bettingType || marketType, marketType);
       const isFancyBet = marketTypeInt === MarketType.Fancy;
@@ -271,7 +273,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           const [mktSetting] = await db
             .select({ minBet: marketSettings.minBet, maxBet: marketSettings.maxBet })
             .from(marketSettings)
-            .where(eq(marketSettings.marketId, String(marketId)))
+            .where(eq(marketSettings.marketId, canonicalMarketId))
             .limit(1);
           if (mktSetting) {
             resolvedMinBet = parseFloat(mktSetting.minBet ?? "0") || 0;
@@ -323,7 +325,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       const slotIndex = Number.isFinite(Number(priceIndex)) ? Number(priceIndex) : 0;
 
       const verification = await verifyOddsUnchanged({
-        marketId: String(marketId),
+        marketId: canonicalMarketId,
         selectionId: numericSelectionId,
         isLay: isLayBet,
         priceIndex: slotIndex,
@@ -352,7 +354,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             eventTypeId: Number(eventTypeId) || 4,
             competitionId: competitionId ? Number(competitionId) : null,
             matchId: Number(matchId),
-            marketId: String(marketId),
+            marketId: canonicalMarketId,
             marketName: marketName || null,
             marketType: marketTypeInt,
             selectionId: numericSelectionId,
