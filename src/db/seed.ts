@@ -20,6 +20,7 @@ const MANUAL_SPORTS = [
   { sport_id: 1002, name: "Lottery" },
   { sport_id: 1003, name: "Skill Games" },
   { sport_id: 1004, name: "Jambo" },
+  { sport_id: 1005, name: "Kalyan-New" },
 ];
 
 // Helper function for API calls
@@ -210,6 +211,42 @@ const upsertCompetition = async (compData: any, sportId: number) => {
   }
 };
 
+// Upsert MANUAL_SPORTS only — safe to call standalone (preserves is_active on
+// existing rows; new rows default to inactive so an admin must explicitly enable).
+const syncManualSports = async () => {
+  for (const manual of MANUAL_SPORTS) {
+    try {
+      const existing = await db
+        .select()
+        .from(sports)
+        .where(eq(sports.sport_id, manual.sport_id))
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db
+          .update(sports)
+          .set({ name: manual.name, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
+          .where(eq(sports.sport_id, manual.sport_id));
+        console.log(`Manual sport updated: ${manual.name} (ID: ${manual.sport_id})`);
+      } else {
+        await db.insert(sports).values({
+          sport_id: manual.sport_id,
+          name: manual.name,
+          is_active: false,
+          sort_order: 0,
+          addedBy: SYSTEM_USER_ID,
+          addedDate: new Date(),
+          updateBy: SYSTEM_USER_ID,
+          updateDate: new Date(),
+        });
+        console.log(`Manual sport added: ${manual.name} (ID: ${manual.sport_id})`);
+      }
+    } catch (err: any) {
+      console.error(`Error upserting manual sport ${manual.name}:`, err.message);
+    }
+  }
+};
+
 // Sync Functions
 const syncSports = async () => {
   console.log("Starting sports sync...");
@@ -238,39 +275,7 @@ const syncSports = async () => {
       `Sports sync done — Total: ${sportsData.length} | Added: ${addedCount} | Updated: ${updatedCount} | Errors: ${errorCount}`,
     );
 
-    // Upsert manually managed sports (matka, lottery, etc.)
-    // Preserves is_active if the row already exists
-    for (const manual of MANUAL_SPORTS) {
-      try {
-        const existing = await db
-          .select()
-          .from(sports)
-          .where(eq(sports.sport_id, manual.sport_id))
-          .limit(1);
-
-        if (existing.length > 0) {
-          await db
-            .update(sports)
-            .set({ name: manual.name, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
-            .where(eq(sports.sport_id, manual.sport_id));
-          console.log(`Manual sport updated: ${manual.name} (ID: ${manual.sport_id})`);
-        } else {
-          await db.insert(sports).values({
-            sport_id: manual.sport_id,
-            name: manual.name,
-            is_active: false,
-            sort_order: 0,
-            addedBy: SYSTEM_USER_ID,
-            addedDate: new Date(),
-            updateBy: SYSTEM_USER_ID,
-            updateDate: new Date(),
-          });
-          console.log(`Manual sport added: ${manual.name} (ID: ${manual.sport_id})`);
-        }
-      } catch (err: any) {
-        console.error(`Error upserting manual sport ${manual.name}:`, err.message);
-      }
-    }
+    await syncManualSports();
 
     return {
       total: sportsData.length,
@@ -412,6 +417,17 @@ export const startCronJobs = async () => {
   //   { timezone: "UTC" },
   // );
 
+  // Manual sports (matka, jambo, lottery, kalyan-new, etc.): every 12 hours
+  // Safe to run on cron — preserves is_active on existing rows.
+  cron.schedule(
+    "0 */12 * * *",
+    () => {
+      console.log("[Seed] Running scheduled manual sports sync...");
+      syncManualSports();
+    },
+    { timezone: "UTC" },
+  );
+
   // Competitions: every 12 hours
   cron.schedule(
     "0 */12 * * *",
@@ -437,6 +453,7 @@ export const startCronJobs = async () => {
   // Run initial sync immediately
   console.log("[Seed] Running initial sync...");
   // await syncSports();
+  await syncManualSports();
   await syncCompetitions();
   await syncAllActiveCompetitionEvents();
   console.log("[Seed] Initial sync completed!");
@@ -463,4 +480,4 @@ export const runAll = async () => {
 //     });
 // }
 
-export { syncSports, syncCompetitions };
+export { syncSports, syncCompetitions, syncManualSports };

@@ -260,6 +260,7 @@ export function drCrToString(value: DrCr | number): string {
 export enum MatkaSportType {
   Matka = 1001,
   Jambo = 1004,
+  KalyanNew = 1005,
 }
 
 /** Profile membership tier — stored in `profiles.membership`. */
