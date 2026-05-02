@@ -49,6 +49,7 @@ async function verifyOddsUnchanged(args: {
   isLay: boolean;
   priceIndex: number;
   clientOdds: number;
+  clientRun: number | null | undefined;
   provider: string | undefined;
   marketType: string | undefined;
   isFancy: boolean;
@@ -61,7 +62,8 @@ async function verifyOddsUnchanged(args: {
   const fetchPromise = (async () => {
     try {
       return await SportsService.getOdds({ marketId: String(args.marketId) });
-    } catch {
+    } catch (e) {
+      console.warn(`[verifyOdds] getOdds threw for ${args.marketId}:`, e);
       return null;
     }
   })();
@@ -70,10 +72,19 @@ async function verifyOddsUnchanged(args: {
 
   // Provider timed out or errored — can't verify, allow through to avoid
   // blanket-blocking placements during transient upstream issues.
-  if (!oddsObj) return { ok: true };
+  if (!oddsObj) {
+    console.warn(`[verifyOdds] timeout/null for marketId=${args.marketId}, allowing through`);
+    return { ok: true };
+  }
 
   const market = (oddsObj as any)?.[String(args.marketId)];
-  if (!market) return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+  if (!market) {
+    console.warn(
+      `[verifyOdds] no market in books response for marketId=${args.marketId} ` +
+        `(isFancy=${args.isFancy}). Response keys=${Object.keys(oddsObj as any).join(",")}`,
+    );
+    return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+  }
 
   const mStatus = (market.status || "").toUpperCase();
   if (mStatus === "SUSPENDED") return { ok: false, reason: "Bet rejected: market is suspended" };
@@ -84,7 +95,13 @@ async function verifyOddsUnchanged(args: {
   const runner = market.runners?.find(
     (r: any) => String(r.selectionId) === String(args.selectionId),
   );
-  if (!runner) return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+  if (!runner) {
+    console.warn(
+      `[verifyOdds] runner not found marketId=${args.marketId} selectionId=${args.selectionId}. ` +
+        `Available runners: ${(market.runners || []).map((r: any) => r.selectionId).join(",")}`,
+    );
+    return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+  }
 
   const rStatus = (runner.status || "").toUpperCase();
   if (rStatus === "SUSPENDED") return { ok: false, reason: "Bet rejected: runner is suspended" };
@@ -92,17 +109,51 @@ async function verifyOddsUnchanged(args: {
 
   const side = args.isLay ? runner.lay : runner.back;
   const slot = Array.isArray(side) ? side[args.priceIndex] : null;
-  // The books feed can return either [price,size] tuples or {price,size} objects.
+  // The books feed can return either [price,size] tuples or {price,size}
+  // objects. For fancy on Betfair, slots typically also carry a `line` field
+  // separate from the rate `price` — see the line-check below.
   const rawPrice = Array.isArray(slot) ? slot[0] : slot?.price;
   const rawNum = Number(rawPrice);
 
   if (!Number.isFinite(rawNum) || rawNum <= 0) {
+    console.warn(
+      `[verifyOdds] empty slot for marketId=${args.marketId} sel=${args.selectionId} ` +
+        `side=${args.isLay ? "lay" : "back"} idx=${args.priceIndex}. side=${JSON.stringify(side)}`,
+    );
     return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+  }
+
+  // Fancy line check.
+  //
+  // For fancy markets the LINE is the meaningful value the user is betting
+  // on (e.g. "session > 65"). The slot's `price` field is sometimes the line
+  // itself (legacy/session feed where price === line) and sometimes the
+  // payout rate (Betfair fancy where price is e.g. 1.95 and line is 65 — a
+  // separate `line` field). If we only compare the rate, a moving line at
+  // unchanged rate sneaks past verification and a stale-line bet gets stored.
+  //
+  // Strategy: if the slot exposes a distinct `line` field, compare that
+  // against clientRun. Otherwise fall back to the price-as-line interpretation
+  // (covered by the rate compare below, since price === line in that case).
+  if (args.isFancy && args.clientRun != null && !Array.isArray(slot)) {
+    const rawLine = (slot as any)?.line;
+    const lineNum = Number(rawLine);
+    if (Number.isFinite(lineNum) && lineNum > 0 && Math.round(lineNum) !== Math.round(args.clientRun)) {
+      console.info(
+        `[verifyOdds] fancy line moved marketId=${args.marketId} sel=${args.selectionId} ` +
+          `clientRun=${args.clientRun} freshLine=${lineNum} → reject`,
+      );
+      return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+    }
   }
 
   const freshDecimal = rawPriceToDecimalOdds(rawNum, args.provider, args.marketType, args.isFancy);
   // 0.001 covers float-conversion noise from /100 without masking real moves.
   if (Math.abs(freshDecimal - args.clientOdds) > 0.001) {
+    console.info(
+      `[verifyOdds] price moved marketId=${args.marketId} sel=${args.selectionId} ` +
+        `clientOdds=${args.clientOdds} freshDecimal=${freshDecimal} (raw=${rawNum}) → reject`,
+    );
     return { ok: false, reason: PRICE_CHANGED_MESSAGE };
   }
 
@@ -330,6 +381,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         isLay: isLayBet,
         priceIndex: slotIndex,
         clientOdds: odds,
+        clientRun: run,
         provider,
         marketType,
         isFancy: isFancyBet,
