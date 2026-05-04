@@ -1,0 +1,2 @@
+ALTER TABLE "matka_transaction_details" ALTER COLUMN "number" SET DATA TYPE varchar(10);--> statement-breakpoint
+ALTER TABLE "matka_transaction_details_declare" ALTER COLUMN "number" SET DATA TYPE varchar(10);
