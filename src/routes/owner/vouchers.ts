@@ -192,34 +192,19 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
           });
         }
 
-        // Update ledger_limit for limit vouchers.
-        //   target user: ± amount on fix_limit, user_limit, final_limit
-        //   source user: ∓ amount on user_limit, final_limit (fix_limit
-        //                belongs to the recipient only)
+        // Limit vouchers move only fix_limit on the target user.
+        // user_limit / final_limit and the source account are intentionally
+        // left untouched.
         if (isLimitVoucher && voucherStatus === VoucherStatus.Approved) {
           const delta = isDebit
             ? sql`-${body.amount}::numeric`
             : sql`${body.amount}::numeric`;
-          const inverseDelta = isDebit
-            ? sql`${body.amount}::numeric`
-            : sql`-${body.amount}::numeric`;
 
           await tx.update(ledgerLimit)
             .set({
-              fixLimit:   sql`${ledgerLimit.fixLimit}   + ${delta}`,
-              userLimit:  sql`${ledgerLimit.userLimit}  + ${delta}`,
-              finalLimit: sql`${ledgerLimit.finalLimit} + ${delta}`,
+              fixLimit: sql`${ledgerLimit.fixLimit} + ${delta}`,
             })
             .where(eq(ledgerLimit.userId, body.userId));
-
-          if (sourceAccountId) {
-            await tx.update(ledgerLimit)
-              .set({
-                userLimit:  sql`${ledgerLimit.userLimit}  + ${inverseDelta}`,
-                finalLimit: sql`${ledgerLimit.finalLimit} + ${inverseDelta}`,
-              })
-              .where(eq(ledgerLimit.userId, sourceAccountId));
-          }
         }
 
         return voucher;
