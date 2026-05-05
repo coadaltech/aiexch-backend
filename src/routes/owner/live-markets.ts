@@ -5,10 +5,8 @@ import { sql } from "drizzle-orm";
 export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
 
   // GET /owner/live-markets/details
-  .get("/details", async ({ set, store }) => {
+  .get("/details", async ({ set, userId, userRole }: any) => {
     try {
-      const userId = (store as { id: string }).id;
-      const userRole = (store as { role: number }).role;
 
       const result = await db.execute(
         sql`SELECT * FROM public.get_list_of_market_with_trans(${userId}::uuid, ${userRole}::int)`
@@ -25,10 +23,8 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
 
   // GET /owner/live-markets/pnl
   // Returns per-runner P&L for odds/bookmaker markets and per-market P&L for fancy.
-  .get("/pnl", async ({ set, store }) => {
+  .get("/pnl", async ({ set, userId, userRole }: any) => {
     try {
-      const userId = (store as { id: string }).id;
-      const userRole = (store as { role: number }).role;
 
       const [oddsResult, fancyResult] = await Promise.all([
         db.execute(
@@ -51,10 +47,8 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
   })
 
   // GET /owner/live-markets/bets?matchId=123
-  .get("/bets", async ({ set, store, query }) => {
+  .get("/bets", async ({ set, userId, userRole, query }: any) => {
     try {
-      const userId = (store as { id: string }).id;
-      const userRole = (store as { role: number }).role;
       const matchId = query.matchId ? parseInt(query.matchId as string) : null;
 
       if (!matchId) {
@@ -190,10 +184,8 @@ export const liveMarketsRoutes = new Elysia({ prefix: "/live-markets" })
   // plus the event / competition / runner meta the UI groups on. All logic
   // lives in the SQL function fn_get_live_markets_summary, which wraps the
   // existing helpers get_hissa_of_group + get_hissa_of_group_fancy.
-  .get("/summary", async ({ set, store }) => {
+  .get("/summary", async ({ set, userId, userRole }: any) => {
     try {
-      const userId = (store as { id: string }).id;
-      const userRole = (store as { role: number }).role;
 
       const result = await db.execute(sql`
         SELECT * FROM fn_get_live_markets_summary(

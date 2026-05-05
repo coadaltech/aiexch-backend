@@ -20,15 +20,15 @@ export const ownerAccountStatementRoutes = new Elysia()
   })
 
   // GET /owner/account-statement?fromDate=YYYY-MM-DD&toDate=YYYY-MM-DD
-  .get("/account-statement", async ({ query, set, store, db }: any) => {
+  .get("/account-statement", async ({ query, set, userId: callerId, userRole, db }: any) => {
     const today    = new Date().toISOString().split("T")[0];
     const fromDate = (query.fromDate as string) || today;
     const toDate   = (query.toDate   as string) || today;
 
     // Owner uses the capital account; all other roles use their own ID
-    const userId = (store.role as number) === UserRole.Owner
+    const userId = (userRole as number) === UserRole.Owner
       ? CAPITAL_ACCOUNT_ID
-      : (store.id as string);
+      : (callerId as string);
 
     try {
       const result = await db.execute(sql`
@@ -63,16 +63,16 @@ export const ownerAccountStatementRoutes = new Elysia()
   })
 
   // GET /owner/account-statement/bet-details?marketId=...
-  .get("/account-statement/bet-details", async ({ query, set, store, db }: any) => {
+  .get("/account-statement/bet-details", async ({ query, set, userId: callerId, userRole, db }: any) => {
     const marketId = query.marketId as string;
     if (!marketId) {
       set.status = 400;
       return { success: false, error: "marketId is required" };
     }
 
-    const userId = (store.role as number) === UserRole.Owner
+    const userId = (userRole as number) === UserRole.Owner
       ? CAPITAL_ACCOUNT_ID
-      : (store.id as string);
+      : (callerId as string);
 
     try {
       const result = await db.execute(sql`

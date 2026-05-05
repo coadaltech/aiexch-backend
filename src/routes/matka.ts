@@ -202,21 +202,24 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   })
 
   // ── Protected routes ──────────────────────────────────────────────────────
-  .state({ id: "" as string, role: 0 as number })
-  .guard({
-    async beforeHandle({ cookie, headers, set, store }) {
-      const state_result = await app_middleware({ cookie, headers });
-      set.status = state_result.code;
-      if (!state_result.data) return state_result;
-      store.id = state_result.data.id;
-      store.role = state_result.data.role;
-    },
+  // Per-request user context via .resolve() (NOT .state(), which is module-shared
+  // and leaks userId across concurrent requests). See betting.ts for the full
+  // explanation of the original bug.
+  .resolve(async ({ cookie, headers, status }) => {
+    const state_result = await app_middleware({ cookie, headers });
+    if (!state_result.data) {
+      return status(state_result.code as 401 | 403 | 404 | 500, state_result);
+    }
+    return {
+      userId: state_result.data.id,
+      userRole: state_result.data.role,
+    };
   })
 
   // ── Place bet (submit jantri) ─────────────────────────────────────────────
   .post(
     "/place",
-    async ({ body, store, set, request }) => {
+    async ({ body, userId, set, request }) => {
       try {
         const { shiftId, bets, copyReferenceShiftId, whitelabelId } = body as {
           shiftId: string;
@@ -236,7 +239,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           const [betUser] = await db
             .select({ whitelabelId: users.whitelabelId })
             .from(users)
-            .where(eq(users.id, store.id))
+            .where(eq(users.id, userId))
             .limit(1);
           resolvedWhitelabelId = betUser?.whitelabelId ?? undefined;
         }
@@ -310,7 +313,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             .innerJoin(matkaTransactions, eq(matkaTransactionDetails.transactionId, matkaTransactions.id))
             .where(
               and(
-                eq(matkaTransactions.userId, store.id),
+                eq(matkaTransactions.userId, userId),
                 eq(matkaTransactions.shiftId, shiftId),
                 eq(matkaTransactions.transactionDate, shift.shiftDate),
                 eq(matkaTransactions.recordStatus, RecordStatus.Active),
@@ -378,8 +381,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             commission: String(commission),
             finalAmount: String(finalAmount),
             orderNumber: idx + 1,
-            addedBy: store.id,
-            updateBy: store.id,
+            addedBy: userId,
+            updateBy: userId,
           };
         });
 
@@ -389,7 +392,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         const [ledger] = await db
           .select()
           .from(ledgerLimit)
-          .where(eq(ledgerLimit.userId, store.id));
+          .where(eq(ledgerLimit.userId, userId));
 
         if (ledger) {
           // const available = Number(ledger.creditLimit) - Number(ledger.limitConsumed);
@@ -403,7 +406,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         const [transaction] = await db
           .insert(matkaTransactions)
           .values({
-            userId: store.id,
+            userId: userId,
             shiftId,
             transactionDate: shift.shiftDate,
             daraRate: String(daraRate),
@@ -415,8 +418,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             finalAmount: String(finalAmount),
             ...(copyReferenceShiftId ? { copyReferenceShiftId } : {}),
             ...(resolvedWhitelabelId ? { whitelabelId: resolvedWhitelabelId } : {}),
-            addedBy: store.id,
-            updateBy: store.id,
+            addedBy: userId,
+            updateBy: userId,
           })
           .returning();
 
@@ -431,7 +434,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         }
 
         // Recalculate exposure and update ledger_limit
-        await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+        await db.execute(sql`CALL set_limit_used_of_user(${userId}::uuid)`);
 
         // Insert matka transaction log
         const ipAddress =
@@ -444,8 +447,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           matkaTransactionId: transaction.id,
           ipAddress,
           ...ua,
-          addedBy: store.id,
-          updateBy: store.id,
+          addedBy: userId,
+          updateBy: userId,
         });
 
         // ── Commission snapshot ──
@@ -459,7 +462,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
               1 AS depth
             FROM users u
             JOIN profiles p ON p.user_id = u.id
-            WHERE u.id = (SELECT added_by FROM users WHERE id = ${store.id})
+            WHERE u.id = (SELECT added_by FROM users WHERE id = ${userId})
 
             UNION ALL
 
@@ -483,8 +486,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
 
         const snapshotData: typeof matkaTransactionCommissions.$inferInsert = {
           matkaTransactionId: transaction.id,
-          addedBy: store.id,
-          updateBy: store.id,
+          addedBy: userId,
+          updateBy: userId,
         };
 
         let previousDownline = 0;
@@ -555,7 +558,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   //   ?shiftId=uuid   – filter by shift
   //   ?status=active  – only today's transactions (default)
   //   ?status=inactive – only transactions before today
-  .get("/my-bets", async ({ store, set, query }) => {
+  .get("/my-bets", async ({ userId, set, query }) => {
     try {
       const filterShiftId = (query as any)?.shiftId as string | undefined;
       const filterStatus = ((query as any)?.status as string | undefined) ?? "active";
@@ -566,7 +569,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
       // follow-up refShift query + JS-side merging.
       const rows = await db.execute(sql`
         SELECT fn_get_user_matka_bets(
-          ${store.id}::uuid,
+          ${userId}::uuid,
           ${MatkaSportType.Matka}::int,
           ${filterShiftId ?? null}::uuid,
           ${filterStatus}::text,
@@ -591,9 +594,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   // Numbers the user has placed bets on, plus the player-side profit if
   // that number wins. Mirrors the math in public.get_user_matka_jantri so
   // the page shows correct wins/losses for dara + bahar + ander.
-  .get("/live-prediction/:shiftId", async ({ params, store, set }) => {
+  .get("/live-prediction/:shiftId", async ({ params, userId, set }) => {
     try {
-      const userId = (store as any).id;
 
       const [shift] = await db
         .select()
@@ -706,7 +708,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   })
 
   // ── Get single transaction with details ───────────────────────────────────
-  .get("/transactions/:id", async ({ params, store, set }) => {
+  .get("/transactions/:id", async ({ params, userId, set }) => {
     try {
       const [txn] = await db
         .select({
@@ -727,7 +729,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .where(
           and(
             eq(matkaTransactions.id, params.id),
-            eq(matkaTransactions.userId, store.id),
+            eq(matkaTransactions.userId, userId),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
             eq(matkaShifts.sportType, MatkaSportType.Matka)
           )
@@ -766,7 +768,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   })
 
   // ── Soft-delete a transaction ─────────────────────────────────────────────
-  .delete("/transactions/:id", async ({ params, store, set }) => {
+  .delete("/transactions/:id", async ({ params, userId, set }) => {
     try {
       // Verify ownership
       const [txn] = await db
@@ -775,7 +777,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .where(
           and(
             eq(matkaTransactions.id, params.id),
-            eq(matkaTransactions.userId, store.id),
+            eq(matkaTransactions.userId, userId),
             eq(matkaTransactions.recordStatus, RecordStatus.Active)
           )
         );
@@ -797,7 +799,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .where(eq(matkaTransactionDetails.transactionId, params.id));
 
       // Recalculate exposure and update ledger_limit
-      await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+      await db.execute(sql`CALL set_limit_used_of_user(${userId}::uuid)`);
 
       return { success: true };
     } catch (error) {
@@ -812,7 +814,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   // ── Update (edit) a transaction ───────────────────────────────────────────
   .put(
     "/transactions/:id",
-    async ({ params, store, set, body }) => {
+    async ({ params, userId, set, body }) => {
       try {
         const { bets } = body as {
           bets: { number: string; numberType: number; amount: number }[];
@@ -830,7 +832,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
           .where(
             and(
               eq(matkaTransactions.id, params.id),
-              eq(matkaTransactions.userId, store.id),
+              eq(matkaTransactions.userId, userId),
               eq(matkaTransactions.recordStatus, RecordStatus.Active)
             )
           );
@@ -904,15 +906,15 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             commission: String(commission),
             finalAmount: String(finalAmt),
             orderNumber: idx + 1,
-            addedBy: store.id,
-            updateBy: store.id,
+            addedBy: userId,
+            updateBy: userId,
           };
         });
 
         const newFinalAmount = newTotalAmount - newTotalCommission;
 
         // Recalculate exposure and update ledger_limit
-        await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+        await db.execute(sql`CALL set_limit_used_of_user(${userId}::uuid)`);
 
         // Soft-delete existing details
         await db
@@ -930,7 +932,7 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
             totalAmount: String(newTotalAmount),
             totalCommission: String(newTotalCommission),
             finalAmount: String(newFinalAmount),
-            updateBy: store.id,
+            updateBy: userId,
           })
           .where(eq(matkaTransactions.id, params.id));
 

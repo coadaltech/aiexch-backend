@@ -160,22 +160,30 @@ async function verifyOddsUnchanged(args: {
   return { ok: true };
 }
 
+// IMPORTANT: per-request user context lives on `resolve` (returns a fresh
+// object per request), NOT on `.state()`. `.state()` is a single shared
+// object created at app startup; mutating it from `beforeHandle` leaks
+// userId between concurrent requests because the handler awaits between
+// the guard write and the DB insert. Concrete failure mode: User A's bet
+// gets stored under User B's userId when their requests overlap.
+//
+// `resolve` supports returning `status(code, body)` to halt with an auth
+// failure response, replacing the old guard.beforeHandle halt.
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
-  .state({ id: "" as string, role: 0 as number })
-  .guard({
-    async beforeHandle({ cookie, headers, set, store }) {
-      const state_result = await app_middleware({ cookie, headers });
+  .resolve(async ({ cookie, headers, status }) => {
+    const state_result = await app_middleware({ cookie, headers });
+    if (!state_result.data) {
+      return status(state_result.code as 401 | 403 | 404 | 500, state_result);
+    }
+    return {
+      userId: state_result.data.id,
+      userRole: state_result.data.role,
+    };
 
-      set.status = state_result.code;
-      if (!state_result.data) return state_result;
-
-      store.id = state_result.data.id;
-      store.role = state_result.data.role;
-    },
   })
 
   // Place a bet
-  .post("/place", async ({ body, store, set, request }) => {
+  .post("/place", async ({ body, userId, set, request }) => {
     try {
       const {
         matchId,
@@ -250,15 +258,15 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         db.select({
           betStatus: profiles.betStatus,
           parentBetStatus: profiles.parentBetStatus,
-        }).from(profiles).where(eq(profiles.userId, store.id)).limit(1),
+        }).from(profiles).where(eq(profiles.userId, userId)).limit(1),
 
         // 2. User whitelabelId
         db.select({ whitelabelId: users.whitelabelId })
-          .from(users).where(eq(users.id, store.id)).limit(1),
+          .from(users).where(eq(users.id, userId)).limit(1),
 
         // 3. Ledger limits
         db.select({ userLimit: ledgerLimit.userLimit, finalLimit: ledgerLimit.finalLimit })
-          .from(ledgerLimit).where(eq(ledgerLimit.userId, store.id)).limit(1),
+          .from(ledgerLimit).where(eq(ledgerLimit.userId, userId)).limit(1),
 
         // 4. Redis market status check (non-blocking)
         (async () => {
@@ -401,7 +409,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         const [newTxn] = await tx
           .insert(transactions)
           .values({
-            userId: store.id,
+            userId: userId,
             whitelabelId: whitelabelId ?? undefined,
             eventTypeId: Number(eventTypeId) || 4,
             competitionId: competitionId ? Number(competitionId) : null,
@@ -417,8 +425,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             status: "matched",
             ipAddress,
             matchedAt: today,
-            addedBy: store.id,
-            updateBy: store.id,
+            addedBy: userId,
+            updateBy: userId,
           })
           .returning();
 
@@ -462,8 +470,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             run: isSelected && run != null ? Math.round(run) : 0,
             stake: stake.toString(),
             potentialReturn: runnerPotentialReturn.toFixed(2),
-            addedBy: store.id,
-            updateBy: store.id,
+            addedBy: userId,
+            updateBy: userId,
           };
         });
 
@@ -474,8 +482,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           transactionId: newTxn.id,
           ipAddress,
           ...ua,
-          addedBy: store.id,
-          updateBy: store.id,
+          addedBy: userId,
+          updateBy: userId,
         });
 
         // ── Commission snapshot ──
@@ -493,7 +501,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
               1 AS depth
             FROM users u
             JOIN profiles p ON p.user_id = u.id
-            WHERE u.id = (SELECT added_by FROM users WHERE id = ${store.id})
+            WHERE u.id = (SELECT added_by FROM users WHERE id = ${userId})
 
             UNION ALL
 
@@ -530,8 +538,8 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         //   Owner gets: 100 - 85 = 15%
         const snapshotData: typeof transactionCommissions.$inferInsert = {
           transactionId: newTxn.id,
-          addedBy: store.id,
-          updateBy: store.id,
+          addedBy: userId,
+          updateBy: userId,
         };
 
         let previousDownline = 0; // start from 0 (bottom of chain, below the first ancestor)
@@ -570,12 +578,12 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         // (and roll back) any bet that would push final_limit negative.
         // Hedging bets reduce limit_consumed and pass; bets that genuinely
         // exceed the user's allowance are caught here.
-        await tx.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+        await tx.execute(sql`CALL set_limit_used_of_user(${userId}::uuid)`);
 
         const [updatedLedger] = await tx
           .select({ finalLimit: ledgerLimit.finalLimit })
           .from(ledgerLimit)
-          .where(eq(ledgerLimit.userId, store.id))
+          .where(eq(ledgerLimit.userId, userId))
           .limit(1);
 
         const newFinalLimit = parseFloat(updatedLedger?.finalLimit ?? "0");
@@ -602,7 +610,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   // Get user's bets — delegated to the SQL function fn_get_user_sports_bets,
   // which folds the transactions / transaction_details / sports / competitions
   // / events joins into a single query. Keeps the old response shape.
-  .get("/my-bets", async ({ store, query, set }) => {
+  .get("/my-bets", async ({ userId, query, set }) => {
     try {
       const status = (query?.status as string) || "all";
       const limit = parseInt((query?.limit as string) || "50");
@@ -610,7 +618,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       const rows = await db.execute(sql`
         SELECT fn_get_user_sports_bets(
-          ${store.id}::uuid,
+          ${userId}::uuid,
           ${status}::text,
           ${limit}::int,
           ${offset}::int
@@ -630,7 +638,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   })
 
   // Cancel a transaction (matched bet)
-  .post("/cancel/:transactionId", async ({ params, store, set }) => {
+  .post("/cancel/:transactionId", async ({ params, userId, set }) => {
     try {
       const txn = await db
         .select()
@@ -638,7 +646,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         .where(
           and(
             eq(transactions.id, params.transactionId),
-            eq(transactions.userId, store.id),
+            eq(transactions.userId, userId),
             eq(transactions.status, "matched")
           )
         )
@@ -658,7 +666,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         .where(eq(transactions.id, params.transactionId));
 
       // Recalculate exposure after cancellation
-      await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+      await db.execute(sql`CALL set_limit_used_of_user(${userId}::uuid)`);
 
       set.status = 200;
       return { success: true };
@@ -689,12 +697,12 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
-  .get("/ledger-info", async ({ store, set }) => {
+  .get("/ledger-info", async ({ userId, set }) => {
     try {
       const ledgerData = await db
         .select()
         .from(ledgerLimit)
-        .where(eq(ledgerLimit.userId, store.id))
+        .where(eq(ledgerLimit.userId, userId))
         .limit(1);
 
       set.status = 200;
@@ -707,11 +715,11 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
   // Get per-market exposure for the user (from DB function)
   // Pass marketId query param to filter by specific market, or omit for all markets
-  .get("/market-exposure", async ({ store, query, set }) => {
+  .get("/market-exposure", async ({ userId, query, set }) => {
     try {
       const marketId = query?.marketId ? Number(query.marketId) : 0;
       const rows = await db.execute(
-        sql`SELECT * FROM get_limituse_of_user_market(${store.id}::uuid, ${marketId}::numeric)`
+        sql`SELECT * FROM get_limituse_of_user_market(${userId}::uuid, ${marketId}::numeric)`
       );
       const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
       set.status = 200;
@@ -724,11 +732,11 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
   // Get per-market exposure for fancy/session markets (market_type = 4)
   // Returns worst-case P&L per market (not per runner)
-  .get("/market-exposure-fancy", async ({ store, query, set }) => {
+  .get("/market-exposure-fancy", async ({ userId, query, set }) => {
     try {
       const marketId = query?.marketId ? Number(query.marketId) : 0;
       const rows = await db.execute(
-        sql`SELECT * FROM get_limituse_of_user_market_fancy(${store.id}::uuid, ${marketId}::numeric)`
+        sql`SELECT * FROM get_limituse_of_user_market_fancy(${userId}::uuid, ${marketId}::numeric)`
       );
       const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
       set.status = 200;
@@ -742,7 +750,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   // Get the user's per-row exposure usage (event/market/shift + amount).
   // Backed by get_limituse_of_user_detail() which returns one row per market
   // (or matka shift) with the worst-case loss already negated.
-  .get("/exposure-usage", async ({ store, set }) => {
+  .get("/exposure-usage", async ({ userId, set }) => {
     try {
       const rows = await db.execute(
         sql`
@@ -756,7 +764,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             lu."competitionname" AS "competitionName",
             lu."eventname"       AS "eventName",
             lu."shiftname"       AS "shiftName"
-          FROM get_limituse_of_user_detail(${store.id}::uuid) lu
+          FROM get_limituse_of_user_detail(${userId}::uuid) lu
           WHERE COALESCE(lu.limit_use, 0) <> 0
           ORDER BY lu.limit_use DESC
         `
@@ -774,7 +782,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   // Drill-down for the Exposure Usage modal — sports market row.
   // Returns the user's active (status='matched') bets on that market with
   // runner detail and the placement log. Backed by fn_get_user_market_active_bets.
-  .get("/exposure-usage/market", async ({ store, query, set }) => {
+  .get("/exposure-usage/market", async ({ userId, query, set }) => {
     try {
       const marketId = query?.marketId ? String(query.marketId) : "";
       if (!marketId) {
@@ -783,7 +791,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       }
       const rows = await db.execute(sql`
         SELECT fn_get_user_market_active_bets(
-          ${store.id}::uuid,
+          ${userId}::uuid,
           ${marketId}::numeric
         ) AS data
       `);
@@ -801,7 +809,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   // Drill-down for the Exposure Usage modal — matka/jambo shift row.
   // Returns the user's consolidated jantri (per-number totals) for that shift.
   // Backed by fn_get_user_shift_consolidated_jantri.
-  .get("/exposure-usage/shift", async ({ store, query, set }) => {
+  .get("/exposure-usage/shift", async ({ userId, query, set }) => {
     try {
       const shiftId = query?.shiftId ? String(query.shiftId) : "";
       if (!shiftId) {
@@ -810,7 +818,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       }
       const rows = await db.execute(sql`
         SELECT fn_get_user_shift_consolidated_jantri(
-          ${store.id}::uuid,
+          ${userId}::uuid,
           ${shiftId}::uuid
         ) AS data
       `);
@@ -826,7 +834,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   })
 
   // Get detailed run-by-run exposure chart for a single fancy market
-  .get("/fancy-exposure-chart", async ({ store, query, set }) => {
+  .get("/fancy-exposure-chart", async ({ userId, query, set }) => {
     try {
       const marketId = query?.marketId ? Number(query.marketId) : 0;
       if (!marketId) {
@@ -834,7 +842,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: "marketId is required" };
       }
       const rows = await db.execute(
-        sql`SELECT * FROM get_user_market_detail_of_fancy(${store.id}::uuid, ${marketId}::numeric)`
+        sql`SELECT * FROM get_user_market_detail_of_fancy(${userId}::uuid, ${marketId}::numeric)`
       );
       const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
       set.status = 200;
@@ -845,12 +853,12 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
     }
   })
 
-  .get("/balance", async ({ store, set }) => {
+  .get("/balance", async ({ userId, set }) => {
     try {
       const ledgerData = await db
         .select({ userBalance: ledgerLimit.userBalance, finalLimit: ledgerLimit.finalLimit })
         .from(ledgerLimit)
-        .where(eq(ledgerLimit.userId, store.id))
+        .where(eq(ledgerLimit.userId, userId))
         .limit(1);
 
       set.status = 200;

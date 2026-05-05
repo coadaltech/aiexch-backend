@@ -12,23 +12,24 @@ import { userMultimarkets, SYSTEM_USER_ID } from "@db/schema";
 import { app_middleware } from "../middleware/auth";
 
 export const multimarketsRoutes = new Elysia({ prefix: "/api/user/multimarkets" })
-  .state({ id: "", role: 0 as number })
-  .guard({
-    async beforeHandle({ cookie, headers, set, store }) {
-      const state_result = await app_middleware({ cookie, headers });
-      set.status = state_result.code;
-      if (!state_result.data) return state_result;
-      store.id = state_result.data.id;
-      store.role = state_result.data.role;
-    },
+  // Per-request user context via .resolve() (NOT .state(), which is module-shared).
+  .resolve(async ({ cookie, headers, status }) => {
+    const state_result = await app_middleware({ cookie, headers });
+    if (!state_result.data) {
+      return status(state_result.code as 401 | 403 | 404 | 500, state_result);
+    }
+    return {
+      userId: state_result.data.id,
+      userRole: state_result.data.role,
+    };
   })
 
   // List current user's pinned markets via the get_multimarket(uuid) SQL
   // function which returns a pre-shaped jsonb array.
-  .get("/", async ({ store, set }) => {
+  .get("/", async ({ userId, set }) => {
     try {
       const result = await db.execute(
-        sql`SELECT get_multimarket(${store.id}::uuid) AS data`,
+        sql`SELECT get_multimarket(${userId}::uuid) AS data`,
       );
       const data = (result as any)?.[0]?.data ?? [];
       set.status = 200;
@@ -43,7 +44,7 @@ export const multimarketsRoutes = new Elysia({ prefix: "/api/user/multimarkets" 
   // Pin a market. Idempotent on (user_id, market_id).
   .post(
     "/",
-    async ({ body, store, set }) => {
+    async ({ body, userId, set }) => {
       try {
         const {
           sportId,
@@ -61,7 +62,7 @@ export const multimarketsRoutes = new Elysia({ prefix: "/api/user/multimarkets" 
         await db
           .insert(userMultimarkets)
           .values({
-            userId: store.id,
+            userId: userId,
             sportId: Number(sportId),
             sportName,
             competitionId: Number(competitionId),
@@ -72,8 +73,8 @@ export const multimarketsRoutes = new Elysia({ prefix: "/api/user/multimarkets" 
             marketId,
             marketName,
             marketType,
-            addedBy: store.id || SYSTEM_USER_ID,
-            updateBy: store.id || SYSTEM_USER_ID,
+            addedBy: userId || SYSTEM_USER_ID,
+            updateBy: userId || SYSTEM_USER_ID,
           })
           .onConflictDoNothing({
             target: [userMultimarkets.userId, userMultimarkets.marketId],
@@ -106,13 +107,13 @@ export const multimarketsRoutes = new Elysia({ prefix: "/api/user/multimarkets" 
   // Unpin a market.
   .delete(
     "/:marketId",
-    async ({ params, store, set }) => {
+    async ({ params, userId, set }) => {
       try {
         await db
           .delete(userMultimarkets)
           .where(
             and(
-              eq(userMultimarkets.userId, store.id),
+              eq(userMultimarkets.userId, userId),
               eq(userMultimarkets.marketId, params.marketId),
             ),
           );

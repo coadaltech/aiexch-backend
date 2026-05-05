@@ -26,21 +26,22 @@ import { ownerAccountStatementRoutes } from "./account-statement";
 import { sportsResultRoutes } from "./sports-result";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
-  .state({ id: "", role: 0 as number })
-  .guard({
-    async beforeHandle({ cookie, headers, set, store }) {
-      const state_result = await app_middleware({
-        cookie,
-        headers,
-        allowed: [UserRole.Owner, UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent],
-      });
-
-      set.status = state_result.code;
-      if (!state_result.data) return state_result;
-
-      store.id = state_result.data.id;
-      store.role = state_result.data.role;
-    },
+  // Per-request user context via .resolve() (NOT .state(), which is module-shared
+  // and would leak userId/userRole across concurrent admin requests). Subroutes
+  // mounted via .use() inherit the resolved `userId` and `userRole`.
+  .resolve(async ({ cookie, headers, status }) => {
+    const state_result = await app_middleware({
+      cookie,
+      headers,
+      allowed: [UserRole.Owner, UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent],
+    });
+    if (!state_result.data) {
+      return status(state_result.code as 401 | 403 | 404 | 500, state_result);
+    }
+    return {
+      userId: state_result.data.id,
+      userRole: state_result.data.role,
+    };
   })
   .use(bannersRoutes)
   .use(promocodesRoutes)

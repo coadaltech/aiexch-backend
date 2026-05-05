@@ -66,14 +66,14 @@ export const marketManagementRoutes = new Elysia({
   // PUT /owner/market-management/events/:eventId
   .put(
     "/events/:eventId",
-    async ({ params, body, set, store }) => {
+    async ({ params, body, set, userId, userRole }: any) => {
       try {
         // Get whitelabelId for admin scoping
         let whitelabelId: string | undefined;
-        if ((store as any).role === UserRole.Admin) {
+        if (userRole === UserRole.Admin) {
           whitelabelId =
             (await AdminMarketService.getUserWhitelabelId(
-              (store as any).id
+              userId
             )) || undefined;
         }
 
@@ -215,14 +215,14 @@ export const marketManagementRoutes = new Elysia({
   // POST /owner/market-management/custom-markets
   .post(
     "/custom-markets",
-    async ({ body, set, store }) => {
+    async ({ body, set, userId, userRole }: any) => {
       try {
         // Get whitelabelId for admin scoping
         let whitelabelId: string | undefined;
-        if ((store as any).role === UserRole.Admin) {
+        if (userRole === UserRole.Admin) {
           whitelabelId =
             (await AdminMarketService.getUserWhitelabelId(
-              (store as any).id
+              userId
             )) || undefined;
         }
 

@@ -15,8 +15,8 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
   })
   .post(
     "/",
-    async ({ body, set, db, whitelabel, store }) => {
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
+    async ({ body, set, db, whitelabel, userId, userRole }: any) => {
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: String(userRole) });
       const requestedRole = body.role ? parseUserRole(body.role as string) : UserRole.User;
       if (!scope.allowedRolesToCreate.includes(requestedRole)) {
         set.status = 403;
@@ -28,7 +28,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       }
 
       const { username, email, password, role, membership, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId } = body as any;
-      const addedBy = (store as { id?: string; role?: string })?.id;
+      const addedBy = userId;
       let whitelabelId: string | null =
         bodyWhitelabelId != null
           ? String(bodyWhitelabelId)
@@ -181,11 +181,11 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       }),
     }
   )
-  .get("/", async ({ set, db, whitelabel, store }) => {
+  .get("/", async ({ set, db, whitelabel, userId, userRole }: any) => {
     // Scope resolution stays in TS — it reads headers, cookies, and the
     // whitelabel middleware result. The SQL function applies the actual
     // visibility rules and enrichment joins in one query.
-    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
+    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: String(userRole) });
 
     // Early-exit for non-owner callers without a whitelabel scope, same as
     // the old logic (these users have no business seeing anyone).
@@ -209,13 +209,13 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     return { success: true, data };
   })
 
-  .get("/:id/created-users", async ({ params, set, db, whitelabel, store }) => {
+  .get("/:id/created-users", async ({ params, set, db, whitelabel, userId, userRole }: any) => {
     const targetUserId = params.id;
     if (!targetUserId || typeof targetUserId !== "string") {
       set.status = 400;
       return { success: false, message: "Invalid user ID" };
     }
-    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
+    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: String(userRole) });
 
     // Verify the target user exists and is visible to the requester
     const [target] = await db
@@ -235,12 +235,12 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     // Get all users created by the target user
     const createdUsers = await db.select().from(users).where(eq(users.createdBy, targetUserId));
 
-    const userIds = createdUsers.map((u) => u.id);
-    const ledgerRows =
+    const userIds = createdUsers.map((u: any) => u.id);
+    const ledgerRows: any[] =
       userIds.length > 0
         ? await db.select().from(ledgerLimit).where(inArray(ledgerLimit.userId, userIds))
         : [];
-    const ledgerMap = new Map(ledgerRows.map((l) => [l.userId, l]));
+    const ledgerMap = new Map(ledgerRows.map((l: any) => [l.userId, l]));
 
     const result = [];
     for (const user of createdUsers) {
@@ -300,13 +300,13 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
   .put(
     "/:id",
-    async ({ params, set, body, db, whitelabel, store }) => {
+    async ({ params, set, body, db, whitelabel, userId: callerId, userRole }: any) => {
       const userId = params.id;
       if (!userId || typeof userId !== "string") {
         set.status = 400;
         return { success: false, message: "Invalid user ID" };
       }
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: callerId, role: String(userRole) });
       const [target] = await db
         .select({
           id: users.id,
@@ -337,7 +337,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "User not found" };
       }
 
-      const isCreator = (target.createdBy ?? target.addedBy) === (store as { id?: string }).id;
+      const isCreator = (target.createdBy ?? target.addedBy) === callerId;
       const isChangingStatus =
         isCreator &&
         (body.accountStatus !== undefined || body.betStatus !== undefined);
@@ -347,7 +347,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
           set.status = 401;
           return { success: false, message: "Transaction password is required to change status" };
         }
-        const currentUserId = (store as { id?: string }).id;
+        const currentUserId = callerId;
         if (!currentUserId) {
           set.status = 401;
           return { success: false, message: "Unauthorized" };
@@ -373,7 +373,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "Only the user's creator can change their status" };
       }
 
-      const updatedBy = (store as { id?: string })?.id || SYSTEM_USER_ID;
+      const updatedBy = callerId || SYSTEM_USER_ID;
       const userUpdateData: Record<string, unknown> = { updateBy: updatedBy };
       const profileUpdateData: Record<string, unknown> = { updateBy: updatedBy };
 
@@ -463,13 +463,13 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
   .put(
     "/:id/profile",
-    async ({ params, body, set, db, whitelabel, store }) => {
+    async ({ params, body, set, db, whitelabel, userId: callerId, userRole }: any) => {
       const userId = params.id;
       if (!userId) {
         set.status = 400;
         return { success: false, message: "Invalid user ID" };
       }
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, store as { id?: string; role?: string });
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: callerId, role: String(userRole) });
       const [target] = await db.select({ id: users.id, whitelabelId: users.whitelabelId, addedBy: users.addedBy, createdBy: users.createdBy }).from(users).where(eq(users.id, userId)).limit(1);
       if (!target) {
         set.status = 404;
@@ -490,7 +490,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         .where(eq(profiles.userId, userId))
         .limit(1);
 
-      const currentUserId = (store as { id?: string })?.id || SYSTEM_USER_ID;
+      const currentUserId = callerId || SYSTEM_USER_ID;
       if (existingProfile.length > 0) {
         const [updated] = await db
           .update(profiles)

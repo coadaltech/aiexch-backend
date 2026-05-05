@@ -32,17 +32,17 @@ import {
 } from "../types/enums";
 
 export const profileRoutes = new Elysia({ prefix: "/profile" })
-  .state({ id: "", role: 0 as number })
-  .guard({
-    async beforeHandle({ cookie, headers, set, store }) {
-      const state_result = await app_middleware({ cookie, headers });
-
-      set.status = state_result.code;
-      if (!state_result.data) return state_result;
-
-      store.id = state_result.data.id;
-      store.role = state_result.data.role;
-    },
+  // Per-request user context via .resolve() (NOT .state(), which is module-shared
+  // and would leak userId across concurrent requests).
+  .resolve(async ({ cookie, headers, status }) => {
+    const state_result = await app_middleware({ cookie, headers });
+    if (!state_result.data) {
+      return status(state_result.code as 401 | 403 | 404 | 500, state_result);
+    }
+    return {
+      userId: state_result.data.id,
+      userRole: state_result.data.role,
+    };
   })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any; dbError?: string }> => {
     const { db, whitelabel, dbError } = await whitelabel_middleware(request);
@@ -59,11 +59,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }
   })
 
-  .get("/me", async ({ store, set, db, headers, request }) => {
+  .get("/me", async ({ userId, set, db, headers, request }) => {
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.id, store.id))
+      .where(eq(users.id, userId))
       .limit(1);
 
     const canLogin = (user?.accountStatus ?? true) && (user?.parentAccountStatus ?? true);
@@ -75,7 +75,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     const [profile] = await db
       .select()
       .from(profiles)
-      .where(eq(profiles.userId, store.id))
+      .where(eq(profiles.userId, userId))
       .limit(1);
 
     const geo = lookupGeo(getCurrentIP(headers, request));
@@ -98,17 +98,17 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       },
     };
   })
-  .get("/", async ({ store, set, db }) => {
+  .get("/", async ({ userId, set, db }) => {
     const [profile] = await db
       .select()
       .from(profiles)
-      .where(eq(profiles.userId, store.id))
+      .where(eq(profiles.userId, userId))
       .limit(1);
 
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.id, store.id))
+      .where(eq(users.id, userId))
       .limit(1);
 
     if (!user) {
@@ -128,11 +128,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     };
   })
 
-  .get("/balance", async ({ store, set, db }) => {
+  .get("/balance", async ({ userId, set, db }) => {
     const [ledger] = await db
       .select({ finalLimit: ledgerLimit.finalLimit })
       .from(ledgerLimit)
-      .where(eq(ledgerLimit.userId, store.id))
+      .where(eq(ledgerLimit.userId, userId))
       .limit(1);
 
     set.status = 200;
@@ -144,11 +144,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
 
   .put(
     "/",
-    async ({ body, store, set, db }) => {
+    async ({ body, userId, set, db }) => {
       const [existingProfile] = await db
         .select()
         .from(profiles)
-        .where(eq(profiles.userId, store.id))
+        .where(eq(profiles.userId, userId))
         .limit(1);
 
       // Validate birth date if provided
@@ -169,7 +169,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         [updatedProfile] = await db
           .insert(profiles)
           .values({
-            userId: store.id,
+            userId: userId,
             ...body,
           })
           .returning();
@@ -180,7 +180,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           .set({
             ...body,
           })
-          .where(eq(profiles.userId, store.id))
+          .where(eq(profiles.userId, userId))
           .returning();
       }
 
@@ -205,7 +205,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   )
 
   // Get stake settings
-  .get("/stake-settings", async ({ store, set, db }) => {
+  .get("/stake-settings", async ({ userId, set, db }) => {
     const DEFAULT_STAKES = [
       { label: "100",       value: 100     },
       { label: "500",       value: 500     },
@@ -221,7 +221,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       const [profile] = await db
         .select({ stakeSettings: profiles.stakeSettings })
         .from(profiles)
-        .where(eq(profiles.userId, store.id))
+        .where(eq(profiles.userId, userId))
         .limit(1);
       const stakes = profile?.stakeSettings as any[] | null;
       set.status = 200;
@@ -233,7 +233,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   })
 
   // Save stake settings
-  .put("/stake-settings", async ({ store, set, db, body }) => {
+  .put("/stake-settings", async ({ userId, set, db, body }) => {
     const stakes = (body as any)?.stakes;
     if (!Array.isArray(stakes) || stakes.length === 0) {
       set.status = 400;
@@ -246,15 +246,15 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }));
     await db
       .update(profiles)
-      .set({ stakeSettings: validated, updateBy: store.id, updateDate: new Date() })
-      .where(eq(profiles.userId, store.id));
+      .set({ stakeSettings: validated, updateBy: userId, updateDate: new Date() })
+      .where(eq(profiles.userId, userId));
     set.status = 200;
     return { success: true, data: validated };
   })
 
   // Get user transactions (queries vouchers table but endpoint name remains "transactions" for user-facing API)
-  .get("/transactions", async ({ query, store, set, db }) => {
-    let whereConditions = [eq(vouchers.userId, store.id)];
+  .get("/transactions", async ({ query, userId, set, db }) => {
+    let whereConditions = [eq(vouchers.userId, userId)];
 
     if (query.type && query.type !== "all") {
       whereConditions.push(eq(vouchers.type, parseVoucherType(query.type)));
@@ -281,7 +281,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         voucherDetails,
         and(
           eq(voucherDetails.voucherId, vouchers.id),
-          eq(voucherDetails.userId, store.id),
+          eq(voucherDetails.userId, userId),
         )
       )
       .where(and(...whereConditions))
@@ -299,10 +299,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   })
 
   // Get user bet history
-  .get("/bets", async ({ store, query, set, db }) => {
+  .get("/bets", async ({ userId, query, set, db }) => {
     const { bets } = await import("../db/schema");
 
-    let whereConditions = [eq(bets.userId, store.id)];
+    let whereConditions = [eq(bets.userId, userId)];
 
     if (query.status && query.status !== "all") {
       whereConditions.push(eq(bets.status, query.status));
@@ -319,11 +319,11 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   })
 
   // Get user bet history (alternative endpoint)
-  .get("/bet-history", async ({ store, query, set, db }) => {
+  .get("/bet-history", async ({ userId, query, set, db }) => {
     try {
       const { bets } = await import("../db/schema");
 
-      let whereConditions = [eq(bets.userId, store.id)];
+      let whereConditions = [eq(bets.userId, userId)];
 
       if (query.status && query.status !== "all") {
         whereConditions.push(eq(bets.status, query.status));
@@ -391,7 +391,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   // Create deposit transaction (pending — admin must approve, trigger updates ledger)
   .post(
     "/deposit",
-    async ({ body, store, set, db }) => {
+    async ({ body, userId, set, db }) => {
       let proofImageUrl: string | undefined;
       if (body.proofImage) {
         proofImageUrl = await uploadFile(body.proofImage);
@@ -401,7 +401,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       const [user] = await db
         .select({ groupId: users.groupId, role: users.role, whitelabelId: users.whitelabelId })
         .from(users)
-        .where(eq(users.id, store.id))
+        .where(eq(users.id, userId))
         .limit(1);
 
       const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
@@ -410,19 +410,19 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         const [voucher] = await tx
           .insert(vouchers)
           .values({
-            userId: store.id,
+            userId: userId,
             type: VoucherType.Deposit,
             status: VoucherStatus.Pending,
             method: body.method,
             reference: body.reference,
-            addedBy: store.id,
+            addedBy: userId,
           })
           .returning();
 
         // Row 1: Credit to user
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
-          userId: store.id,
+          userId: userId,
           amount: body.amount,
           voucherType: VoucherType.Deposit,
           voucherDetailType: VoucherType.Deposit,
@@ -442,7 +442,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           voucherType: VoucherType.Deposit,
           voucherDetailType: VoucherType.Deposit,
           drCr: DrCr.Debit,
-          oppositeUserId: store.id,
+          oppositeUserId: userId,
           role: UserRole.Owner,
           whitelabelId: user?.whitelabelId,
           description: "deposit voucher - debit from limit account",
@@ -467,14 +467,14 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   // Create withdrawal transaction (pending — balance deducted only on admin approval via trigger)
   .post(
     "/withdraw",
-    async ({ body, store, set, db }) => {
+    async ({ body, userId, set, db }) => {
       const amount = parseFloat(body.amount);
 
       // Check cash balance in ledger_limit
       const [ledger] = await db
         .select({ userBalance: ledgerLimit.userBalance })
         .from(ledgerLimit)
-        .where(eq(ledgerLimit.userId, store.id))
+        .where(eq(ledgerLimit.userId, userId))
         .limit(1);
 
       if (!ledger || parseFloat(ledger.userBalance || "0") < amount) {
@@ -486,7 +486,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       const [user] = await db
         .select({ groupId: users.groupId, role: users.role, whitelabelId: users.whitelabelId })
         .from(users)
-        .where(eq(users.id, store.id))
+        .where(eq(users.id, userId))
         .limit(1);
 
       const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
@@ -495,19 +495,19 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         const [voucher] = await tx
           .insert(vouchers)
           .values({
-            userId: store.id,
+            userId: userId,
             type: VoucherType.Withdraw,
             status: VoucherStatus.Pending,
             method: body.method,
             reference: body.address,
-            addedBy: store.id,
+            addedBy: userId,
           })
           .returning();
 
         // Row 1: Debit from user
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
-          userId: store.id,
+          userId: userId,
           amount: body.amount,
           voucherType: VoucherType.Withdraw,
           voucherDetailType: VoucherType.Withdraw,
@@ -526,7 +526,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           voucherType: VoucherType.Withdraw,
           voucherDetailType: VoucherType.Withdraw,
           drCr: DrCr.Credit,
-          oppositeUserId: store.id,
+          oppositeUserId: userId,
           role: UserRole.Owner,
           whitelabelId: user?.whitelabelId,
           description: "withdraw voucher - credit to limit account",
@@ -550,7 +550,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   // Redeem promocode
   .post(
     "/promocodes/redeem",
-    async ({ body, store, set, db }) => {
+    async ({ body, userId, set, db }) => {
       const [promocode] = await db
         .select()
         .from(promocodes)
@@ -585,7 +585,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         .from(vouchers)
         .where(
           and(
-            eq(vouchers.userId, store.id),
+            eq(vouchers.userId, userId),
             eq(vouchers.type, VoucherType.Bonus),
             eq(vouchers.reference, promocode.code)
           )
@@ -601,7 +601,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       const [ledger] = await db
         .select({ userBalance: ledgerLimit.userBalance })
         .from(ledgerLimit)
-        .where(eq(ledgerLimit.userId, store.id))
+        .where(eq(ledgerLimit.userId, userId))
         .limit(1);
 
       if (!ledger) {
@@ -623,7 +623,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       const [promoUser] = await db
         .select({ groupId: users.groupId, role: users.role, whitelabelId: users.whitelabelId })
         .from(users)
-        .where(eq(users.id, store.id))
+        .where(eq(users.id, userId))
         .limit(1);
 
       const LIMIT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000003";
@@ -631,20 +631,20 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       // Auto-approved voucher — DB trigger updates ledger_limit.user_balance
       await db.transaction(async (tx) => {
         const [voucher] = await tx.insert(vouchers).values({
-          userId: store.id,
+          userId: userId,
           type: VoucherType.Bonus,
           method: "promocode",
           reference: promocode.code,
           status: VoucherStatus.Approved,
-          addedBy: store.id,
-          approvedBy: store.id,
+          addedBy: userId,
+          approvedBy: userId,
           approvedDate: new Date().toISOString().split("T")[0],
         }).returning();
 
         // Row 1: Credit to user
         await tx.insert(voucherDetails).values({
           voucherId: voucher.id,
-          userId: store.id,
+          userId: userId,
           amount: bonusAmount.toString(),
           voucherType: VoucherType.Bonus,
           voucherDetailType: VoucherType.Bonus,
@@ -663,7 +663,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           voucherType: VoucherType.Bonus,
           voucherDetailType: VoucherType.Bonus,
           drCr: DrCr.Debit,
-          oppositeUserId: store.id,
+          oppositeUserId: userId,
           role: UserRole.Owner,
           whitelabelId: promoUser?.whitelabelId,
           description: "bonus voucher - debit from limit account (promocode: " + promocode.code + ")",
@@ -708,11 +708,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   })
   // Account ledger statement
   // Returns: opening balance row, transaction rows (date range), closing balance row
-  .get("/account-statement", async ({ query, store, set, db }) => {
+  .get("/account-statement", async ({ query, userId, set, db }) => {
     const today    = new Date().toISOString().split("T")[0];
     const fromDate = (query.fromDate as string) || today;
     const toDate   = (query.toDate   as string) || today;
-    const userId   = store.id as string;
 
     try {
       const result = await db.execute(sql`
@@ -749,7 +748,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
   //     because settlement aggregates P&L per user per market). So we return per-bet
   //     Won/Lost status derived from winner_id, and the market-level net P&L pulled
   //     from voucher_details joined by voucher_id.
-  .get("/account-statement/bet-details", async ({ query, store, set, db }) => {
+  .get("/account-statement/bet-details", async ({ query, userId, set, db }) => {
     const marketId  = query.marketId  as string;
     const voucherId = (query.voucherId as string) || null;
     if (!marketId) {
@@ -759,7 +758,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     try {
       const betsResult = await db.execute(sql`
         SELECT * FROM get_user_account_ledger_statement_transaction_detail(
-          ${store.id}::uuid,
+          ${userId}::uuid,
           ${marketId}::numeric,
           ${voucherId}::uuid
         )
@@ -780,7 +779,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
           ) AS pnl
           FROM voucher_details vd
           WHERE vd.voucher_id     = ${voucherId}::uuid
-            AND vd.user_id        = ${store.id}::uuid
+            AND vd.user_id        = ${userId}::uuid
             AND vd.record_status  = 0
         `);
         const pnlRows = Array.isArray(pnlResult)
@@ -801,13 +800,13 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
 
   .post(
     "/change-password",
-    async ({ body, store, set, db }) => {
+    async ({ body, userId, set, db }) => {
       const { currentPassword, newPassword } = body;
 
       const [userRecord] = await db
         .select()
         .from(users)
-        .where(eq(users.id, store.id))
+        .where(eq(users.id, userId))
         .limit(1);
 
       if (!userRecord) {
@@ -830,7 +829,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       await db
         .update(users)
         .set({ password: hashedNewPassword })
-        .where(eq(users.id, store.id));
+        .where(eq(users.id, userId));
 
       set.status = 200;
       return { success: true, message: "Password changed successfully" };

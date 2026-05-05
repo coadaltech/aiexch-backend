@@ -9,8 +9,8 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { RecordStatus, UserRole, MatkaSportType } from "../../types/enums";
 
-const ownerOnly = ({ store, set }: any) => {
-  if (store.role !== UserRole.Owner) {
+const ownerOnly = ({ userRole, set }: any) => {
+  if (userRole !== UserRole.Owner) {
     set.status = 403;
     return { success: false, message: "Owner access only" };
   }
@@ -56,7 +56,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
   // ── Create kalyan-new shift (owner only) ─────────────────────────────────
   .post(
     "/shifts",
-    async ({ body, set, store }) => {
+    async ({ body, set, userId }: any) => {
       try {
         const [maxOrder] = await db
           .select({ max: sql<number>`COALESCE(MAX(${matkaShifts.shiftOrder}), 0)` })
@@ -95,8 +95,8 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
             isActive: body.isActive ?? true,
             nextDayAllow: body.nextDayAllow ?? false,
             capping: String(body.capping ?? 0),
-            addedBy: (store as any).id || SYSTEM_USER_ID,
-            updateBy: (store as any).id || SYSTEM_USER_ID,
+            addedBy: userId || SYSTEM_USER_ID,
+            updateBy: userId || SYSTEM_USER_ID,
           })
           .returning();
 
@@ -140,14 +140,14 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
   // ── Reorder kalyan-new shifts (bulk) ─────────────────────────────────────
   .put(
     "/shifts/reorder",
-    async ({ body, set, store }) => {
+    async ({ body, set, userId }: any) => {
       try {
-        const updates = body.orders.map((item) =>
+        const updates = body.orders.map((item: any) =>
           db
             .update(matkaShifts)
             .set({
               shiftOrder: item.shiftOrder,
-              updateBy: (store as any).id || SYSTEM_USER_ID,
+              updateBy: userId || SYSTEM_USER_ID,
             })
             .where(
               and(
@@ -184,7 +184,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
   // ── Update kalyan-new shift ──────────────────────────────────────────────
   .put(
     "/shifts/:id",
-    async ({ body, params, set, store }) => {
+    async ({ body, params, set, userId }: any) => {
       try {
         const [existing] = await db
           .select()
@@ -202,7 +202,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
         }
 
         const updateData: Record<string, any> = {
-          updateBy: (store as any).id || SYSTEM_USER_ID,
+          updateBy: userId || SYSTEM_USER_ID,
         };
 
         if (body.name !== undefined) updateData.name = body.name;
@@ -273,13 +273,13 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
   // ── Soft delete kalyan-new shift ─────────────────────────────────────────
   .delete(
     "/shifts/:id",
-    async ({ params, set, store }) => {
+    async ({ params, set, userId }: any) => {
       try {
         const [updated] = await db
           .update(matkaShifts)
           .set({
             recordStatus: RecordStatus.Deleted,
-            updateBy: (store as any).id || SYSTEM_USER_ID,
+            updateBy: userId || SYSTEM_USER_ID,
           })
           .where(
             and(

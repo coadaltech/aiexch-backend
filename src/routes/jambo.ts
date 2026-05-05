@@ -231,21 +231,23 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
   })
 
   // ── Protected routes ─────────────────────────────────────────────────────
-  .state({ id: "" as string, role: 0 as number })
-  .guard({
-    async beforeHandle({ cookie, headers, set, store }) {
-      const state_result = await app_middleware({ cookie, headers });
-      set.status = state_result.code;
-      if (!state_result.data) return state_result;
-      store.id = state_result.data.id;
-      store.role = state_result.data.role;
-    },
+  // Per-request user context via .resolve() (NOT .state(), which is module-shared
+  // and would leak userId across concurrent bet placements).
+  .resolve(async ({ cookie, headers, status }) => {
+    const state_result = await app_middleware({ cookie, headers });
+    if (!state_result.data) {
+      return status(state_result.code as 401 | 403 | 404 | 500, state_result);
+    }
+    return {
+      userId: state_result.data.id,
+      userRole: state_result.data.role,
+    };
   })
 
   // ── Place jambo bet ───────────────────────────────────────────────────────
   .post(
     "/place",
-    async ({ body, store, set, request }) => {
+    async ({ body, userId, set, request }) => {
       try {
         const { shiftId, bets, copyReferenceShiftId, whitelabelId } = body as {
           shiftId: string;
@@ -273,7 +275,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
           const [betUser] = await db
             .select({ whitelabelId: users.whitelabelId })
             .from(users)
-            .where(eq(users.id, store.id))
+            .where(eq(users.id, userId))
             .limit(1);
           resolvedWhitelabelId = betUser?.whitelabelId ?? undefined;
         }
@@ -343,7 +345,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
             )
             .where(
               and(
-                eq(matkaTransactions.userId, store.id),
+                eq(matkaTransactions.userId, userId),
                 eq(matkaTransactions.shiftId, shiftId),
                 eq(matkaTransactions.transactionDate, shift.shiftDate),
                 eq(matkaTransactions.recordStatus, RecordStatus.Active),
@@ -419,8 +421,8 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
             commission: String(commission),
             finalAmount: String(finalAmount),
             orderNumber: idx + 1,
-            addedBy: store.id,
-            updateBy: store.id,
+            addedBy: userId,
+            updateBy: userId,
           };
         });
 
@@ -429,7 +431,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
         const [ledger] = await db
           .select()
           .from(ledgerLimit)
-          .where(eq(ledgerLimit.userId, store.id));
+          .where(eq(ledgerLimit.userId, userId));
 
         if (ledger) {
           if (totalAmount > Number(ledger.finalLimit)) {
@@ -441,7 +443,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
         const [transaction] = await db
           .insert(matkaTransactions)
           .values({
-            userId: store.id,
+            userId: userId,
             shiftId,
             transactionDate: shift.shiftDate,
             tripleRate: String(tripleRate),
@@ -455,8 +457,8 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
             finalAmount: String(finalAmount),
             ...(copyReferenceShiftId ? { copyReferenceShiftId } : {}),
             ...(resolvedWhitelabelId ? { whitelabelId: resolvedWhitelabelId } : {}),
-            addedBy: store.id,
-            updateBy: store.id,
+            addedBy: userId,
+            updateBy: userId,
           })
           .returning();
 
@@ -469,7 +471,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
           );
         }
 
-        await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+        await db.execute(sql`CALL set_limit_used_of_user(${userId}::uuid)`);
 
         const ipAddress =
           request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
@@ -481,8 +483,8 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
           matkaTransactionId: transaction.id,
           ipAddress,
           ...ua,
-          addedBy: store.id,
-          updateBy: store.id,
+          addedBy: userId,
+          updateBy: userId,
         });
 
         // Commission snapshot (same hierarchy walk as matka)
@@ -495,7 +497,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
               1 AS depth
             FROM users u
             JOIN profiles p ON p.user_id = u.id
-            WHERE u.id = (SELECT added_by FROM users WHERE id = ${store.id})
+            WHERE u.id = (SELECT added_by FROM users WHERE id = ${userId})
 
             UNION ALL
 
@@ -521,8 +523,8 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
 
         const snapshotData: typeof matkaTransactionCommissions.$inferInsert = {
           matkaTransactionId: transaction.id,
-          addedBy: store.id,
-          updateBy: store.id,
+          addedBy: userId,
+          updateBy: userId,
         };
 
         let previousDownline = 0;
@@ -589,14 +591,14 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
   )
 
   // ── User's own jambo bet history ─────────────────────────────────────────
-  .get("/my-bets", async ({ store, set, query }) => {
+  .get("/my-bets", async ({ userId, set, query }) => {
     try {
       const today = new Date().toISOString().split("T")[0];
       const filterShiftId = (query as any)?.shiftId as string | undefined;
       const filterStatus = (query as any)?.status as string | undefined;
 
       const whereConditions: any[] = [
-        eq(matkaTransactions.userId, store.id),
+        eq(matkaTransactions.userId, userId),
         eq(matkaTransactions.recordStatus, RecordStatus.Active),
         eq(matkaShifts.sportType, MatkaSportType.Jambo),
       ];
@@ -640,7 +642,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
   })
 
   // ── Single jambo transaction ─────────────────────────────────────────────
-  .get("/transactions/:id", async ({ params, store, set }) => {
+  .get("/transactions/:id", async ({ params, userId, set }) => {
     try {
       const [txn] = await db
         .select({
@@ -661,7 +663,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
         .where(
           and(
             eq(matkaTransactions.id, params.id),
-            eq(matkaTransactions.userId, store.id),
+            eq(matkaTransactions.userId, userId),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
             eq(matkaShifts.sportType, MatkaSportType.Jambo)
           )
@@ -700,7 +702,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
   })
 
   // ── Soft-delete a jambo transaction ──────────────────────────────────────
-  .delete("/transactions/:id", async ({ params, store, set }) => {
+  .delete("/transactions/:id", async ({ params, userId, set }) => {
     try {
       const [txn] = await db
         .select()
@@ -709,7 +711,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
         .where(
           and(
             eq(matkaTransactions.id, params.id),
-            eq(matkaTransactions.userId, store.id),
+            eq(matkaTransactions.userId, userId),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
             eq(matkaShifts.sportType, MatkaSportType.Jambo)
           )
@@ -730,7 +732,7 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
         .set({ recordStatus: RecordStatus.Deleted })
         .where(eq(matkaTransactionDetails.transactionId, params.id));
 
-      await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+      await db.execute(sql`CALL set_limit_used_of_user(${userId}::uuid)`);
 
       return { success: true };
     } catch (error) {

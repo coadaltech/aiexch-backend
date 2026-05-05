@@ -52,9 +52,8 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
   })
   // Owner-only guard for write operations and available list
   .guard({
-    beforeHandle({ store, set }) {
-      const role = (store as { role?: number }).role;
-      if (role !== UserRole.Owner) {
+    beforeHandle({ userRole, set }: any) {
+      if (userRole !== UserRole.Owner) {
         set.status = 403;
         return { success: false, message: "Only owner can manage currencies" };
       }

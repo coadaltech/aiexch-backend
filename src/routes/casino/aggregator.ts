@@ -57,21 +57,21 @@ export const casinoAggregatorRoutes = new Elysia({ prefix: "/casino" })
     }
   )
 
-  .state({ id: 0, role: 0 as number })
-  .guard({
-    async beforeHandle({ cookie, headers, set, store }) {
-      const state_result = await app_middleware({ cookie, headers });
-
-      set.status = state_result.code;
-      if (!state_result.data) return state_result;
-
-      store.id = state_result.data.id;
-      store.role = state_result.data.role;
-    },
+  // Per-request user context via .resolve() (NOT .state(), which is module-shared
+  // and would leak userId across concurrent requests).
+  .resolve(async ({ cookie, headers, status }) => {
+    const state_result = await app_middleware({ cookie, headers });
+    if (!state_result.data) {
+      return status(state_result.code as 401 | 403 | 404 | 500, state_result);
+    }
+    return {
+      userId: state_result.data.id,
+      userRole: state_result.data.role,
+    };
   })
   .post(
     "/init",
-    async ({ body, set, db, store }) => {
+    async ({ body, set, db, userId }) => {
       try {
         const { game_uuid } = body;
         if (!game_uuid) {
@@ -92,7 +92,7 @@ export const casinoAggregatorRoutes = new Elysia({ prefix: "/casino" })
         const [player] = await db
           .select()
           .from(users)
-          .where(eq(users.id, store.id))
+          .where(eq(users.id, userId))
           .limit(1);
         if (!player) {
           set.status = 404;
@@ -104,7 +104,7 @@ export const casinoAggregatorRoutes = new Elysia({ prefix: "/casino" })
         const requestBody = {
           game_uuid,
           currency: "EUR",
-          player_id: String(store.id),
+          player_id: String(userId),
           player_name: player.email,
           session_id: uniqueSessionId,
           // return_url: body.return_url,

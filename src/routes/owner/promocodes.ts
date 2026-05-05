@@ -7,8 +7,8 @@ import { UserRole } from "../../types/enums";
 
 export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
   .guard({
-    beforeHandle({ store, set }) {
-      if ((store as any).role !== UserRole.Owner) {
+    beforeHandle({ userRole, set }: any) {
+      if (userRole !== UserRole.Owner) {
         set.status = 403;
         return { success: false, message: "Owner access only" };
       }

@@ -77,8 +77,8 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
   .post(
     "/",
-    async ({ body, set, db, store }) => {
-      const adminId = (store as { id?: string })?.id;
+    async ({ body, set, db, userId }: any) => {
+      const adminId = userId;
       const amount = parseFloat(body.amount);
 
       if (isNaN(amount) || amount <= 0) {
@@ -141,7 +141,7 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
       // Insert voucher (no amount — amounts go in voucher_details only).
       // ledger_limit is updated explicitly below; the matching DB trigger
       // is currently not attached to voucher_details, so we do it here.
-      const result = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx: any) => {
         const [voucher] = await tx
           .insert(vouchers)
           .values({
@@ -235,8 +235,8 @@ export const vouchersRoutes = new Elysia({ prefix: "/vouchers" })
 
   .put(
     "/:id",
-    async ({ params, body, set, db, store }) => {
-      const adminId = (store as { id?: string })?.id || null;
+    async ({ params, body, set, db, userId }: any) => {
+      const adminId = userId || null;
       const voucherId = params.id;
 
       const statusInt = parseVoucherStatus(body.status);

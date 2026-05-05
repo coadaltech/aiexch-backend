@@ -14,8 +14,8 @@ export const withdrawalMethodsRoutes = new Elysia({
     return { db: db as DbType, whitelabel };
   })
   .guard({
-    beforeHandle({ store, set, whitelabel }: any) {
-      if (store.role === UserRole.Owner) {
+    beforeHandle({ userRole, set, whitelabel }: any) {
+      if (userRole === UserRole.Owner) {
         set.status = 403;
         return { success: false, message: "Withdrawal Methods are managed by whitelabel admins, not the owner" };
       }

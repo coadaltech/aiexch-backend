@@ -16,8 +16,8 @@ const MATKA_EVENT_TYPE_ID = 999;
 // Returns a 403 response object if the caller is not an Owner. Used to gate
 // shift CRUD and result-declaration endpoints. Returning from `beforeHandle`
 // short-circuits the request.
-const ownerOnly = ({ store, set }: any) => {
-  if (store.role !== UserRole.Owner) {
+const ownerOnly = ({ userRole, set }: any) => {
+  if (userRole !== UserRole.Owner) {
     set.status = 403;
     return { success: false, message: "Owner access only" };
   }
@@ -111,7 +111,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // ── Create a new shift (owner only) ──────────────────────────────────────
   .post(
     "/shifts",
-    async ({ body, set, store }) => {
+    async ({ body, set, userId }: any) => {
       try {
         // Auto-increment order: get the max shiftOrder for active shifts
         const [maxOrder] = await db
@@ -142,8 +142,8 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
             isActive: body.isActive ?? true,
             nextDayAllow: body.nextDayAllow ?? false,
             capping: String(body.capping ?? 0),
-            addedBy: (store as any).id || SYSTEM_USER_ID,
-            updateBy: (store as any).id || SYSTEM_USER_ID,
+            addedBy: userId || SYSTEM_USER_ID,
+            updateBy: userId || SYSTEM_USER_ID,
           })
           .returning();
 
@@ -179,14 +179,14 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // NOTE: must be before /shifts/:id to avoid path conflict
   .put(
     "/shifts/reorder",
-    async ({ body, set, store }) => {
+    async ({ body, set, userId }: any) => {
       try {
-        const updates = body.orders.map((item) =>
+        const updates = body.orders.map((item: any) =>
           db
             .update(matkaShifts)
             .set({
               shiftOrder: item.shiftOrder,
-              updateBy: (store as any).id || SYSTEM_USER_ID,
+              updateBy: userId || SYSTEM_USER_ID,
             })
             .where(eq(matkaShifts.id, item.id))
         );
@@ -218,7 +218,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // ── Update a shift — owner only ──────────────────────────────────────────
   .put(
     "/shifts/:id",
-    async ({ body, params, set, store }) => {
+    async ({ body, params, set, userId }: any) => {
       try {
         const [existing] = await db
           .select()
@@ -231,7 +231,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         }
 
         const updateData: Record<string, any> = {
-          updateBy: (store as any).id || SYSTEM_USER_ID,
+          updateBy: userId || SYSTEM_USER_ID,
         };
 
         if (body.name !== undefined) updateData.name = body.name;
@@ -284,13 +284,13 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // ── Delete a shift (soft delete) — owner only ────────────────────────────
   .delete(
     "/shifts/:id",
-    async ({ params, set, store }) => {
+    async ({ params, set, userId, userRole }: any) => {
       try {
         const [updated] = await db
           .update(matkaShifts)
           .set({
             recordStatus: RecordStatus.Deleted,
-            updateBy: (store as any).id || SYSTEM_USER_ID,
+            updateBy: userId || SYSTEM_USER_ID,
           })
           .where(eq(matkaShifts.id, params.id))
           .returning();
@@ -347,10 +347,10 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   })
 
   // ── Live Prediction: per-number sale / profit + 30-day declared count ─────
-  .get("/live-prediction/:shiftId", async ({ params, set, store }) => {
+  .get("/live-prediction/:shiftId", async ({ params, set, userId, userRole }: any) => {
     try {
-      const viewerId = (store as any).id;
-      const viewerRole = Number((store as any).role);
+      const viewerId = userId;
+      const viewerRole = Number(userRole);
       const cfg = roleConfig(viewerRole);
 
       const [shift] = await db
@@ -495,10 +495,10 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // ── Live Prediction: per-whitelabel (or all) jantri grid for a shift ──────
   .get(
     "/live-prediction/:shiftId/jantri",
-    async ({ params, query, set, store }) => {
+    async ({ params, query, set, userId, userRole }: any) => {
       try {
-        const viewerId = (store as any).id;
-        const viewerRole = Number((store as any).role);
+        const viewerId = userId;
+        const viewerRole = Number(userRole);
         const cfg = roleConfig(viewerRole);
         if (!cfg) {
           set.status = 403;
@@ -574,7 +574,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // ── Live Prediction: per-whitelabel sale for a single number (Agent Group) ──
   .get(
     "/live-prediction/:shiftId/agent-sale",
-    async ({ params, query, set, store }) => {
+    async ({ params, query, set, userId, userRole }: any) => {
       try {
         const num = Number(query?.nums);
         if (!Number.isInteger(num) || num < 1 || num > 100) {
@@ -621,7 +621,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   // ── Live Prediction: declare a result for a shift ─────────────────────────
   .post(
     "/live-prediction/:shiftId/declare",
-    async ({ params, body, set, store }) => {
+    async ({ params, body, set, userId }: any) => {
       try {
         const num = Number(body.result);
         if (!Number.isFinite(num) || num < 0 || num > 100) {
@@ -689,13 +689,13 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
           .update(matkaShifts)
           .set({
             shiftDate: "1970-01-01",
-            updateBy: (store as any).id || SYSTEM_USER_ID,
+            updateBy: userId || SYSTEM_USER_ID,
           })
           .where(eq(matkaShifts.id, params.shiftId));
 
         // marketId must be unique numeric — use epoch microseconds.
         const uniqueMarketId = String(Date.now() * 1000 + Math.floor(Math.random() * 1000));
-        const ownerId = (store as any).id || SYSTEM_USER_ID;
+        const ownerId = userId || SYSTEM_USER_ID;
 
         const [inserted] = await db
           .insert(marketResults)

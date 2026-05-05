@@ -363,12 +363,12 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
 
   // ── Competition endpoints (role + whitelabel aware) ─────────────────────
 
-  .get("/competitions/:sportId", async ({ params, query, set, store, whitelabel }) => {
+  .get("/competitions/:sportId", async ({ params, query, set, userId, userRole, whitelabel }: any) => {
     try {
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        store as { id?: string; role?: string },
+        { id: userId, role: String(userRole) },
       );
 
       const limitRaw = Number((query as any)?.limit);
@@ -418,12 +418,12 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     ),
   })
 
-  .post("/competitions/:sportId/update-status", async ({ params, body, set, store, whitelabel }) => {
+  .post("/competitions/:sportId/update-status", async ({ params, body, set, userId, userRole, whitelabel }: any) => {
     try {
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        store as { id?: string; role?: string },
+        { id: userId, role: String(userRole) },
       );
 
       const { competitions: updates } = body as {
@@ -468,12 +468,12 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
 
   // ── Event endpoints (per-competition, role + whitelabel aware) ─────────────
 
-  .get("/events/:competitionId", async ({ params, query, set, store, whitelabel }) => {
+  .get("/events/:competitionId", async ({ params, query, set, userId, userRole, whitelabel }: any) => {
     try {
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        store as { id?: string; role?: string },
+        { id: userId, role: String(userRole) },
       );
 
       const limitRaw = Number((query as any)?.limit);
@@ -524,12 +524,12 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     ),
   })
 
-  .post("/events/:competitionId/update-status", async ({ params, body, set, store, whitelabel }) => {
+  .post("/events/:competitionId/update-status", async ({ params, body, set, userId, userRole, whitelabel }: any) => {
     try {
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        store as { id?: string; role?: string },
+        { id: userId, role: String(userRole) },
       );
 
       const { events: updates } = body as {
