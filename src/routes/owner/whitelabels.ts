@@ -9,7 +9,7 @@ import { UserRole } from "../../types/enums";
 
 export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .get("/", async ({ set, userId, userRole }: any) => {
-    const scope = await resolveOwnerScope(db, undefined, { id: userId, role: String(userRole) });
+    const scope = await resolveOwnerScope(db, undefined, { id: userId, role: userRole });
     let query = db
       .select({
         whitelabel: whitelabels,
@@ -73,7 +73,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
     "/",
     async ({ body, set, userId: callerId, userRole }: any) => {
       try {
-        const scope = await resolveOwnerScope(db, undefined, { id: callerId, role: String(userRole) });
+        const scope = await resolveOwnerScope(db, undefined, { id: callerId, role: userRole });
         if (scope.currentUserRole !== UserRole.Owner) {
           set.status = 403;
           return { success: false, message: "Only owner can create whitelabels." };
@@ -167,7 +167,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .put(
     "/:id",
     async ({ params, body, set, userId, userRole }: any) => {
-      const scope = await resolveOwnerScope(db, undefined, { id: userId, role: String(userRole) });
+      const scope = await resolveOwnerScope(db, undefined, { id: userId, role: userRole });
       const [existing] = await db
         .select()
         .from(whitelabels)
@@ -280,7 +280,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   )
 
   .delete("/:id", async ({ params, set, userId, userRole }: any) => {
-    const scope = await resolveOwnerScope(db, undefined, { id: userId, role: String(userRole) });
+    const scope = await resolveOwnerScope(db, undefined, { id: userId, role: userRole });
     const [existing] = await db
       .select()
       .from(whitelabels)

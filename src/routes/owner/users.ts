@@ -16,7 +16,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
   .post(
     "/",
     async ({ body, set, db, whitelabel, userId, userRole }: any) => {
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: String(userRole) });
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: userRole });
       const requestedRole = body.role ? parseUserRole(body.role as string) : UserRole.User;
       if (!scope.allowedRolesToCreate.includes(requestedRole)) {
         set.status = 403;
@@ -185,7 +185,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     // Scope resolution stays in TS — it reads headers, cookies, and the
     // whitelabel middleware result. The SQL function applies the actual
     // visibility rules and enrichment joins in one query.
-    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: String(userRole) });
+    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: userRole });
 
     // Early-exit for non-owner callers without a whitelabel scope, same as
     // the old logic (these users have no business seeing anyone).
@@ -215,7 +215,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       set.status = 400;
       return { success: false, message: "Invalid user ID" };
     }
-    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: String(userRole) });
+    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: userRole });
 
     // Verify the target user exists and is visible to the requester
     const [target] = await db
@@ -306,7 +306,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         set.status = 400;
         return { success: false, message: "Invalid user ID" };
       }
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: callerId, role: String(userRole) });
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: callerId, role: userRole });
       const [target] = await db
         .select({
           id: users.id,
@@ -469,7 +469,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         set.status = 400;
         return { success: false, message: "Invalid user ID" };
       }
-      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: callerId, role: String(userRole) });
+      const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: callerId, role: userRole });
       const [target] = await db.select({ id: users.id, whitelabelId: users.whitelabelId, addedBy: users.addedBy, createdBy: users.createdBy }).from(users).where(eq(users.id, userId)).limit(1);
       if (!target) {
         set.status = 404;

@@ -368,7 +368,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        { id: userId, role: String(userRole) },
+        { id: userId, role: userRole },
       );
 
       const limitRaw = Number((query as any)?.limit);
@@ -423,7 +423,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        { id: userId, role: String(userRole) },
+        { id: userId, role: userRole },
       );
 
       const { competitions: updates } = body as {
@@ -473,7 +473,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        { id: userId, role: String(userRole) },
+        { id: userId, role: userRole },
       );
 
       const limitRaw = Number((query as any)?.limit);
@@ -529,7 +529,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
       const scope = await resolveOwnerScope(
         db as DbType,
         whitelabel ?? undefined,
-        { id: userId, role: String(userRole) },
+        { id: userId, role: userRole },
       );
 
       const { events: updates } = body as {
