@@ -197,6 +197,54 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     },
   )
 
+  // ── Toggle sport live/coming-soon (owner only) ────────────────────────
+  // Independent from is_active: when is_live=false the sport stays in nav
+  // but its public page shows a "Coming Soon" banner.
+  .post(
+    "/toggle-live/:sportId",
+    async ({ params, body, set }) => {
+      try {
+        const sportId = Number(params.sportId);
+        if (!Number.isFinite(sportId)) {
+          set.status = 400;
+          return { success: false, error: "Invalid sportId" };
+        }
+
+        const { isLive } = body as { isLive: boolean };
+
+        const [updated] = await db
+          .update(sports)
+          .set({
+            is_live: isLive,
+            updateBy: SYSTEM_USER_ID,
+            updateDate: new Date(),
+          })
+          .where(eq(sports.sport_id, sportId))
+          .returning({ sport_id: sports.sport_id, is_live: sports.is_live });
+
+        if (!updated) {
+          set.status = 404;
+          return { success: false, error: "Sport not found" };
+        }
+
+        await invalidateSportsListCache();
+
+        set.status = 200;
+        return {
+          success: true,
+          data: { sportId: updated.sport_id, isLive: updated.is_live },
+        };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to update sport live state" };
+      }
+    },
+    {
+      params: t.Object({ sportId: t.String() }),
+      body: t.Object({ isLive: t.Boolean() }),
+    },
+  )
+
   // ── Toggle a competition's "top competition" flag (owner only) ────────
   .post(
     "/toggle-top-competition/:competitionId",

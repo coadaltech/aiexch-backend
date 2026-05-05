@@ -1,0 +1,1 @@
+ALTER TABLE "sports" ADD COLUMN "is_live" boolean DEFAULT true NOT NULL;

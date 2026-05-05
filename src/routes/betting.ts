@@ -353,18 +353,18 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       }
 
       const userLimitNum = parseFloat(ledger.userLimit ?? "0");
-      const finalLimitNum = parseFloat(ledger.finalLimit ?? "0");
 
-      if (finalLimitNum <= 0) {
+      // Fail-fast only when the user has no betting allowance at all.
+      // We deliberately do NOT reject on final_limit <= 0 here: a hedging bet
+      // (e.g. lay on a runner the user is already long on) reduces total
+      // exposure, so post-insertion final_limit can become positive again
+      // even when pre-insertion final_limit was 0 or negative. The real
+      // exposure check is done post-insert by re-running set_limit_used_of_user
+      // inside the transaction and rolling back if final_limit < 0.
+      if (userLimitNum <= 0) {
         set.status = 400;
         return { success: false, error: "Bet rejected: no available limit" };
       }
-
-      // NOTE: We no longer compare stake or single-bet exposure against finalLimit here.
-      // The DB trigger (trg_recalc_ledger_on_bet) calculates the TOTAL worst-case exposure
-      // across all markets after inserting this bet, and checks total_exposure <= user_limit.
-      // This allows e.g. a lay bet with stake 5000 if the worst-case loss is only 800 and
-      // the user's limit covers that.
 
       // ── STEP 1.5: Verify odds against upstream /sports/books/ ──
       // The user's screen may be running on a stale snapshot (slow network, WS
@@ -566,11 +566,25 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
         await tx.insert(transactionCommissions).values(snapshotData);
 
+        // Recalculate exposure inside the transaction so we can reject
+        // (and roll back) any bet that would push final_limit negative.
+        // Hedging bets reduce limit_consumed and pass; bets that genuinely
+        // exceed the user's allowance are caught here.
+        await tx.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
+
+        const [updatedLedger] = await tx
+          .select({ finalLimit: ledgerLimit.finalLimit })
+          .from(ledgerLimit)
+          .where(eq(ledgerLimit.userId, store.id))
+          .limit(1);
+
+        const newFinalLimit = parseFloat(updatedLedger?.finalLimit ?? "0");
+        if (newFinalLimit < 0) {
+          throw new Error("Bet rejected: potential loss exceeds your available limit");
+        }
+
         return [newTxn];
       });
-
-      // Call procedure to recalculate exposure and update ledger_limit
-      await db.execute(sql`CALL set_limit_used_of_user(${store.id}::uuid)`);
 
       set.status = 201;
       return { success: true, transactionId: txn.id };

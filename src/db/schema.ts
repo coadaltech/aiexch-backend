@@ -606,6 +606,9 @@ export const sports = pgTable("sports", {
   sport_id: bigint("sport_id", { mode: "number" }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull(),
   is_active: boolean("is_active").default(true),
+  // When false, the sport is shown in the sidebar/dropheader but its page
+  // displays a "Coming Soon" banner instead of live content.
+  is_live: boolean("is_live").default(true).notNull(),
   sort_order: integer("sort_order").default(0),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),

@@ -49,6 +49,8 @@ export const getAvailableSportsList = async (
       name: sport.name,
       is_active: sport.is_active,
       isActive: sport.is_active,
+      is_live: sport.is_live,
+      isLive: sport.is_live,
       sort_order: sport.sort_order,
       addedDate: sport.addedDate,
       updateDate: sport.updateDate,
