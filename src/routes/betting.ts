@@ -265,7 +265,11 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           .from(users).where(eq(users.id, userId)).limit(1),
 
         // 3. Ledger limits
-        db.select({ userLimit: ledgerLimit.userLimit, finalLimit: ledgerLimit.finalLimit })
+        db.select({
+          userLimit: ledgerLimit.userLimit,
+          finalLimit: ledgerLimit.finalLimit,
+          transactionLimit: ledgerLimit.transactionLimit,
+        })
           .from(ledgerLimit).where(eq(ledgerLimit.userId, userId)).limit(1),
 
         // 4. Redis market status check (non-blocking)
@@ -351,6 +355,16 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       if (resolvedMaxBet > 0 && stake > resolvedMaxBet) {
         set.status = 400;
         return { success: false, error: `Bet rejected: maximum bet is ${resolvedMaxBet}` };
+      }
+
+      // Per-user single-bet cap (transactionLimit). 0 means "no cap".
+      // We take the more restrictive of (market maxBet, user transactionLimit),
+      // so if the user is capped at 10k and the market allows 10L, only 10k
+      // goes through per individual bet.
+      const txLimitNum = parseFloat(ledger?.transactionLimit ?? "0");
+      if (txLimitNum > 0 && stake > txLimitNum) {
+        set.status = 400;
+        return { success: false, error: `Bet rejected: per-bet limit is ${txLimitNum}` };
       }
 
       const whitelabelId = userRecord[0]?.whitelabelId ?? null;

@@ -198,6 +198,16 @@ export const AdminMarketService = {
       await redis.hSet(`admin:market:${marketId}`, hash);
     }
 
+    // Push an instant patched broadcast so subscribed user pages (matchId,
+    // multimarket) reflect the new min/max bet, bet delay, and toggles
+    // immediately instead of waiting up to a full poll cycle.
+    const resolvedEventId =
+      data.eventId ||
+      (existing[0]?.eventId != null ? String(existing[0].eventId) : null);
+    if (resolvedEventId) {
+      LiveDataService.patchMarketSettings(resolvedEventId, marketId, data);
+    }
+
     return { success: true, marketId };
   },
 

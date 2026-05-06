@@ -27,7 +27,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "No whitelabel scope. You must operate from your whitelabel domain." };
       }
 
-      const { username, email, password, role, membership, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId } = body as any;
+      const { username, email, password, role, membership, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId, transactionLimit } = body as any;
       const addedBy = userId;
       let whitelabelId: string | null =
         bodyWhitelabelId != null
@@ -132,6 +132,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
       // Create ledger_limit record — all amounts start at 0;
       // admin can assign a credit limit (userLimit) separately.
+      // transactionLimit is the per-bet cap; default 0 = "no per-bet cap".
       await db.insert(ledgerLimit).values({
         userId: user.id,
         userBalance: "0",
@@ -139,6 +140,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         limitConsumed: "0",
         fixLimit: "0",
         finalLimit: "0",
+        transactionLimit: toStr(transactionLimit),
         addedBy: addedBy || SYSTEM_USER_ID,
         updateBy: addedBy || SYSTEM_USER_ID,
       });
@@ -178,6 +180,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         lastName: t.Optional(t.String()),
         phone: t.Optional(t.String()),
         country: t.Optional(t.String()),
+        transactionLimit: t.Optional(t.Union([t.String(), t.Number()])),
       }),
     }
   )
@@ -285,6 +288,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         userLimit: ledgerLimit.userLimit,
         limitConsumed: ledgerLimit.limitConsumed,
         userBalance: ledgerLimit.userBalance,
+        transactionLimit: ledgerLimit.transactionLimit,
       })
       .from(ledgerLimit)
       .where(eq(ledgerLimit.userId, params.id));
@@ -391,6 +395,41 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       if (body.downline !== undefined) profileUpdateData.downline = typeof body.downline === "number" ? body.downline.toString() : body.downline;
       if (body.currencyId !== undefined) profileUpdateData.currencyId = body.currencyId;
 
+      // Per-bet transaction limit lives on ledger_limit, not profiles.
+      // Only the user's creator can update it (same rule as status).
+      if (body.transactionLimit !== undefined) {
+        if (!isCreator) {
+          set.status = 403;
+          return { success: false, message: "Only the user's creator can change transaction limit" };
+        }
+        const txStr = typeof body.transactionLimit === "number"
+          ? body.transactionLimit.toString()
+          : String(body.transactionLimit);
+        const txNum = parseFloat(txStr);
+        if (!Number.isFinite(txNum) || txNum < 0) {
+          set.status = 400;
+          return { success: false, message: "Invalid transaction limit" };
+        }
+        const existingLedger = await db
+          .select({ userId: ledgerLimit.userId })
+          .from(ledgerLimit)
+          .where(eq(ledgerLimit.userId, userId))
+          .limit(1);
+        if (existingLedger.length > 0) {
+          await db
+            .update(ledgerLimit)
+            .set({ transactionLimit: txStr, updateBy: updatedBy })
+            .where(eq(ledgerLimit.userId, userId));
+        } else {
+          await db.insert(ledgerLimit).values({
+            userId,
+            transactionLimit: txStr,
+            addedBy: updatedBy,
+            updateBy: updatedBy,
+          });
+        }
+      }
+
       let updated: any = null;
       if (Object.keys(userUpdateData).length > 0) {
         const [u] = await db
@@ -457,6 +496,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         downline: t.Optional(t.Union([t.String(), t.Number()])),
         password: t.Optional(t.String({ minLength: 6 })),
         currencyId: t.Optional(t.Union([t.String(), t.Null()])),
+        transactionLimit: t.Optional(t.Union([t.String(), t.Number()])),
       }),
     }
   )

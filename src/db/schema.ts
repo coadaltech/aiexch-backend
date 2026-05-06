@@ -749,6 +749,10 @@ export const ledgerLimit = pgTable("ledger_limit", {
   limitConsumed: decimal("limit_consumed", { precision: 15, scale: 2 }).default("0").notNull(),
   fixLimit: decimal("fix_limit", { precision: 15, scale: 2 }).default("0").notNull(),
   finalLimit: decimal("final_limit", { precision: 15, scale: 2 }).default("0").notNull(),
+  // Per-user maximum stake for a single bet. 0 means "no per-bet cap";
+  // any other value caps each individual bet at that amount (multiple bets
+  // are still allowed).
+  transactionLimit: decimal("transaction_limit", { precision: 15, scale: 2 }).default("0").notNull(),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

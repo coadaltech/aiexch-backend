@@ -243,6 +243,18 @@ export const LiveDataService = {
       return;
     }
 
+    // Refresh admin overrides every tick — these are cheap Redis HGETALL
+    // reads, and they must reflect owner-panel changes (min/max bet, bet
+    // delay, toggles) within a single poll cycle instead of waiting for the
+    // 60s structure refresh window. The expensive external getMarkets call
+    // stays cached at 60s.
+    const [freshEventOverrides, freshMarketOverridesMap] = await Promise.all([
+      MarketPipelineService.getEventOverrides(eventId),
+      MarketPipelineService.getMarketOverridesBatch(structure.openMarketIds),
+    ]);
+    structure.eventOverrides = freshEventOverrides;
+    structure.marketOverridesMap = freshMarketOverridesMap;
+
     // Custom markets are owner-controlled and must reflect create/update/delete
     // instantly on the user's match page. Fetch fresh from Redis every tick
     // (cheap: a single SMEMBERS + HGETALL per custom market) instead of using
@@ -344,6 +356,58 @@ export const LiveDataService = {
 
     // Fire-and-forget: update Redis live cache for bet validation
     MarketPipelineService.finalize(eventId, allProcessed);
+  },
+
+  // Instant patch path for admin market settings (min/max bet, bet delay,
+  // active/visible/suspended). Mutates the cached lastMessage so subscribers
+  // see the change on the next frame without waiting for the next poll tick
+  // (which has to await the external getOdds call, ~1–2s). Safe to call
+  // fire-and-forget; no-op if the event has no live subscribers yet.
+  patchMarketSettings(
+    eventId: string,
+    marketId: string,
+    patch: {
+      isActive?: boolean;
+      isVisible?: boolean;
+      suspended?: boolean;
+      betLock?: boolean;
+      betDelay?: number;
+      minBet?: number;
+      maxBet?: number;
+      maxProfit?: number;
+    }
+  ) {
+    const state = activeEvents.get(eventId);
+    if (!state || !state.lastMessage) return;
+    try {
+      const msg = JSON.parse(state.lastMessage);
+      const list: any[] = Array.isArray(msg.matchOdds) ? msg.matchOdds : [];
+      const market = list.find((m: any) => m.marketId === marketId);
+      if (!market) return;
+
+      if (patch.isActive !== undefined) market.adminDisabled = !patch.isActive;
+      if (patch.isVisible !== undefined) market.adminHidden = !patch.isVisible;
+      // Only force SUSPENDED on a true→suspend; un-suspending requires the
+      // real odds-feed status, which the next poll will fill in.
+      if (patch.suspended === true) market.status = "SUSPENDED";
+
+      market.marketCondition = market.marketCondition || {};
+      if (patch.betDelay !== undefined) market.marketCondition.betDelay = patch.betDelay;
+      if (patch.minBet !== undefined) market.marketCondition.minBet = patch.minBet;
+      if (patch.maxBet !== undefined) market.marketCondition.maxBet = patch.maxBet;
+      if (patch.maxProfit !== undefined) market.marketCondition.maxProfit = patch.maxProfit;
+      if (patch.betLock !== undefined) market.marketCondition.betLock = patch.betLock;
+
+      msg.timestamp = Date.now();
+      const patched = JSON.stringify(msg);
+      state.lastMessage = patched;
+      this._broadcast(state, patched);
+    } catch (e) {
+      console.warn(
+        `[Live] patchMarketSettings failed for ${eventId}/${marketId}:`,
+        (e as Error)?.message
+      );
+    }
   },
 
   // Instant patch path for admin toggles (e.g. ball-running). Mutates the

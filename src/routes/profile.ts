@@ -78,6 +78,14 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       .where(eq(profiles.userId, userId))
       .limit(1);
 
+    // transactionLimit is the per-bet cap. The bet UI reads this off the
+    // logged-in user so it can clamp the stake input before submission.
+    const [ledger] = await db
+      .select({ transactionLimit: ledgerLimit.transactionLimit })
+      .from(ledgerLimit)
+      .where(eq(ledgerLimit.userId, userId))
+      .limit(1);
+
     const geo = lookupGeo(getCurrentIP(headers, request));
 
     set.status = 200;
@@ -95,6 +103,7 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         currencyId: profile?.currencyId ?? null,
         country: geo.country ?? profile?.country ?? null,
         timezone: geo.timezone ?? null,
+        transactionLimit: ledger?.transactionLimit ?? "0",
       },
     };
   })

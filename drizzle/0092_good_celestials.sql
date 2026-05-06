@@ -1,0 +1,1 @@
+ALTER TABLE "ledger_limit" ADD COLUMN "transaction_limit" numeric(15, 2) DEFAULT '0' NOT NULL;

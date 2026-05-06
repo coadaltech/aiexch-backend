@@ -33,7 +33,8 @@
 --   membership, betStatus, parentBetStatus, upline, downline, currencyId,
 --   lastLoginIp, lastLoginAt, firstName, lastName, phone, country,
 --   addedByUsername, whitelabelName,
---   balance, userLimit, limitConsumed, fixLimit, finalLimit
+--   balance, userLimit, limitConsumed, fixLimit, finalLimit,
+--   transactionLimit
 
 CREATE OR REPLACE FUNCTION fn_list_owner_users(
   p_current_user_id      uuid,
@@ -115,7 +116,8 @@ AS $$
         'userLimit',            COALESCE(l.user_limit,     '0.00'),
         'limitConsumed',        COALESCE(l.limit_consumed, '0.00'),
         'fixLimit',             COALESCE(l.fix_limit,      '0.00'),
-        'finalLimit',           COALESCE(l.final_limit,    '0.00')
+        'finalLimit',           COALESCE(l.final_limit,    '0.00'),
+        'transactionLimit',     COALESCE(l.transaction_limit, '0.00')
       )
       ORDER BY u.added_date DESC
     ),
