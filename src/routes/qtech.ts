@@ -1,114 +1,89 @@
 import { Elysia, t } from "elysia";
 import crypto from "crypto";
 
-// Stub QTech Games seamless wallet endpoints for the integration handover form.
-// Real DB / wallet logic will replace the dummy responses once QTech shares their API spec.
+// QTech Games "Common Wallet" stub endpoints.
 //
-// Signing (provisional — adjust when QTech doc arrives):
-//   - Algo: HMAC-SHA256(rawJsonBodyWithoutSignatureField, QTECH_PASSKEY) hex-encoded
-//   - Sent in JSON `signature` field OR `X-Signature` header
-//   - Constant-time compare via crypto.timingSafeEqual
+// Auth model (per QT Common Wallet API §2.1): simple shared-secret `Pass-Key`
+// HTTP header — no signing, no HMAC. Constant-time compare so a wrong key
+// can't be timing-attacked into being learned.
+//
+// Endpoint shape (per QT Common Wallet API §3): GET for session/balance,
+// POST /transactions for both withdrawal (txnType=DEBIT) and deposit
+// (txnType=CREDIT), POST /transactions/rollback for rollback. Promotion
+// Status and Rewards live at the paths submitted on the QT handover form.
+//
+// Responses are hardcoded dummies; real DB-backed wallet logic replaces them
+// once integration testing with QT passes.
 const PASS_KEY = process.env.QTECH_PASSKEY || "";
 
-type VerifyResult = "ok" | "missing" | "invalid";
-
-function verifySignature(body: any, headerSig?: string | string[]): VerifyResult {
-  if (!PASS_KEY) return "invalid";
-
-  const sentRaw =
-    (body && typeof body === "object" && body.signature) ||
-    (Array.isArray(headerSig) ? headerSig[0] : headerSig);
-
-  if (!sentRaw || typeof sentRaw !== "string") return "missing";
-
-  const bodyForSig = { ...(body || {}) };
-  delete bodyForSig.signature;
-  const payload = JSON.stringify(bodyForSig);
-
-  const expected = crypto
-    .createHmac("sha256", PASS_KEY)
-    .update(payload)
-    .digest("hex");
-
+function checkPassKey(headers: Record<string, string | string[] | undefined>): boolean {
+  if (!PASS_KEY) return false;
+  const raw = headers["pass-key"];
+  const sent = Array.isArray(raw) ? raw[0] : raw;
+  if (!sent || typeof sent !== "string") return false;
   try {
-    const a = Buffer.from(sentRaw, "hex");
-    const b = Buffer.from(expected, "hex");
-    if (a.length !== b.length) return "invalid";
-    return crypto.timingSafeEqual(a, b) ? "ok" : "invalid";
+    const a = Buffer.from(sent);
+    const b = Buffer.from(PASS_KEY);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   } catch {
-    return "invalid";
+    return false;
   }
 }
 
+const loginFailed = { code: "LOGIN_FAILED", message: "The given pass-key is incorrect." };
+
 export const qtechRoutes = new Elysia({ prefix: "/qtech/v1" })
-  .onBeforeHandle(({ body, headers, set }) => {
-    const headerSig = headers["x-signature"];
-    const result = verifySignature(body, headerSig);
-    if (result === "missing") {
+  .onBeforeHandle(({ headers, set }) => {
+    if (!checkPassKey(headers)) {
       set.status = 401;
-      return { status: "ERROR", code: "MISSING_SIGNATURE" };
-    }
-    if (result === "invalid") {
-      set.status = 401;
-      return { status: "ERROR", code: "INVALID_SIGNATURE" };
+      return loginFailed;
     }
   })
+  // §3.1 Verify Session — GET /accounts/{playerId}/session?gameId=…
+  .get("/accounts/:playerId/session", ({ params }) => ({
+    balance: 1000.0,
+    currency: "INR",
+    playerId: params.playerId,
+  }))
+  // §3.2 Get Balance — GET /accounts/{playerId}/balance?gameId=…
+  .get("/accounts/:playerId/balance", () => ({
+    balance: 1000.0,
+    currency: "INR",
+  }))
+  // §3.3 Withdrawal (txnType=DEBIT) and §3.4 Deposit (txnType=CREDIT)
+  // share POST /transactions; the body discriminates.
   .post(
-    "/balance",
-    () => ({
-      status: "OK",
-      balance: 1000.0,
-      currency: "INR",
-      playerId: "test_player",
-    }),
+    "/transactions",
+    ({ body, set }) => {
+      const txnType = (body as { txnType?: string })?.txnType;
+      set.status = 201;
+      if (txnType === "DEBIT") {
+        return { balance: 950.0, referenceId: `ref_${Date.now()}` };
+      }
+      // CREDIT (deposit / win)
+      return { balance: 1050.0, referenceId: `ref_${Date.now()}` };
+    },
     { body: t.Any() },
   )
+  // §3.5 Rollback — POST /transactions/rollback
   .post(
-    "/debit",
-    () => ({
-      status: "OK",
-      balance: 950.0,
-      transactionId: "txn_dummy_001",
-      currency: "INR",
-    }),
+    "/transactions/rollback",
+    () => ({ balance: 1000.0, referenceId: `ref_${Date.now()}` }),
     { body: t.Any() },
   )
-  .post(
-    "/credit",
-    () => ({
-      status: "OK",
-      balance: 1050.0,
-      transactionId: "txn_dummy_002",
-      currency: "INR",
-    }),
-    { body: t.Any() },
-  )
-  .post(
-    "/rollback",
-    () => ({
-      status: "OK",
-      balance: 1000.0,
-      transactionId: "txn_dummy_003",
-      currency: "INR",
-    }),
-    { body: t.Any() },
-  )
+  // §3.6 Promotion Status — informative callback, returns 204 No Content
   .post(
     "/promotion/status",
-    () => ({
-      status: "OK",
-      eligible: false,
-      bonusBalance: 0,
-      currency: "INR",
-    }),
+    () => new Response(null, { status: 204 }),
     { body: t.Any() },
   )
+  // §3.7 Rewards — POST /rewards (operator-defined path on the handover form)
   .post(
     "/rewards",
-    () => ({
-      status: "OK",
-      balance: 1100.0,
-      transactionId: "reward_dummy_001",
-    }),
+    ({ set }) => {
+      set.status = 201;
+      return { balance: 1100.0, referenceId: `reward_${Date.now()}` };
+    },
     { body: t.Any() },
   );

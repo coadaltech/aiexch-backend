@@ -1,9 +1,9 @@
-// Smoke test for the QTech stub endpoints. Run against a live dev server:
+// Smoke test for the QTech Common Wallet stub.
 //   bun run dev          # in one terminal
 //   bun run test/qtech-stub.test.ts <baseUrl> <passKey>
 // Defaults: http://localhost:3001 + QTECH_PASSKEY from env.
-import crypto from "crypto";
 import "dotenv/config";
+declare const process: { argv: string[]; env: Record<string, string | undefined>; exit: (code: number) => never };
 
 const BASE = process.argv[2] || `http://localhost:${process.env.PORT || 3001}`;
 const PASS_KEY = process.argv[3] || process.env.QTECH_PASSKEY || "";
@@ -13,27 +13,19 @@ if (!PASS_KEY) {
   process.exit(1);
 }
 
-const ENDPOINTS = [
-  "/qtech/v1/balance",
-  "/qtech/v1/debit",
-  "/qtech/v1/credit",
-  "/qtech/v1/rollback",
-  "/qtech/v1/promotion/status",
-  "/qtech/v1/rewards",
-];
-
-function sign(payload: object, key: string): string {
-  return crypto.createHmac("sha256", key).update(JSON.stringify(payload)).digest("hex");
-}
-
-async function post(path: string, body: object, headers: Record<string, string> = {}) {
+async function call(method: string, path: string, body?: object, key?: string | null) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key !== null) headers["Pass-Key"] = key ?? PASS_KEY;
   const res = await fetch(BASE + path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body),
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
   });
-  let json: any = null;
-  try { json = await res.json(); } catch {}
+  let json: unknown = null;
+  const text = await res.text();
+  if (text) {
+    try { json = JSON.parse(text); } catch { json = text; }
+  }
   return { status: res.status, body: json };
 }
 
@@ -50,50 +42,126 @@ function check(name: string, ok: boolean, detail?: unknown) {
   }
 }
 
+const debitBody = {
+  txnType: "DEBIT",
+  txnId: `txn_${Date.now()}`,
+  playerId: "test_player",
+  roundId: "round_1",
+  amount: 50.0,
+  currency: "INR",
+  gameId: "TK-froggrog",
+  device: "MOBILE",
+  clientType: "HTML5",
+  created: new Date().toISOString(),
+  completed: "false",
+};
+
+const creditBody = {
+  txnType: "CREDIT",
+  txnId: `txn_${Date.now() + 1}`,
+  betId: debitBody.txnId,
+  playerId: "test_player",
+  roundId: "round_1",
+  amount: 100.0,
+  currency: "INR",
+  gameId: "TK-froggrog",
+  device: "MOBILE",
+  clientType: "HTML5",
+  created: new Date().toISOString(),
+  completed: "true",
+};
+
+const rollbackBody = {
+  betId: debitBody.txnId,
+  txnId: `txn_${Date.now() + 2}`,
+  playerId: "test_player",
+  roundId: "round_1",
+  amount: 50.0,
+  currency: "INR",
+  gameId: "TK-froggrog",
+  created: new Date().toISOString(),
+  completed: "true",
+};
+
+const promoBody = {
+  bonusId: "bonus-1",
+  playerId: "test_player",
+  gameIds: ["TK-froggrog"],
+  totalBetValue: 100.0,
+  roundOptions: [1, 2, 4],
+  currency: "INR",
+  promoCode: "TEST",
+  status: "PROMOTED",
+  validityDays: 7,
+  promotedDateTime: new Date().toISOString(),
+};
+
+const rewardBody = {
+  rewardType: "TOURNAMENT_REWARD",
+  rewardTitle: "Test Tournament",
+  txnId: `reward_${Date.now()}`,
+  playerId: "test_player",
+  amount: 500.0,
+  currency: "INR",
+  created: new Date().toISOString(),
+};
+
 async function run() {
   console.log(`Base: ${BASE}`);
   console.log(`PassKey: ${PASS_KEY.slice(0, 4)}…${PASS_KEY.slice(-4)} (len=${PASS_KEY.length})`);
 
-  console.log("\n[1] Valid signature in body — expect 200 OK");
-  for (const path of ENDPOINTS) {
-    const payload: Record<string, unknown> = { playerId: "test_player", currency: "INR", nonce: crypto.randomUUID() };
-    const signed = { ...payload, signature: sign(payload, PASS_KEY) };
-    const r = await post(path, signed);
-    check(`${path} 200`, r.status === 200 && r.body?.status === "OK", r);
+  console.log("\n[1] Verify Session — GET /accounts/{playerId}/session");
+  {
+    const r = await call("GET", "/qtech/v1/accounts/test_player/session?gameId=TK-froggrog");
+    check("200 with balance+currency", r.status === 200 && (r.body as any)?.currency === "INR", r);
   }
 
-  console.log("\n[2] Valid signature in X-Signature header — expect 200 OK");
+  console.log("\n[2] Get Balance — GET /accounts/{playerId}/balance");
   {
-    const payload = { playerId: "test_player", currency: "INR" };
-    const r = await post("/qtech/v1/balance", payload, { "X-Signature": sign(payload, PASS_KEY) });
-    check("X-Signature header path", r.status === 200 && r.body?.status === "OK", r);
+    const r = await call("GET", "/qtech/v1/accounts/test_player/balance?gameId=TK-froggrog");
+    check("200 with balance+currency", r.status === 200 && (r.body as any)?.currency === "INR", r);
   }
 
-  console.log("\n[3] Missing signature — expect 401 MISSING_SIGNATURE");
+  console.log("\n[3] Withdrawal (DEBIT) — POST /transactions");
   {
-    const r = await post("/qtech/v1/balance", { playerId: "test_player" });
-    check("missing signature", r.status === 401 && r.body?.code === "MISSING_SIGNATURE", r);
+    const r = await call("POST", "/qtech/v1/transactions", debitBody);
+    check("201 with balance+referenceId", r.status === 201 && !!(r.body as any)?.referenceId, r);
   }
 
-  console.log("\n[4] Wrong signature — expect 401 INVALID_SIGNATURE");
+  console.log("\n[4] Deposit (CREDIT) — POST /transactions");
   {
-    const payload = { playerId: "test_player" };
-    const r = await post("/qtech/v1/balance", { ...payload, signature: "deadbeef".repeat(8) });
-    check("wrong signature", r.status === 401 && r.body?.code === "INVALID_SIGNATURE", r);
+    const r = await call("POST", "/qtech/v1/transactions", creditBody);
+    check("201 with balance+referenceId", r.status === 201 && !!(r.body as any)?.referenceId, r);
   }
 
-  console.log("\n[5] Tampered body (correct sig for different payload) — expect 401");
+  console.log("\n[5] Rollback — POST /transactions/rollback");
   {
-    const original = { playerId: "test_player", amount: 100 };
-    const tampered = { ...original, amount: 9999, signature: sign(original, PASS_KEY) };
-    const r = await post("/qtech/v1/debit", tampered);
-    check("tampered body", r.status === 401 && r.body?.code === "INVALID_SIGNATURE", r);
+    const r = await call("POST", "/qtech/v1/transactions/rollback", rollbackBody);
+    check("200 with balance+referenceId", r.status === 200 && !!(r.body as any)?.referenceId, r);
   }
 
-  console.log("\n[6] Garbage signature (non-hex) — expect 401");
+  console.log("\n[6] Promotion Status — POST /promotion/status");
   {
-    const r = await post("/qtech/v1/balance", { playerId: "test_player", signature: "not-a-hex-string" });
-    check("non-hex signature", r.status === 401 && r.body?.code === "INVALID_SIGNATURE", r);
+    const r = await call("POST", "/qtech/v1/promotion/status", promoBody);
+    check("204 No Content", r.status === 204, r);
+  }
+
+  console.log("\n[7] Rewards — POST /rewards");
+  {
+    const r = await call("POST", "/qtech/v1/rewards", rewardBody);
+    check("201 with balance+referenceId", r.status === 201 && !!(r.body as any)?.referenceId, r);
+  }
+
+  console.log("\n[8] Missing Pass-Key — expect 401 LOGIN_FAILED");
+  {
+    const r = await call("GET", "/qtech/v1/accounts/test_player/balance", undefined, null);
+    check("missing key", r.status === 401 && (r.body as any)?.code === "LOGIN_FAILED", r);
+  }
+
+  console.log("\n[9] Wrong Pass-Key — expect 401 LOGIN_FAILED");
+  {
+    const r = await call("GET", "/qtech/v1/accounts/test_player/balance", undefined, "wrong-key");
+    check("wrong key", r.status === 401 && (r.body as any)?.code === "LOGIN_FAILED", r);
   }
 
   console.log(`\nResult: ${pass} passed, ${fail} failed`);
