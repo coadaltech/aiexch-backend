@@ -1326,6 +1326,11 @@ export const userMultimarkets = pgTable("user_multimarkets", {
   unique("uq_user_multimarket").on(table.userId, table.marketId),
 ]);
 
+export const bombay_bazar_number = pgTable("bombay_bazar_number", {
+  number_order: numeric("number_order"),
+  game_number: numeric("game_number"),
+})
+
 // ── Indexes ──────────────────────────────────────────────────────────────────
 export const currencyValueHistoryIndex = { table: currencyValueHistory, columns: [currencyValueHistory.currencyId] as const };
 
