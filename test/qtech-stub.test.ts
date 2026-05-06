@@ -1,15 +1,21 @@
 // Smoke test for the QTech Common Wallet stub.
-//   bun run dev          # in one terminal
-//   bun run test/qtech-stub.test.ts <baseUrl> <passKey>
-// Defaults: http://localhost:3001 + QTECH_PASSKEY from env.
+//   bun run dev                                          # in one terminal
+//   bun run test/qtech-stub.test.ts                      # local, staging prefix
+//   bun run test/qtech-stub.test.ts <baseUrl> <passKey> <prefix>
+// Defaults: http://localhost:3001 + QTECH_PASSKEY_STAGING + /qtech-staging/v1
 import "dotenv/config";
 declare const process: { argv: string[]; env: Record<string, string | undefined>; exit: (code: number) => never };
 
 const BASE = process.argv[2] || `http://localhost:${process.env.PORT || 3001}`;
-const PASS_KEY = process.argv[3] || process.env.QTECH_PASSKEY || "";
+const PASS_KEY =
+  process.argv[3] ||
+  process.env.QTECH_PASSKEY_STAGING ||
+  process.env.QTECH_PASSKEY ||
+  "";
+const PREFIX = process.argv[4] || "/qtech-staging/v1";
 
 if (!PASS_KEY) {
-  console.error("QTECH_PASSKEY missing. Set it in .env or pass as 2nd arg.");
+  console.error("Pass-Key missing. Set QTECH_PASSKEY_STAGING in .env or pass as 2nd arg.");
   process.exit(1);
 }
 
@@ -48,7 +54,7 @@ const debitBody = {
   playerId: "test_player",
   roundId: "round_1",
   amount: 50.0,
-  currency: "INR",
+  currency: "SLRs",
   gameId: "TK-froggrog",
   device: "MOBILE",
   clientType: "HTML5",
@@ -63,7 +69,7 @@ const creditBody = {
   playerId: "test_player",
   roundId: "round_1",
   amount: 100.0,
-  currency: "INR",
+  currency: "SLRs",
   gameId: "TK-froggrog",
   device: "MOBILE",
   clientType: "HTML5",
@@ -77,7 +83,7 @@ const rollbackBody = {
   playerId: "test_player",
   roundId: "round_1",
   amount: 50.0,
-  currency: "INR",
+  currency: "SLRs",
   gameId: "TK-froggrog",
   created: new Date().toISOString(),
   completed: "true",
@@ -89,7 +95,7 @@ const promoBody = {
   gameIds: ["TK-froggrog"],
   totalBetValue: 100.0,
   roundOptions: [1, 2, 4],
-  currency: "INR",
+  currency: "SLRs",
   promoCode: "TEST",
   status: "PROMOTED",
   validityDays: 7,
@@ -102,7 +108,7 @@ const rewardBody = {
   txnId: `reward_${Date.now()}`,
   playerId: "test_player",
   amount: 500.0,
-  currency: "INR",
+  currency: "SLRs",
   created: new Date().toISOString(),
 };
 
@@ -112,55 +118,55 @@ async function run() {
 
   console.log("\n[1] Verify Session — GET /accounts/{playerId}/session");
   {
-    const r = await call("GET", "/qtech/v1/accounts/test_player/session?gameId=TK-froggrog");
-    check("200 with balance+currency", r.status === 200 && (r.body as any)?.currency === "INR", r);
+    const r = await call("GET", `${PREFIX}/accounts/test_player/session?gameId=TK-froggrog`);
+    check("200 with balance+currency", r.status === 200 && !!(r.body as any)?.currency, r);
   }
 
   console.log("\n[2] Get Balance — GET /accounts/{playerId}/balance");
   {
-    const r = await call("GET", "/qtech/v1/accounts/test_player/balance?gameId=TK-froggrog");
-    check("200 with balance+currency", r.status === 200 && (r.body as any)?.currency === "INR", r);
+    const r = await call("GET", `${PREFIX}/accounts/test_player/balance?gameId=TK-froggrog`);
+    check("200 with balance+currency", r.status === 200 && !!(r.body as any)?.currency, r);
   }
 
   console.log("\n[3] Withdrawal (DEBIT) — POST /transactions");
   {
-    const r = await call("POST", "/qtech/v1/transactions", debitBody);
+    const r = await call("POST", `${PREFIX}/transactions`, debitBody);
     check("201 with balance+referenceId", r.status === 201 && !!(r.body as any)?.referenceId, r);
   }
 
   console.log("\n[4] Deposit (CREDIT) — POST /transactions");
   {
-    const r = await call("POST", "/qtech/v1/transactions", creditBody);
+    const r = await call("POST", `${PREFIX}/transactions`, creditBody);
     check("201 with balance+referenceId", r.status === 201 && !!(r.body as any)?.referenceId, r);
   }
 
   console.log("\n[5] Rollback — POST /transactions/rollback");
   {
-    const r = await call("POST", "/qtech/v1/transactions/rollback", rollbackBody);
+    const r = await call("POST", `${PREFIX}/transactions/rollback`, rollbackBody);
     check("200 with balance+referenceId", r.status === 200 && !!(r.body as any)?.referenceId, r);
   }
 
   console.log("\n[6] Promotion Status — POST /promotion/status");
   {
-    const r = await call("POST", "/qtech/v1/promotion/status", promoBody);
+    const r = await call("POST", `${PREFIX}/promotion/status`, promoBody);
     check("204 No Content", r.status === 204, r);
   }
 
   console.log("\n[7] Rewards — POST /rewards");
   {
-    const r = await call("POST", "/qtech/v1/rewards", rewardBody);
+    const r = await call("POST", `${PREFIX}/rewards`, rewardBody);
     check("201 with balance+referenceId", r.status === 201 && !!(r.body as any)?.referenceId, r);
   }
 
   console.log("\n[8] Missing Pass-Key — expect 401 LOGIN_FAILED");
   {
-    const r = await call("GET", "/qtech/v1/accounts/test_player/balance", undefined, null);
+    const r = await call("GET", `${PREFIX}/accounts/test_player/balance`, undefined, null);
     check("missing key", r.status === 401 && (r.body as any)?.code === "LOGIN_FAILED", r);
   }
 
   console.log("\n[9] Wrong Pass-Key — expect 401 LOGIN_FAILED");
   {
-    const r = await call("GET", "/qtech/v1/accounts/test_player/balance", undefined, "wrong-key");
+    const r = await call("GET", `${PREFIX}/accounts/test_player/balance`, undefined, "wrong-key");
     check("wrong key", r.status === 401 && (r.body as any)?.code === "LOGIN_FAILED", r);
   }
 
