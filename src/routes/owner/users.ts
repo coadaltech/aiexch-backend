@@ -27,7 +27,10 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "No whitelabel scope. You must operate from your whitelabel domain." };
       }
 
-      const { username, email, password, role, membership, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId, transactionLimit } = body as any;
+      const { username: rawUsername, email, password, role, membership, upline, downline, firstName, lastName, phone, country, whitelabelId: bodyWhitelabelId, domain: bodyDomain, currencyId, transactionLimit } = body as any;
+      // Normalize usernames to lowercase at the boundary so duplicate-check
+      // and login lookups are case-insensitive ("Alice" === "alice").
+      const username: string = String(rawUsername ?? "").trim().toLowerCase();
       const addedBy = userId;
       let whitelabelId: string | null =
         bodyWhitelabelId != null
@@ -62,10 +65,11 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         return { success: false, message: "Email already registered" };
       }
 
+      // Case-insensitive duplicate check: handles legacy mixed-case rows.
       const existingUsername = await db
         .select()
         .from(users)
-        .where(eq(users.username, username));
+        .where(sql`lower(${users.username}) = ${username}`);
       if (existingUsername.length > 0) {
         set.status = 409;
         return { success: false, message: "Username already taken" };

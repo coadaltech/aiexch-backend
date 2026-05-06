@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { users, profiles, otps, whitelabels, userLoginLogs } from "@db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
 import { decodeToken, generateTokens } from "@services/token";
 import { getCurrentIP } from "@utils/user-ip";
@@ -31,7 +31,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   .post(
     "/register",
     async ({ body, db, whitelabel, set }) => {
-      const { username, email, password, phone, country, otp, whitelabelId: bodyWhitelabelId, domain: bodyDomain } = body;
+      const { username: rawUsername, email, password, phone, country, otp, whitelabelId: bodyWhitelabelId, domain: bodyDomain } = body;
+      // Store usernames lowercase so login is case-insensitive.
+      const username: string = String(rawUsername ?? "").trim().toLowerCase();
 
       // Verify OTP first
       const [otpRecord] = await db
@@ -61,10 +63,11 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         return { success: false, message: "Email already registered" };
       }
 
+      // Case-insensitive duplicate check (handles legacy mixed-case rows).
       const existingUsername = await db
         .select()
         .from(users)
-        .where(eq(users.username, username));
+        .where(sql`lower(${users.username}) = ${username}`);
       if (existingUsername.length > 0) {
         set.status = 409;
         return { success: false, message: "Username already taken" };
@@ -129,7 +132,10 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     async ({ body, headers, request, set, cookie, db, whitelabel }) => {
       try {
 
-        const { username, password } = body;
+        const { username: rawUsername, password } = body;
+        // Lowercase both sides so login is case-insensitive even for legacy
+        // rows that were created before the lowercase-on-write convention.
+        const username: string = String(rawUsername ?? "").trim().toLowerCase();
 
         const clientIP = getCurrentIP(headers, request);
         const geo = lookupGeo(clientIP);
@@ -138,7 +144,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         const [user] = await db
           .select()
           .from(users)
-          .where(eq(users.username, username));
+          .where(sql`lower(${users.username}) = ${username}`);
 
         if (!user) {
           set.status = 404;
