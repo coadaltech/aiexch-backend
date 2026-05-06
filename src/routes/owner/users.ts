@@ -208,6 +208,31 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
     const data: any[] = (rowArray[0]?.data as any[] | null) ?? [];
 
+    // Defensive merge: backfill `transactionLimit` even when the deployed
+    // fn_list_owner_users in the DB hasn't been refreshed (e.g. someone ran
+    // the column migration but didn't re-apply sql_functions/*.sql). One
+    // extra round-trip, fine for an admin-only listing.
+    if (data.length > 0 && data.some((u) => u.transactionLimit === undefined)) {
+      const ids = data.map((u) => u.id).filter(Boolean);
+      if (ids.length > 0) {
+        const ledgerRows = await db
+          .select({
+            userId: ledgerLimit.userId,
+            transactionLimit: ledgerLimit.transactionLimit,
+          })
+          .from(ledgerLimit)
+          .where(inArray(ledgerLimit.userId, ids));
+        const txMap = new Map<string, string>(
+          ledgerRows.map((r: any) => [r.userId, r.transactionLimit ?? "0.00"]),
+        );
+        for (const u of data) {
+          if (u.transactionLimit === undefined) {
+            u.transactionLimit = txMap.get(u.id) ?? "0.00";
+          }
+        }
+      }
+    }
+
     set.status = 200;
     return { success: true, data };
   })
@@ -276,6 +301,47 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     }
     set.status = 200;
     return { success: true, data: result };
+  }, {
+    params: t.Object({ id: t.String() }),
+  })
+
+  // Direct children of a user — same row shape as GET /owner/users so the
+  // frontend can render an identical table inside the drill-down modal.
+  // Backed by fn_list_user_children for a single round-trip to Postgres.
+  .get("/:id/downline", async ({ params, set, db, whitelabel, userId, userRole }: any) => {
+    const targetUserId = params.id;
+    if (!targetUserId || typeof targetUserId !== "string") {
+      set.status = 400;
+      return { success: false, message: "Invalid user ID" };
+    }
+
+    const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: userRole });
+
+    // Verify the requester can actually see this user. Mirrors the visibility
+    // check in /:id/created-users so callers can't drill into accounts that
+    // belong to another whitelabel/branch.
+    const [target] = await db
+      .select({ id: users.id, whitelabelId: users.whitelabelId, addedBy: users.addedBy, createdBy: users.createdBy })
+      .from(users)
+      .where(eq(users.id, targetUserId))
+      .limit(1);
+    if (!target) {
+      set.status = 404;
+      return { success: false, message: "User not found" };
+    }
+    if (scope.scopeWhitelabelId != null && target.whitelabelId !== scope.scopeWhitelabelId) {
+      set.status = 404;
+      return { success: false, message: "User not found" };
+    }
+
+    const rows = await db.execute(sql`
+      SELECT fn_list_user_children(${targetUserId}::uuid) AS data
+    `);
+    const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+    const data: any[] = (rowArray[0]?.data as any[] | null) ?? [];
+
+    set.status = 200;
+    return { success: true, data };
   }, {
     params: t.Object({ id: t.String() }),
   })
