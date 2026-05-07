@@ -257,12 +257,34 @@ export const MarketPipelineService = {
           `custom:ballrunning:${marketId}`
         );
 
+        const bettingType = overrides.bettingType || "ODDS";
+
+        // LINE/Fancy markets: the owner enters the rate (e.g. 50) as the
+        // "price" and the over/under threshold (e.g. 6.5) as the "line".
+        // The user match page renders `item.line` as the headline number
+        // and `item.price` underneath — which is the inverse of how the
+        // owner fills it in. Swap the two fields here on the way out so
+        // the rate shows up top and the threshold shows below, without
+        // having to special-case custom markets in the frontend.
+        const swapPriceLine = (
+          arr: { price: number; size: number; line?: number }[]
+        ) =>
+          arr.map((entry) => ({
+            ...entry,
+            price: entry.line ?? 0,
+            line: entry.price,
+          }));
+
         const runners = runnerRows.map((r) => {
           const odds = oddsRows.find((o) => o.selectionId === r.selectionId);
-          const back =
-            (odds?.backPrices as { price: number; size: number }[]) || [];
-          const lay =
-            (odds?.layPrices as { price: number; size: number }[]) || [];
+          let back =
+            (odds?.backPrices as { price: number; size: number; line?: number }[]) || [];
+          let lay =
+            (odds?.layPrices as { price: number; size: number; line?: number }[]) || [];
+          if (bettingType === "LINE") {
+            back = swapPriceLine(back);
+            lay = swapPriceLine(lay);
+          }
           const suspended =
             ballRunningHash[String(r.selectionId)] === "true";
           return {
@@ -280,7 +302,7 @@ export const MarketPipelineService = {
           marketType: overrides.marketType || "CUSTOM",
           status: overrides.suspended === "true" ? "SUSPENDED" : "OPEN",
           inPlay: true,
-          bettingType: overrides.bettingType || "ODDS",
+          bettingType,
           isCustom: true,
           adminDisabled: overrides.isActive === "false",
           adminHidden: overrides.isVisible === "false",
