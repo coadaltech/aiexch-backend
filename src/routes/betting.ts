@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings, customMarketOdds } from "../db/schema";
 // Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
 import { eq, and, sql } from "drizzle-orm";
@@ -34,10 +34,79 @@ function rawPriceToDecimalOdds(
 const PRICE_CHANGED_MESSAGE =
   "Bet rejected: prices changed, please place the bet again or refresh the page";
 
+// Custom markets created from the owner panel use a "9.<eventId><timestamp>"
+// marketId, while Betfair markets start with "1.". We detect by prefix so the
+// verifier can use our own DB as the odds source instead of the external books
+// API (which has no record of custom markets and would reject every bet).
+const CUSTOM_MARKET_PREFIX = "9.";
+const isCustomMarketId = (marketId: string) => marketId.startsWith(CUSTOM_MARKET_PREFIX);
+
+// Build the same shape SportsService.getOdds returns for an external market,
+// from our local custom_market_odds + market_settings rows. Returning the same
+// envelope means the rest of verifyOddsUnchanged (status check, slot lookup,
+// line/price compare) works without any custom-market-specific branching.
+async function getCustomMarketSnapshot(marketId: string): Promise<Record<string, unknown> | null> {
+  const [setting] = await db
+    .select({
+      isCustom: marketSettings.isCustom,
+      isActive: marketSettings.isActive,
+      suspended: marketSettings.suspended,
+      betLock: marketSettings.betLock,
+    })
+    .from(marketSettings)
+    .where(eq(marketSettings.marketId, marketId))
+    .limit(1);
+
+  // Prefix matched but no row (or not actually a custom market) — bail so the
+  // caller treats it as an unverifiable bet and rejects, rather than silently
+  // allowing through.
+  if (!setting || !setting.isCustom) return null;
+
+  const oddsRows = await db
+    .select({
+      selectionId: customMarketOdds.selectionId,
+      backPrices: customMarketOdds.backPrices,
+      layPrices: customMarketOdds.layPrices,
+      line: customMarketOdds.line,
+    })
+    .from(customMarketOdds)
+    .where(eq(customMarketOdds.marketId, marketId));
+
+  const status = setting.suspended
+    ? "SUSPENDED"
+    : (setting.betLock || !setting.isActive)
+      ? "CLOSED"
+      : "OPEN";
+
+  return {
+    [marketId]: {
+      status,
+      sportingEvent: false,
+      runners: oddsRows.map((r) => {
+        // For custom LINE markets, propagate the per-runner line onto each
+        // slot so the existing fancy line check (slot.line vs clientRun) works
+        // unchanged. Non-LINE markets leave it off.
+        const lineNum = r.line != null ? Number(r.line) : null;
+        const decorate = (slot: { price: number; size: number }) =>
+          lineNum != null && Number.isFinite(lineNum)
+            ? { ...slot, line: lineNum }
+            : slot;
+        return {
+          selectionId: r.selectionId,
+          status: "ACTIVE",
+          back: (r.backPrices ?? []).map(decorate),
+          lay: (r.layPrices ?? []).map(decorate),
+        };
+      }),
+    },
+  };
+}
+
 // Verify the user's submitted odds still match upstream at the exact slot they
 // clicked. Hits /sports/books/{marketId}. Returns:
-//   { ok: true }          → odds match, proceed
-//   { ok: false, reason } → reject the bet (price moved / suspended / no data)
+//   { ok: true, effectiveOdds? } → proceed; if effectiveOdds is set, place the
+//                                  bet at that value instead of clientOdds
+//   { ok: false, reason }        → reject the bet (price moved / suspended / no data)
 //
 // Provider timeout is the only non-rejection escape hatch — a slow upstream
 // must not silently block legitimate placements. Every other "we couldn't
@@ -54,25 +123,40 @@ async function verifyOddsUnchanged(args: {
   marketType: string | undefined;
   isFancy: boolean;
   timeoutMs: number;
-}): Promise<{ ok: true } | { ok: false; reason: string }> {
+}): Promise<{ ok: true; effectiveOdds?: number } | { ok: false; reason: string }> {
+  const isCustom = isCustomMarketId(String(args.marketId));
+
   const timeoutPromise = new Promise<null>((resolve) =>
     setTimeout(() => resolve(null), args.timeoutMs),
   );
 
   const fetchPromise = (async () => {
     try {
+      // Custom markets aren't in the upstream books feed — read from our own
+      // DB instead. Falls back through the same shape so the rest of the
+      // verification logic doesn't need to change.
+      if (isCustom) {
+        return await getCustomMarketSnapshot(String(args.marketId));
+      }
       return await SportsService.getOdds({ marketId: String(args.marketId) });
     } catch (e) {
-      console.warn(`[verifyOdds] getOdds threw for ${args.marketId}:`, e);
+      console.warn(`[verifyOdds] odds fetch threw for ${args.marketId}:`, e);
       return null;
     }
   })();
 
   const oddsObj = await Promise.race([fetchPromise, timeoutPromise]);
 
-  // Provider timed out or errored — can't verify, allow through to avoid
-  // blanket-blocking placements during transient upstream issues.
   if (!oddsObj) {
+    if (isCustom) {
+      // Local DB lookup is fast and definitive — null means the custom market
+      // isn't in our DB. Don't fall back to the external API (it'll never
+      // have it), and don't allow the bet through (we genuinely can't verify).
+      console.warn(`[verifyOdds] custom market not found in DB: ${args.marketId}`);
+      return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+    }
+    // Provider timed out or errored — can't verify, allow through to avoid
+    // blanket-blocking placements during transient upstream issues.
     console.warn(`[verifyOdds] timeout/null for marketId=${args.marketId}, allowing through`);
     return { ok: true };
   }
@@ -148,16 +232,70 @@ async function verifyOddsUnchanged(args: {
   }
 
   const freshDecimal = rawPriceToDecimalOdds(rawNum, args.provider, args.marketType, args.isFancy);
-  // 0.001 covers float-conversion noise from /100 without masking real moves.
-  if (Math.abs(freshDecimal - args.clientOdds) > 0.001) {
+
+  // Fancy: tight 0.001 tolerance — fancy lines are integers, the rate either
+  // matches or it doesn't. The line check above is the meaningful guard.
+  if (args.isFancy) {
+    if (Math.abs(freshDecimal - args.clientOdds) > 0.001) {
+      console.info(
+        `[verifyOdds] fancy price moved marketId=${args.marketId} sel=${args.selectionId} ` +
+          `clientOdds=${args.clientOdds} freshDecimal=${freshDecimal} (raw=${rawNum}) → reject`,
+      );
+      return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+    }
+    return { ok: true };
+  }
+
+  // Non-fancy (match-odds, bookmaker, winning-odds): tolerate small favorable
+  // moves and snap-adjust on big favorable moves. All comparisons are in
+  // integer "points" where 1 point = 0.01 of the (decimal/profit-ratio) odds.
+  //
+  //   Back  (user benefits when odds rise)
+  //     fresh < clicked                   → reject (price went against user)
+  //     0 ≤ fresh − clicked ≤ +3 pts      → accept at fresh (user gets the
+  //                                         better upstream odds)
+  //     +3 < fresh − clicked < +10 pts    → reject
+  //     fresh − clicked ≥ +10 pts         → accept at clicked + 5 pts (cap the
+  //                                         improvement to discourage chasing
+  //                                         large swings)
+  //   Lay (mirror): user benefits when odds drop, same thresholds in the
+  //   opposite direction; large drops snap to clicked − 5 pts.
+  const diffPoints = Math.round((freshDecimal - args.clientOdds) * 100);
+  const favorablePoints = args.isLay ? -diffPoints : diffPoints;
+
+  if (favorablePoints < 0) {
     console.info(
-      `[verifyOdds] price moved marketId=${args.marketId} sel=${args.selectionId} ` +
-        `clientOdds=${args.clientOdds} freshDecimal=${freshDecimal} (raw=${rawNum}) → reject`,
+      `[verifyOdds] price moved against user marketId=${args.marketId} sel=${args.selectionId} ` +
+        `side=${args.isLay ? "lay" : "back"} clientOdds=${args.clientOdds} freshDecimal=${freshDecimal} ` +
+        `diffPts=${diffPoints} → reject`,
     );
     return { ok: false, reason: PRICE_CHANGED_MESSAGE };
   }
 
-  return { ok: true };
+  if (favorablePoints <= 3) {
+    // Within tolerance — fill at the fresh upstream odds (user-favorable).
+    return { ok: true, effectiveOdds: freshDecimal };
+  }
+
+  if (favorablePoints < 10) {
+    console.info(
+      `[verifyOdds] price moved ${diffPoints}pts (over 3pt tolerance, under 10pt snap) ` +
+        `marketId=${args.marketId} sel=${args.selectionId} side=${args.isLay ? "lay" : "back"} ` +
+        `clientOdds=${args.clientOdds} freshDecimal=${freshDecimal} → reject`,
+    );
+    return { ok: false, reason: PRICE_CHANGED_MESSAGE };
+  }
+
+  // Large favorable swing (≥10 pts): cap the improvement at 5 pts so the user
+  // gets a small benefit without harvesting the full upstream movement.
+  const adjustment = args.isLay ? -0.05 : 0.05;
+  const effectiveOdds = Math.round((args.clientOdds + adjustment) * 100) / 100;
+  console.info(
+    `[verifyOdds] snap-adjust ${diffPoints}pts marketId=${args.marketId} sel=${args.selectionId} ` +
+      `side=${args.isLay ? "lay" : "back"} clientOdds=${args.clientOdds} freshDecimal=${freshDecimal} ` +
+      `→ effectiveOdds=${effectiveOdds}`,
+  );
+  return { ok: true, effectiveOdds };
 }
 
 // IMPORTANT: per-request user context lives on `resolve` (returns a fresh
@@ -415,6 +553,12 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         return { success: false, error: verification.reason };
       }
 
+      // verifyOddsUnchanged may snap the bet to a different price (small
+      // favorable move → fresh upstream odds; large favorable move → clicked
+      // ± 5 points). Use effectiveOdds from here on so the stored bet, the
+      // potential-return math, and the user's history all agree.
+      const effectiveOdds = verification.effectiveOdds ?? odds;
+
       // ── STEP 2: Insert bet + details in a single transaction ──
       const today = new Date();
 
@@ -435,7 +579,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             selectionName: selectionName || null,
             betType: parseBetType(type),
             stake: stake.toString(),
-            odds: odds.toString(),
+            odds: effectiveOdds.toString(),
             status: "matched",
             ipAddress,
             matchedAt: today,
@@ -455,10 +599,11 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         const detailRows = runners.map((runner) => {
           const runnerId = Number(runner.id);
           const isSelected = runnerId === numericSelectionId;
-          // For the selected runner, use the authoritative `odds` from the transaction
-          // to guarantee transaction_details.price matches transactions.odds exactly.
-          // For other runners, use their own price from the runners array.
-          const runnerOdds = isSelected ? odds : (runner.price ?? 0);
+          // For the selected runner, use the authoritative `effectiveOdds` from the
+          // transaction (post snap-adjust) so transaction_details.price matches
+          // transactions.odds exactly. For other runners, use their own price
+          // from the runners array.
+          const runnerOdds = isSelected ? effectiveOdds : (runner.price ?? 0);
           // Betfair fancy (LINE) markets: odds are already the raw run value (e.g. 1), never subtract 1.
           // Betfair non-fancy and WINNING_ODDS: odds are decimal (e.g. 1.98), subtract 1 for profit ratio.
           const storedPrice = (isBetfair && isFancy) ? runnerOdds : (isBetfair || isWinningOdds) ? runnerOdds - 1 : runnerOdds;
