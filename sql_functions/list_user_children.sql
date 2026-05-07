@@ -60,13 +60,13 @@ AS $$
         'lastName',             NULLIF(p.last_name,  ''),
         'phone',                NULLIF(p.phone,      ''),
         'country',              NULLIF(p.country,    ''),
-        -- ── ledger ──
-        'balance',              COALESCE(l.user_balance,    '0.00'),
-        'userLimit',            COALESCE(l.user_limit,      '0.00'),
-        'limitConsumed',        COALESCE(l.limit_consumed,  '0.00'),
-        'fixLimit',             COALESCE(l.fix_limit,       '0.00'),
-        'finalLimit',           COALESCE(l.final_limit,     '0.00'),
-        'transactionLimit',     COALESCE(l.transaction_limit, '0.00')
+        -- ── ledger (truncated to whole rupees — UI shows no decimals) ──
+        'balance',              COALESCE(TRUNC(l.user_balance)::text,      '0'),
+        'userLimit',            COALESCE(TRUNC(l.user_limit)::text,        '0'),
+        'limitConsumed',        COALESCE(TRUNC(l.limit_consumed)::text,    '0'),
+        'fixLimit',             COALESCE(TRUNC(l.fix_limit)::text,         '0'),
+        'finalLimit',           COALESCE(TRUNC(l.final_limit)::text,       '0'),
+        'transactionLimit',     COALESCE(TRUNC(l.transaction_limit)::text, '0')
       )
       ORDER BY u.added_date DESC
     ),
