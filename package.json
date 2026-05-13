@@ -11,7 +11,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts",
     "db:migrate:prod": "bun run dist/db/migrate.js",
-    "create:owner": "bun run src/scripts/create-owner.ts"
+    "create:owner": "bun run src/scripts/create-owner.ts",
+    "seed:permissions": "bun run src/scripts/seed-permissions.ts",
+    "backfill:staff": "bun run src/scripts/backfill-staff-roles.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",

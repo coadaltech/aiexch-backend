@@ -13,6 +13,7 @@ import {
 } from "../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
+import { getEffectivePermissions } from "../services/permissions";
 import { increment } from "../utils/numbers";
 import { uploadFile } from "../services/s3";
 import { getCurrentIP } from "../utils/user-ip";
@@ -88,6 +89,13 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
 
     const geo = lookupGeo(getCurrentIP(headers, request));
 
+    // Effective staff permissions — empty array for regular users (role=User),
+    // full catalog for Owner, derived from staff role + overrides for staff.
+    const permissionSet =
+      user.role === UserRole.User
+        ? new Set<string>()
+        : await getEffectivePermissions(user.id, { userRole: user.role, db });
+
     set.status = 200;
     return {
       loggedIn: true,
@@ -104,6 +112,9 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         country: geo.country ?? profile?.country ?? null,
         timezone: geo.timezone ?? null,
         transactionLimit: ledger?.transactionLimit ?? "0",
+        permissions: Array.from(permissionSet),
+        isStaff: user.isStaff ?? false,
+        parentUserId: user.parentUserId ?? null,
       },
     };
   })

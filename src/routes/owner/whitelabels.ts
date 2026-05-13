@@ -6,6 +6,16 @@ import { uploadFile, deleteFile } from "../../services/s3";
 import { resolveOwnerScope } from "../../utils/ownerScope";
 import { addAllowedOrigin, removeAllowedOrigin } from "../../utils/cors-origins";
 import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+// View is open in OPS_FULL backfill (current admins can list).
+// Create/edit/delete/assign_admin are excluded from OPS_FULL → only Owner.
+// PUT/DELETE keep an internal scope check so a non-owner with .edit can only
+// touch their own whitelabel.
+const canViewWhitelabels = requirePermission("whitelabels.view");
+const canCreateWhitelabel = requirePermission("whitelabels.create");
+const canEditWhitelabel = requirePermission("whitelabels.edit");
+const canDeleteWhitelabel = requirePermission("whitelabels.delete");
 
 export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
   .get("/", async ({ set, userId, userRole }: any) => {
@@ -67,17 +77,12 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
     }));
     set.status = 200;
     return { success: true, data: parsedWhitelabels };
-  })
+  }, { beforeHandle: canViewWhitelabels })
 
   .post(
     "/",
-    async ({ body, set, userId: callerId, userRole }: any) => {
+    async ({ body, set }: any) => {
       try {
-        const scope = await resolveOwnerScope(db, undefined, { id: callerId, role: userRole });
-        if (scope.currentUserRole !== UserRole.Owner) {
-          set.status = 403;
-          return { success: false, message: "Only owner can create whitelabels." };
-        }
         let logoUrl = body.logoUrl;
         let faviconUrl = body.faviconUrl;
 
@@ -141,6 +146,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       }
     },
     {
+      beforeHandle: canCreateWhitelabel,
       body: t.Object({
         userId: t.Union([t.Number(), t.String()]), // Accept both number and string (FormData sends strings)
         whitelabelType: t.Optional(t.Union([t.Literal("B2B"), t.Literal("B2C")])),
@@ -256,6 +262,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
       return { success: true, data: updated };
     },
     {
+      beforeHandle: canEditWhitelabel,
       body: t.Object({
         userId: t.Optional(t.Union([t.Number(), t.String()])), // Accept both number and string (FormData sends strings)
         whitelabelType: t.Optional(t.Union([t.Literal("B2B"), t.Literal("B2C")])),
@@ -319,7 +326,7 @@ export const whitelabelsRoutes = new Elysia({ prefix: "/whitelabels" })
 
     set.status = 200;
     return { success: true };
-  })
+  }, { beforeHandle: canDeleteWhitelabel })
 
   .post(
     "/upload-logo",

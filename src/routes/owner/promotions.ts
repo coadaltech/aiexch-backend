@@ -4,17 +4,14 @@ import { eq } from "drizzle-orm";
 import { deleteFile, uploadFile } from "../../services/s3";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
-import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+const canViewPromotions = requirePermission("promotions.view");
+const canCreatePromotion = requirePermission("promotions.create");
+const canEditPromotion = requirePermission("promotions.edit");
+const canDeletePromotion = requirePermission("promotions.delete");
 
 export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
-  .guard({
-    beforeHandle({ userRole, set }: any) {
-      if (userRole !== UserRole.Owner) {
-        set.status = 403;
-        return { success: false, message: "Owner access only" };
-      }
-    },
-  })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
@@ -23,7 +20,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
     const allPromotions = await db.select().from(promotions);
     set.status = 200;
     return { success: true, data: allPromotions };
-  })
+  }, { beforeHandle: canViewPromotions })
 
   .post(
     "/",
@@ -70,6 +67,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
       }
     },
     {
+      beforeHandle: canCreatePromotion,
       body: t.Object({
         title: t.String({ minLength: 1, maxLength: 255 }),
         description: t.String({ maxLength: 1000 }),
@@ -153,6 +151,7 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
       }
     },
     {
+      beforeHandle: canEditPromotion,
       body: t.Object({
         title: t.Optional(t.String()),
         description: t.Optional(t.String()),
@@ -186,4 +185,4 @@ export const promotionsRoutes = new Elysia({ prefix: "/promotions" })
     await db.delete(promotions).where(eq(promotions.id, params.id));
     set.status = 200;
     return { success: true };
-  });
+  }, { beforeHandle: canDeletePromotion });

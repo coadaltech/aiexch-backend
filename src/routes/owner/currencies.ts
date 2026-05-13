@@ -2,7 +2,14 @@ import { Elysia, t } from "elysia";
 import { db } from "../../db";
 import { currencies, currencyValueHistory } from "../../db/schema";
 import { eq, desc } from "drizzle-orm";
-import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+// Pre-RBAC: GET endpoints were open to all admin tiers, POST/PUT were Owner-only.
+// New keys: currency.view (open in OPS_FULL), currency.create / currency.set_rates
+// (Owner-only and excluded from OPS_FULL backfill).
+const canViewCurrencies = requirePermission("currency.view");
+const canCreateCurrency = requirePermission("currency.create");
+const canSetCurrencyRate = requirePermission("currency.set_rates");
 
 // Common currencies with country name for the "Add currency" dropdown (owner-only)
 const AVAILABLE_CURRENCIES = [
@@ -39,7 +46,7 @@ const AVAILABLE_CURRENCIES = [
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
-  // GET endpoints are accessible to all authenticated admin users
+  // GET endpoints are accessible to anyone with currency.view (open in backfill).
   .get("/", async ({ set }) => {
     try {
       const list = await db.select().from(currencies).orderBy(currencies.code);
@@ -49,20 +56,13 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
       set.status = 500;
       return { success: false, error: "Failed to fetch currencies" };
     }
-  })
-  // Owner-only guard for write operations and available list
-  .guard({
-    beforeHandle({ userRole, set }: any) {
-      if (userRole !== UserRole.Owner) {
-        set.status = 403;
-        return { success: false, message: "Only owner can manage currencies" };
-      }
-    },
-  })
+  }, { beforeHandle: canViewCurrencies })
+  // The catalog of pickable currencies is shown only when adding one — gate it
+  // by the create permission so non-creators don't see it.
   .get("/available", async ({ set }) => {
     set.status = 200;
     return { success: true, data: AVAILABLE_CURRENCIES };
-  })
+  }, { beforeHandle: canCreateCurrency })
   .post(
     "/",
     async ({ body, set }) => {
@@ -90,6 +90,7 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
       }
     },
     {
+      beforeHandle: canCreateCurrency,
       body: t.Object({
         code: t.String(),
         name: t.String(),
@@ -127,6 +128,7 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
       }
     },
     {
+      beforeHandle: canSetCurrencyRate,
       body: t.Object({
         value: t.Union([t.String(), t.Number()]),
       }),
@@ -146,4 +148,4 @@ export const currenciesRoutes = new Elysia({ prefix: "/currencies" })
       set.status = 500;
       return { success: false, error: "Failed to fetch history" };
     }
-  });
+  }, { beforeHandle: canViewCurrencies });

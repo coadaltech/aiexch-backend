@@ -659,6 +659,20 @@
       "when": 1778069407144,
       "tag": "0093_tiresome_patch",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1778311102535,
+      "tag": "0094_fuzzy_madripoor",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1778485146483,
+      "tag": "0095_burly_multiple_man",
+      "breakpoints": true
     }
   ]
 }

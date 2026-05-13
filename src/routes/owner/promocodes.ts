@@ -3,17 +3,14 @@ import { promocodes } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
-import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+const canViewPromocodes = requirePermission("promocodes.view");
+const canCreatePromocode = requirePermission("promocodes.create");
+const canEditPromocode = requirePermission("promocodes.edit");
+const canDeletePromocode = requirePermission("promocodes.delete");
 
 export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
-  .guard({
-    beforeHandle({ userRole, set }: any) {
-      if (userRole !== UserRole.Owner) {
-        set.status = 403;
-        return { success: false, message: "Owner access only" };
-      }
-    },
-  })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
@@ -22,7 +19,7 @@ export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
     const allPromocodes = await db.select().from(promocodes);
     set.status = 200;
     return { success: true, data: allPromocodes };
-  })
+  }, { beforeHandle: canViewPromocodes })
 
   .post(
     "/",
@@ -60,6 +57,7 @@ export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
       }
     },
     {
+      beforeHandle: canCreatePromocode,
       body: t.Object({
         code: t.String({ minLength: 1, maxLength: 50 }),
         type: t.String({ minLength: 1, maxLength: 50 }),
@@ -83,6 +81,7 @@ export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
       return { success: true, data: updated };
     },
     {
+      beforeHandle: canEditPromocode,
       body: t.Object({
         code: t.Optional(t.String()),
         type: t.Optional(t.String()),
@@ -96,4 +95,4 @@ export const promocodesRoutes = new Elysia({ prefix: "/promocodes" })
     await db.delete(promocodes).where(eq(promocodes.id, params.id));
     set.status = 200;
     return { success: true };
-  });
+  }, { beforeHandle: canDeletePromocode });

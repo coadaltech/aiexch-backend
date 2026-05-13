@@ -4,17 +4,14 @@ import { eq } from "drizzle-orm";
 import { uploadFile, deleteFile } from "../../services/s3";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
-import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+const canViewPopups = requirePermission("popups.view");
+const canCreatePopup = requirePermission("popups.create");
+const canEditPopup = requirePermission("popups.edit");
+const canDeletePopup = requirePermission("popups.delete");
 
 export const popupsRoutes = new Elysia({ prefix: "/popups" })
-  .guard({
-    beforeHandle({ userRole, set }: any) {
-      if (userRole !== UserRole.Owner) {
-        set.status = 403;
-        return { success: false, message: "Owner access only" };
-      }
-    },
-  })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
@@ -23,7 +20,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
     const allPopups = await db.select().from(popups);
     set.status = 200;
     return { success: true, data: allPopups };
-  })
+  }, { beforeHandle: canViewPopups })
 
   .post(
     "/",
@@ -72,6 +69,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
       }
     },
     {
+      beforeHandle: canCreatePopup,
       body: t.Object({
         title: t.String(),
         image: t.File(),
@@ -153,6 +151,7 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
       }
     },
     {
+      beforeHandle: canEditPopup,
       body: t.Object({
         title: t.Optional(t.String()),
         image: t.Optional(t.Union([t.File(), t.String()])),
@@ -179,4 +178,4 @@ export const popupsRoutes = new Elysia({ prefix: "/popups" })
     await db.delete(popups).where(eq(popups.id, params.id));
     set.status = 200;
     return { success: true };
-  });
+  }, { beforeHandle: canDeletePopup });

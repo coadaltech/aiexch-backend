@@ -7,14 +7,14 @@ import {
   SYSTEM_USER_ID,
 } from "../../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { RecordStatus, UserRole, MatkaSportType } from "../../types/enums";
+import { RecordStatus, MatkaSportType } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
 
-const ownerOnly = ({ userRole, set }: any) => {
-  if (userRole !== UserRole.Owner) {
-    set.status = 403;
-    return { success: false, message: "Owner access only" };
-  }
-};
+// Pre-RBAC: shift CRUD was Owner-only. OPS_FULL backfill excludes kalyan.* CRUD.
+const canCreateShift = requirePermission("kalyan.create");
+const canEditShift = requirePermission("kalyan.edit");
+const canDeleteShift = requirePermission("kalyan.delete");
+const canReorderShifts = requirePermission("kalyan.reorder");
 
 // Kalyan-New rate mapping (sport_type = 1005):
 //   singlePanaRate / doublePanaRate / sangamRate → kalyan-new only columns
@@ -111,7 +111,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canCreateShift,
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100 }),
         shiftDate: t.String(),
@@ -169,7 +169,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canReorderShifts,
       body: t.Object({
         orders: t.Array(
           t.Object({
@@ -243,7 +243,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canEditShift,
       body: t.Object({
         name: t.Optional(t.String()),
         shiftDate: t.Optional(t.String()),
@@ -303,7 +303,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
         };
       }
     },
-    { beforeHandle: ownerOnly }
+    { beforeHandle: canDeleteShift }
   )
 
   // ── Aggregated jantri summary for a kalyan-new shift ─────────────────────

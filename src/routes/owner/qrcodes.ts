@@ -5,13 +5,22 @@ import { uploadFile, deleteFile } from "../../services/s3";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
 import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+const canViewQrCodes = requirePermission("qrcodes.view");
+const canCreateQrCode = requirePermission("qrcodes.create");
+const canEditQrCode = requirePermission("qrcodes.edit");
+const canDeleteQrCode = requirePermission("qrcodes.delete");
 
 export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
   })
-  // QR Codes: only for non-owner users on B2C whitelabels
+  // Product-level constraint: QR codes are managed by whitelabel admins (not
+  // the platform Owner), and only on B2C whitelabels. Kept as a top-level
+  // guard alongside the per-action permission checks below — Owner has every
+  // permission via bypass but is intentionally locked out here by product rule.
   .guard({
     beforeHandle({ userRole, set, whitelabel }: any) {
       if (userRole === UserRole.Owner) {
@@ -32,7 +41,7 @@ export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
     const allQrCodes = await db.select().from(qrCodes);
     set.status = 200;
     return { success: true, data: allQrCodes };
-  })
+  }, { beforeHandle: canViewQrCodes })
 
   // 🟢 Create new QR Code
   .post(
@@ -63,6 +72,7 @@ export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
       return { success: true, data: qrCode };
     },
     {
+      beforeHandle: canCreateQrCode,
       body: t.Object({
         paymentMethod: t.String({ minLength: 1, maxLength: 100 }),
         currency: t.String(),
@@ -120,6 +130,7 @@ export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
       return { success: true, data: updated };
     },
     {
+      beforeHandle: canEditQrCode,
       body: t.Object({
         paymentMethod: t.Optional(t.String()),
         currency: t.Optional(t.String()),
@@ -153,4 +164,4 @@ export const qrCodesRoutes = new Elysia({ prefix: "/qrcodes" })
     await db.delete(qrCodes).where(eq(qrCodes.id, id));
     set.status = 200;
     return { success: true };
-  });
+  }, { beforeHandle: canDeleteQrCode });

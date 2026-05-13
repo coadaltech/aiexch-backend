@@ -3,6 +3,7 @@ import { users, profiles, otps, whitelabels, userLoginLogs } from "@db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
 import { decodeToken, generateTokens } from "@services/token";
+import { getEffectivePermissions } from "@services/permissions";
 import { getCurrentIP } from "@utils/user-ip";
 import { lookupGeo } from "@utils/geo";
 import { parseUserAgent } from "@utils/parse-ua";
@@ -250,6 +251,12 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           ...cookieConfig.refreshToken,
         });
 
+        const userRole = user.role ?? UserRole.User;
+        const permissionSet =
+          userRole === UserRole.User
+            ? new Set<string>()
+            : await getEffectivePermissions(user.id, { userRole, db });
+
         set.status = 200;
         return {
           success: true,
@@ -260,13 +267,16 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             username: user.username,
             email: user.email,
             membership: profile?.membership ?? MembershipType.Bronze,
-            role: user.role ?? UserRole.User,
+            role: userRole,
             upline: profile?.upline ?? "0.00",
             downline: profile?.downline ?? "0.00",
             groupId: user.groupId,
             currencyId: profile?.currencyId ?? null,
             country: geo.country ?? profile?.country ?? null,
             timezone: geo.timezone ?? null,
+            permissions: Array.from(permissionSet),
+            isStaff: (user as any).isStaff ?? false,
+            parentUserId: (user as any).parentUserId ?? null,
           },
         };
       } catch (e) {

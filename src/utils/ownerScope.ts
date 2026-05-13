@@ -53,10 +53,34 @@ export async function resolveOwnerScope(
   requestWhitelabel: { id: string; whitelabelType?: string } | undefined,
   store: { id?: string; role?: number | string }
 ): Promise<OwnerScopeResult> {
-  const currentUserId = store.id ?? "";
-  const currentUserRole = typeof store.role === "number"
+  let currentUserId = store.id ?? "";
+  let currentUserRole = typeof store.role === "number"
     ? store.role
     : (store.role != null ? getGroupIdForRole(store.role) : UserRole.User);
+
+  // Staff delegation: if the caller is a staff user, resolve to their parent's
+  // identity for data scoping. The staff inherits exactly the parent's data
+  // view (whitelabel, downline, audit-by-createdBy). Permissions are still
+  // gated separately by the staff's own user_staff_role + overrides.
+  if (currentUserId) {
+    const [u] = await db
+      .select({ isStaff: users.isStaff, parentUserId: users.parentUserId })
+      .from(users)
+      .where(eq(users.id, currentUserId))
+      .limit(1);
+    if (u?.isStaff && u.parentUserId) {
+      const [parent] = await db
+        .select({ id: users.id, role: users.role })
+        .from(users)
+        .where(eq(users.id, u.parentUserId))
+        .limit(1);
+      if (parent) {
+        currentUserId = parent.id;
+        currentUserRole = parent.role;
+      }
+    }
+  }
+
   const allowedRolesToCreate = ROLES_CREATABLE_BY[currentUserRole] ?? [];
 
   // Owner: use whitelabel from request (domain). Owner can open any whitelabel and see its data.

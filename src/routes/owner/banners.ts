@@ -4,17 +4,17 @@ import { eq } from "drizzle-orm";
 import { uploadFile, deleteFile } from "../../services/s3";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
-import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+// Per-action permission gates. Owner role bypasses these (services/permissions.ts).
+// Pre-RBAC behavior: this entire route was Owner-only — matching that, the
+// "Operations Full Access" backfill template intentionally excludes banners.*
+const canViewBanners = requirePermission("banners.view");
+const canCreateBanner = requirePermission("banners.create");
+const canEditBanner = requirePermission("banners.edit");
+const canDeleteBanner = requirePermission("banners.delete");
 
 export const bannersRoutes = new Elysia({ prefix: "/banners" })
-  .guard({
-    beforeHandle({ userRole, set }: any) {
-      if (userRole !== UserRole.Owner) {
-        set.status = 403;
-        return { success: false, message: "Owner access only" };
-      }
-    },
-  })
   .resolve(async ({ request }): Promise<{ db: DbType; whitelabel: any }> => {
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
@@ -23,7 +23,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
     const allBanners = await db.select().from(banners);
     set.status = 200;
     return { success: true, data: allBanners };
-  })
+  }, { beforeHandle: canViewBanners })
   .post(
     "/",
     async ({ body, set, db }) => {
@@ -64,6 +64,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
       }
     },
     {
+      beforeHandle: canCreateBanner,
       body: t.Object({
         title: t.String({ minLength: 1, maxLength: 255 }),
         image: t.File(),
@@ -130,6 +131,7 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
       }
     },
     {
+      beforeHandle: canEditBanner,
       params: t.Object({
         id: t.String(),
       }),
@@ -161,4 +163,4 @@ export const bannersRoutes = new Elysia({ prefix: "/banners" })
     await db.delete(banners).where(eq(banners.id, params.id));
     set.status = 200;
     return { success: true };
-  });
+  }, { beforeHandle: canDeleteBanner });

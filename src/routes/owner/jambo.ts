@@ -7,14 +7,14 @@ import {
   SYSTEM_USER_ID,
 } from "../../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { RecordStatus, UserRole, MatkaSportType } from "../../types/enums";
+import { RecordStatus, MatkaSportType } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
 
-const ownerOnly = ({ userRole, set }: any) => {
-  if (userRole !== UserRole.Owner) {
-    set.status = 403;
-    return { success: false, message: "Owner access only" };
-  }
-};
+// Pre-RBAC: shift CRUD was Owner-only. OPS_FULL backfill excludes jambo.* CRUD.
+const canCreateShift = requirePermission("jambo.create");
+const canEditShift = requirePermission("jambo.edit");
+const canDeleteShift = requirePermission("jambo.delete");
+const canReorderShifts = requirePermission("jambo.reorder");
 
 export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
 
@@ -101,7 +101,7 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canCreateShift,
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100 }),
         shiftDate: t.String(),
@@ -152,7 +152,7 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canReorderShifts,
       body: t.Object({
         orders: t.Array(
           t.Object({
@@ -219,7 +219,7 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canEditShift,
       body: t.Object({
         name: t.Optional(t.String()),
         shiftDate: t.Optional(t.String()),
@@ -272,7 +272,7 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
         };
       }
     },
-    { beforeHandle: ownerOnly }
+    { beforeHandle: canDeleteShift }
   )
 
   // ── Aggregated jantri summary for a jambo shift ──────────────────────────

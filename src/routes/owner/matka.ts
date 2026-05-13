@@ -9,19 +9,20 @@ import {
 } from "../../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { RecordStatus, UserRole, MatkaSportType } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
 
 // Synthetic event_type_id used to mark matka result rows in market_results.
 const MATKA_EVENT_TYPE_ID = 999;
 
-// Returns a 403 response object if the caller is not an Owner. Used to gate
-// shift CRUD and result-declaration endpoints. Returning from `beforeHandle`
-// short-circuits the request.
-const ownerOnly = ({ userRole, set }: any) => {
-  if (userRole !== UserRole.Owner) {
-    set.status = 403;
-    return { success: false, message: "Owner access only" };
-  }
-};
+// Per-action permission gates (replacing the previous Owner-only check).
+// Owner role bypasses these via services/permissions.ts. The OPS_FULL backfill
+// template excludes all matka CRUD verbs, preserving pre-RBAC behavior for
+// existing Admin/Super/Master/Agent users.
+const canCreateShift = requirePermission("matka.create");
+const canEditShift = requirePermission("matka.edit");
+const canDeleteShift = requirePermission("matka.delete");
+const canReorderShifts = requirePermission("matka.reorder");
+const canDeclarePrediction = requirePermission("live_prediction.declare");
 
 // For the currently-logged-in viewer, return which commission-table column
 // holds their id and a SQL expression for the next-non-null downline level
@@ -158,7 +159,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canCreateShift,
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100 }),
         shiftDate: t.String(),
@@ -175,7 +176,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
     }
   )
 
-  // ── Reorder shifts (bulk update order) — owner only ─────────────────────
+  // ── Reorder shifts (bulk update order) ─────────────────────────────────
   // NOTE: must be before /shifts/:id to avoid path conflict
   .put(
     "/shifts/reorder",
@@ -203,7 +204,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canReorderShifts,
       body: t.Object({
         orders: t.Array(
           t.Object({
@@ -215,7 +216,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
     }
   )
 
-  // ── Update a shift — owner only ──────────────────────────────────────────
+  // ── Update a shift ───────────────────────────────────────────────────────
   .put(
     "/shifts/:id",
     async ({ body, params, set, userId }: any) => {
@@ -263,7 +264,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canEditShift,
       body: t.Object({
         name: t.Optional(t.String()),
         shiftDate: t.Optional(t.String()),
@@ -281,7 +282,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
     }
   )
 
-  // ── Delete a shift (soft delete) — owner only ────────────────────────────
+  // ── Delete a shift (soft delete) ─────────────────────────────────────────
   .delete(
     "/shifts/:id",
     async ({ params, set, userId, userRole }: any) => {
@@ -309,7 +310,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         };
       }
     },
-    { beforeHandle: ownerOnly }
+    { beforeHandle: canDeleteShift }
   )
 
   // ── Get jantri summary for a shift (admin view with totals) ───────────────
@@ -732,7 +733,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
       }
     },
     {
-      beforeHandle: ownerOnly,
+      beforeHandle: canDeclarePrediction,
       body: t.Object({ result: t.Number() }),
     }
   )

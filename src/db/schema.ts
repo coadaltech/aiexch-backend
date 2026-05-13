@@ -36,6 +36,21 @@ export const users = pgTable("users", {
   emailVerified: boolean("email_verified").default(false),
   sessionToken: varchar("session_token", { length: 36 }),
   createdBy: uuid("created_by"),
+  /**
+   * Staff delegation columns.
+   *
+   * A "staff" user is a delegated proxy of a tier user (Owner/Admin/Super/Master/Agent):
+   *   - is_staff = true marks them as such.
+   *   - parent_user_id points to the tier user they work under.
+   *   - role mirrors the parent's role so existing data-scoping logic works
+   *     (e.g. an Admin's staff has role=Admin) — they're then swapped to the
+   *     parent's identity inside resolveOwnerScope for queries.
+   *   - Permissions are entirely controlled by user_staff_role + overrides;
+   *     Owner-bypass in getEffectivePermissions does NOT apply to staff users
+   *     (so an Owner's staff has only the permissions the Owner grants).
+   */
+  parentUserId: uuid("parent_user_id"),
+  isStaff: boolean("is_staff").default(false).notNull(),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
@@ -1330,6 +1345,74 @@ export const bombay_bazar_number = pgTable("bombay_bazar_number", {
   number_order: numeric("number_order"),
   game_number: numeric("game_number"),
 })
+
+// ── Staff Management — Permissions / Roles / Assignments / Overrides ─────────
+// Layered RBAC on top of the existing UserRole hierarchy. The 6 user roles
+// (Owner / Admin / Super / Master / Agent / User) continue to govern data
+// scope (whose users/whitelabel you see). These tables govern WHICH FEATURES
+// a staff member can use within their scope. Owner role bypasses these checks
+// entirely — see services/permissions.ts.
+
+/** Catalog of every permission key in the system (e.g. "banners.create"). Seeded. */
+export const permissions = pgTable("permissions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: varchar("key", { length: 100 }).notNull().unique(),
+  group: varchar("group", { length: 50 }).notNull(),
+  label: varchar("label", { length: 150 }).notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** Reusable role templates ("Sports Manager", "Finance Manager", ...). */
+export const staffRoles = pgTable("staff_roles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  /** Which user-tier this template targets (Admin/Super/Master/Agent). */
+  scopeRole: integer("scope_role").notNull(),
+  /** NULL = global template (Owner-defined). Set = whitelabel-private template. */
+  whitelabelId: uuid("whitelabel_id"),
+  /** Seeded defaults: cloneable but not deletable. */
+  isSystem: boolean("is_system").default(false).notNull(),
+  createdBy: uuid("created_by"),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+}, (table) => [
+  unique("uq_staff_role_name_per_scope").on(table.name, table.whitelabelId),
+]);
+
+/** M2M: which permissions belong to which role template. */
+export const staffRolePermissions = pgTable("staff_role_permissions", {
+  staffRoleId: uuid("staff_role_id").notNull().references(() => staffRoles.id, { onDelete: "cascade" }),
+  permissionId: uuid("permission_id").notNull().references(() => permissions.id, { onDelete: "cascade" }),
+}, (table) => [
+  unique("pk_staff_role_permission").on(table.staffRoleId, table.permissionId),
+]);
+
+/** Assignment of a staff role to a user (one role per user in v1). */
+export const userStaffRole = pgTable("user_staff_role", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  staffRoleId: uuid("staff_role_id").notNull().references(() => staffRoles.id, { onDelete: "restrict" }),
+  assignedBy: uuid("assigned_by"),
+  assignedAt: timestamp("assigned_at").defaultNow().notNull(),
+});
+
+/** Per-user GRANT/DENY overrides on top of the role's permissions. DENY wins. */
+export const userPermissionOverrides = pgTable("user_permission_overrides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  permissionId: uuid("permission_id").notNull().references(() => permissions.id, { onDelete: "cascade" }),
+  /** "GRANT" or "DENY". DENY always wins over role default + GRANT. */
+  effect: varchar("effect", { length: 5 }).notNull(),
+  grantedBy: uuid("granted_by"),
+  grantedAt: timestamp("granted_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_user_permission").on(table.userId, table.permissionId),
+]);
 
 // ── Indexes ──────────────────────────────────────────────────────────────────
 export const currencyValueHistoryIndex = { table: currencyValueHistory, columns: [currencyValueHistory.currencyId] as const };

@@ -24,6 +24,7 @@ import { kalyanNewOwnerRoutes } from "./kalyan-new";
 import { liveMarketsRoutes } from "./live-markets";
 import { ownerAccountStatementRoutes } from "./account-statement";
 import { sportsResultRoutes } from "./sports-result";
+import { staffRoutes } from "./staff";
 
 export const ownerRoutes = new Elysia({ prefix: "/owner" })
   // Per-request user context via .resolve() (NOT .state(), which is module-shared
@@ -66,3 +67,4 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(liveMarketsRoutes)
   .use(ownerAccountStatementRoutes)
   .use(sportsResultRoutes)
+  .use(staffRoutes)

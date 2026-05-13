@@ -5,6 +5,12 @@ import { eq } from "drizzle-orm";
 import { DbType } from "../../types";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+const canViewMethods = requirePermission("withdrawal_methods.view");
+const canCreateMethod = requirePermission("withdrawal_methods.create");
+const canEditMethod = requirePermission("withdrawal_methods.edit");
+const canDeleteMethod = requirePermission("withdrawal_methods.delete");
 
 export const withdrawalMethodsRoutes = new Elysia({
   prefix: "/withdrawal-methods",
@@ -13,6 +19,8 @@ export const withdrawalMethodsRoutes = new Elysia({
     const { db, whitelabel } = await whitelabel_middleware(request);
     return { db: db as DbType, whitelabel };
   })
+  // Product-level constraint: managed by whitelabel admins (not platform Owner)
+  // and only on B2C whitelabels. Sits alongside per-action permission checks.
   .guard({
     beforeHandle({ userRole, set, whitelabel }: any) {
       if (userRole === UserRole.Owner) {
@@ -32,7 +40,7 @@ export const withdrawalMethodsRoutes = new Elysia({
     const methods = await db.select().from(withdrawalMethods);
     set.status = 200;
     return { success: true, data: methods };
-  })
+  }, { beforeHandle: canViewMethods })
 
   .post(
     "/",
@@ -45,6 +53,7 @@ export const withdrawalMethodsRoutes = new Elysia({
       return { success: true, data: method };
     },
     {
+      beforeHandle: canCreateMethod,
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100 }),
         type: t.String({ minLength: 1, maxLength: 50 }),
@@ -72,6 +81,7 @@ export const withdrawalMethodsRoutes = new Elysia({
       return { success: true, data: updated };
     },
     {
+      beforeHandle: canEditMethod,
       body: t.Object({
         name: t.Optional(t.String()),
         type: t.Optional(t.String()),
@@ -93,4 +103,4 @@ export const withdrawalMethodsRoutes = new Elysia({
       .where(eq(withdrawalMethods.id, params.id));
     set.status = 200;
     return { success: true };
-  });
+  }, { beforeHandle: canDeleteMethod });
