@@ -1,6 +1,14 @@
 import { Elysia, t } from "elysia";
-import { users, profiles, whitelabels, ledgerLimit, SYSTEM_USER_ID } from "../../db/schema";
-import { eq, and, inArray, ne, sql } from "drizzle-orm";
+import {
+  users,
+  profiles,
+  whitelabels,
+  ledgerLimit,
+  staffRoles,
+  userStaffRole,
+  SYSTEM_USER_ID,
+} from "../../db/schema";
+import { eq, and, inArray, ne, sql, isNull } from "drizzle-orm";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { DbType } from "../../types";
 import { generateHashPassword, comparePassword } from "../../utils/password";
@@ -148,6 +156,33 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         addedBy: addedBy || SYSTEM_USER_ID,
         updateBy: addedBy || SYSTEM_USER_ID,
       });
+
+      // Auto-assign the "Operations Full Access" system template to newly
+      // created tier users (Admin/Super/Master/Agent) so they have the same
+      // pre-RBAC default access on their first login. Owner restricts later
+      // via Staff Roles → Manage. Player accounts (UserRole.User) get no
+      // staff role — they don't use the owner panel.
+      const STAFF_TIERS = [UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent];
+      if (STAFF_TIERS.includes(finalRole)) {
+        const [opsTemplate] = await db
+          .select({ id: staffRoles.id })
+          .from(staffRoles)
+          .where(
+            and(
+              eq(staffRoles.name, "Operations Full Access"),
+              isNull(staffRoles.whitelabelId),
+              eq(staffRoles.isSystem, true),
+            ),
+          )
+          .limit(1);
+        if (opsTemplate) {
+          await db.insert(userStaffRole).values({
+            userId: user.id,
+            staffRoleId: opsTemplate.id,
+            assignedBy: addedBy || null,
+          });
+        }
+      }
 
       set.status = 201;
       return {

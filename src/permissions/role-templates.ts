@@ -83,6 +83,16 @@ const OWNER_ONLY_KEYS_PRE_RBAC: string[] = [
   "live_prediction.declare",
   "sports_result.declare",
   "sports_result.edit",
+  // Sports sync & market management — Owner-only by product decision.
+  //   - fetch_competitions: syncs the external API catalog (global side effect).
+  //   - custom_markets.*: bespoke market definitions + odds management. Drill-down
+  //     screens at /sports-games/competitions/.../events/... live behind these.
+  "sports.fetch_competitions",
+  "custom_markets.view",
+  "custom_markets.create",
+  "custom_markets.edit",
+  "custom_markets.delete",
+  "custom_markets.manage_odds",
 ];
 
 export const ROLE_TEMPLATES: StaffRoleTemplate[] = [
