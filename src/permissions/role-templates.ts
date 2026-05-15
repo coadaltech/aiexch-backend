@@ -87,7 +87,10 @@ const OWNER_ONLY_KEYS_PRE_RBAC: string[] = [
   //   - fetch_competitions: syncs the external API catalog (global side effect).
   //   - custom_markets.*: bespoke market definitions + odds management. Drill-down
   //     screens at /sports-games/competitions/.../events/... live behind these.
+  //   - sports.toggle: Visible / Live switches on the Sports Games page.
+  //     Flips affect every whitelabel + every player, so it stays Owner-only.
   "sports.fetch_competitions",
+  "sports.toggle",
   "custom_markets.view",
   "custom_markets.create",
   "custom_markets.edit",
