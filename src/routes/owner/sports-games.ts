@@ -8,6 +8,14 @@ import { broadcastChange } from "../../services/sports-broadcast";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { resolveOwnerScope } from "../../utils/ownerScope";
 import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
+
+// Sport CRUD/toggle/sync endpoints. Owner-only by product decision because
+// flipping a sport's Visible/Live state, reordering sports, or syncing
+// competitions affects every whitelabel and every player simultaneously.
+// Owner role bypasses these checks (services/permissions.ts); the OPS_FULL
+// backfill template intentionally excludes sports.toggle / .fetch_competitions.
+const canToggleSport = requirePermission("sports.toggle");
 import { DbType } from "../../types";
 import {
   getCompetitionsWithOverrides,
@@ -192,6 +200,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
       }
     },
     {
+      beforeHandle: canToggleSport,
       params: t.Object({ sportId: t.String() }),
       body: t.Object({ isActive: t.Boolean() }),
     },
@@ -240,6 +249,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
       }
     },
     {
+      beforeHandle: canToggleSport,
       params: t.Object({ sportId: t.String() }),
       body: t.Object({ isLive: t.Boolean() }),
     },
