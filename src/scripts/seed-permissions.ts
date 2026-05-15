@@ -136,6 +136,17 @@ async function pruneOrphanRolePermissions(permIdByKey: Map<string, string>): Pro
   }
 }
 
+/**
+ * Idempotent seed entrypoint that callers (CLI and the backend boot sequence)
+ * can both invoke. Doesn't touch process.exit so the caller decides what to do
+ * on failure — the boot sequence logs and continues, the CLI rethrows.
+ */
+export async function runStaffPermissionSeed(): Promise<void> {
+  const permIdByKey = await seedPermissions();
+  await seedRoleTemplates(permIdByKey);
+  await pruneOrphanRolePermissions(permIdByKey);
+}
+
 async function main() {
   if (!process.env.DATABASE_URL) {
     console.error("DATABASE_URL is not set");
@@ -143,9 +154,7 @@ async function main() {
   }
   console.log("Seeding staff RBAC catalog...");
   try {
-    const permIdByKey = await seedPermissions();
-    await seedRoleTemplates(permIdByKey);
-    await pruneOrphanRolePermissions(permIdByKey);
+    await runStaffPermissionSeed();
     console.log("✓ Seed complete.");
   } catch (err) {
     console.error("Seed failed:", err);
@@ -154,4 +163,8 @@ async function main() {
   process.exit(0);
 }
 
-main();
+// Only auto-run the CLI flow when executed directly (e.g. `bun run seed:permissions`).
+// When imported by src/index.ts at startup we just expose runStaffPermissionSeed.
+if (import.meta.main) {
+  main();
+}

@@ -1,5 +1,11 @@
 import { redis } from "@db/redis";
 import { db } from "@db/index";
+import { RedisGCService } from "./redis-gc-service";
+
+// TTL refreshed on every admin-override write. Outlives any normal match
+// lifetime; renewed whenever the key is touched. Stale keys get cleaned up
+// either by this TTL or by the periodic Redis GC pass.
+const OVERRIDE_TTL = RedisGCService.OVERRIDE_TTL_SECONDS;
 import {
   events,
   marketSettings,
@@ -98,7 +104,9 @@ export const AdminMarketService = {
     if (data.betDelay !== undefined) hash.betDelay = String(data.betDelay);
 
     if (Object.keys(hash).length > 0 && redis.isOpen) {
-      await redis.hSet(`admin:event:${eventId}`, hash);
+      const key = `admin:event:${eventId}`;
+      await redis.hSet(key, hash);
+      await redis.expire(key, OVERRIDE_TTL);
     }
 
     return { success: true, eventId };
@@ -195,7 +203,9 @@ export const AdminMarketService = {
       }
     }
     if (Object.keys(hash).length > 0 && redis.isOpen) {
-      await redis.hSet(`admin:market:${marketId}`, hash);
+      const key = `admin:market:${marketId}`;
+      await redis.hSet(key, hash);
+      await redis.expire(key, OVERRIDE_TTL);
     }
 
     // Push an instant patched broadcast so subscribed user pages (matchId,
@@ -285,7 +295,8 @@ export const AdminMarketService = {
         // should never collide, but leaves no ambiguity if it did).
         await redis.del(`custom:ballrunning:${marketId}`);
 
-        await redis.hSet(`admin:market:${marketId}`, {
+        const marketKey = `admin:market:${marketId}`;
+        await redis.hSet(marketKey, {
           isActive: "true",
           isVisible: "true",
           suspended: "false",
@@ -298,7 +309,10 @@ export const AdminMarketService = {
           maxProfit: String(params.maxProfit || 100000),
           betDelay: String(params.betDelay || 0),
         });
-        await redis.sAdd(`custom:markets:${params.eventId}`, marketId);
+        await redis.expire(marketKey, OVERRIDE_TTL);
+        const customSetKey = `custom:markets:${params.eventId}`;
+        await redis.sAdd(customSetKey, marketId);
+        await redis.expire(customSetKey, OVERRIDE_TTL);
       }
 
       return { success: true, marketId };
@@ -321,11 +335,9 @@ export const AdminMarketService = {
    */
   async setCustomMarketBallRunning(marketId: string, ballRunning: boolean) {
     if (!redis.isOpen) return { success: true };
-    await redis.hSet(
-      `admin:market:${marketId}`,
-      "ballRunning",
-      ballRunning ? "true" : "false"
-    );
+    const key = `admin:market:${marketId}`;
+    await redis.hSet(key, "ballRunning", ballRunning ? "true" : "false");
+    await redis.expire(key, OVERRIDE_TTL);
 
     // Push an immediate patched broadcast so subscribed user match pages flip
     // the Ball Running overlay on the next frame instead of waiting for the
@@ -398,6 +410,7 @@ export const AdminMarketService = {
       const key = `custom:ballrunning:${marketId}`;
       if (odds.ballRunning) {
         await redis.hSet(key, String(sid), "true");
+        await redis.expire(key, OVERRIDE_TTL);
       } else {
         await redis.hDel(key, String(sid));
       }
@@ -678,11 +691,13 @@ export const AdminMarketService = {
             if (existingJson) {
               const current = JSON.parse(existingJson);
               current.name = runner.name;
+              const oddsKey = `custom:odds:${marketId}`;
               await redis.hSet(
-                `custom:odds:${marketId}`,
+                oddsKey,
                 String(runner.selectionId),
                 JSON.stringify(current)
               );
+              await redis.expire(oddsKey, OVERRIDE_TTL);
             }
           }
         }
@@ -700,7 +715,9 @@ export const AdminMarketService = {
       if (data.isActive !== undefined) hash.isActive = String(data.isActive);
 
       if (Object.keys(hash).length > 0) {
-        await redis.hSet(`admin:market:${marketId}`, hash);
+        const key = `admin:market:${marketId}`;
+        await redis.hSet(key, hash);
+        await redis.expire(key, OVERRIDE_TTL);
       }
     }
 
@@ -793,20 +810,42 @@ export const AdminMarketService = {
       return;
     }
 
-    // Sync event overrides
+    // Sync event overrides — skip events whose openDate is well past, those
+    // would only re-bloat Redis at startup. The GC service would just delete
+    // them on its next pass anyway.
+    const staleCutoff = new Date(
+      Date.now() - 3 * 24 * 60 * 60 * 1000
+    );
     const allEvents = await db.select().from(events);
+    let skippedEvents = 0;
     for (const evt of allEvents) {
-      await redis.hSet(`admin:event:${evt.eventId}`, {
+      if (evt.openDate && new Date(evt.openDate) < staleCutoff) {
+        skippedEvents++;
+        continue;
+      }
+      const key = `admin:event:${evt.eventId}`;
+      await redis.hSet(key, {
         isActive: String(evt.isActive),
         isVisible: String(evt.isVisible),
         suspended: String(evt.suspended),
         betDelay: String(evt.betDelay),
       });
+      await redis.expire(key, OVERRIDE_TTL);
     }
 
-    // Sync market overrides
+    // Sync market overrides — skip markets whose parent event is stale.
+    const liveEventIds = new Set(
+      allEvents
+        .filter((e) => !e.openDate || new Date(e.openDate) >= staleCutoff)
+        .map((e) => e.eventId)
+    );
     const allMarkets = await db.select().from(marketSettings);
+    let skippedMarkets = 0;
     for (const mkt of allMarkets) {
+      if (!liveEventIds.has(mkt.eventId)) {
+        skippedMarkets++;
+        continue;
+      }
       const hash: Record<string, string> = {
         isActive: String(mkt.isActive),
         isVisible: String(mkt.isVisible),
@@ -826,11 +865,15 @@ export const AdminMarketService = {
         hash.bettingType = marketTypeToString(mkt.bettingType).toUpperCase();
       }
 
-      await redis.hSet(`admin:market:${mkt.marketId}`, hash);
+      const marketKey = `admin:market:${mkt.marketId}`;
+      await redis.hSet(marketKey, hash);
+      await redis.expire(marketKey, OVERRIDE_TTL);
 
       // Rebuild custom market sets
       if (mkt.isCustom) {
-        await redis.sAdd(`custom:markets:${mkt.eventId}`, mkt.marketId);
+        const setKey = `custom:markets:${mkt.eventId}`;
+        await redis.sAdd(setKey, mkt.marketId);
+        await redis.expire(setKey, OVERRIDE_TTL);
       }
     }
 
@@ -838,7 +881,7 @@ export const AdminMarketService = {
     // each tick). No Redis hash to sync.
 
     console.log(
-      `[AdminSync] Synced ${allEvents.length} events, ${allMarkets.length} markets`
+      `[AdminSync] Synced ${allEvents.length - skippedEvents}/${allEvents.length} events, ${allMarkets.length - skippedMarkets}/${allMarkets.length} markets (skipped stale)`
     );
   },
 };

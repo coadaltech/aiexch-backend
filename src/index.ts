@@ -16,6 +16,7 @@ import { startBetSettlementService } from "./services/bet-settlement";
 import { startMarketResultCronJobs } from "./services/market-result-cron-service";
 import { AdminMarketService } from "@services/admin-market-service";
 import { OddsHistoryWorker } from "@services/odds-history-worker";
+import { RedisGCService } from "@services/redis-gc-service";
 import { seriesRoutes } from "./routes/series-route";
 import { matkaRoutes } from "./routes/matka";
 import { jamboRoutes } from "./routes/jambo";
@@ -25,6 +26,7 @@ import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
 import { startCronJobs, ensureSystemUser } from "@db/seed";
+import { runStaffPermissionSeed } from "./scripts/seed-permissions";
 import { gamesRoutes } from "@routes/dashboard/games-routes";
 import { competitions, whitelabels } from "@db/schema";
 import { db } from "./db";
@@ -110,6 +112,18 @@ async function initializeServices() {
   // Step 0: Ensure the "system" user exists (used as default for audit columns)
   await ensureSystemUser();
   console.log("[Init] System user ensured");
+
+  // Step 0b: Sync the staff RBAC catalog + system role templates with what's
+  // declared in code (permissions/catalog.ts and permissions/role-templates.ts).
+  // Idempotent and safe to run every boot. Without this, prod keeps stale
+  // template permissions after code deploys (the symptom is non-Owner users
+  // still seeing tabs that have just been moved to Owner-only in the template).
+  try {
+    await runStaffPermissionSeed();
+    console.log("[Init] Staff permission catalog synced");
+  } catch (e) {
+    console.error("[Init] Staff permission seed failed (non-fatal):", e);
+  }
   // initializeuserservice comments
 
   // Step 1: Connect Redis (non-blocking — app works without it via in-memory cache)
@@ -166,6 +180,14 @@ async function initializeServices() {
 
   // Step 6: Clean up stale Redis keys and trim bloated streams
   await cleanupRedis();
+
+  // Step 7: Schedule periodic Redis GC (every 30 minutes) so admin override
+  // hashes for finished events don't accumulate until Redis hits maxmemory.
+  try {
+    RedisGCService.start();
+  } catch (e) {
+    console.error("[Init] Redis GC scheduler failed (non-fatal):", e);
+  }
 
   console.log("[Init] All services ready");
 }
