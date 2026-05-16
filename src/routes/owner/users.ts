@@ -346,7 +346,8 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
   // Direct children of a user — same row shape as GET /owner/users so the
   // frontend can render an identical table inside the drill-down modal.
-  // Backed by fn_list_user_children for a single round-trip to Postgres.
+  // Reuses fn_list_owner_users with the drilled user's id as p_current_user_id
+  // so the per-row totalpnl is the P/L between that user and each child.
   .get("/:id/downline", async ({ params, set, db, whitelabel, userId, userRole }: any) => {
     const targetUserId = params.id;
     if (!targetUserId || typeof targetUserId !== "string") {
@@ -356,11 +357,14 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
 
     const scope = await resolveOwnerScope(db, whitelabel ?? undefined, { id: userId, role: userRole });
 
-    // Verify the requester can actually see this user. Mirrors the visibility
-    // check in /:id/created-users so callers can't drill into accounts that
-    // belong to another whitelabel/branch.
     const [target] = await db
-      .select({ id: users.id, whitelabelId: users.whitelabelId, addedBy: users.addedBy, createdBy: users.createdBy })
+      .select({
+        id: users.id,
+        whitelabelId: users.whitelabelId,
+        addedBy: users.addedBy,
+        createdBy: users.createdBy,
+        groupId: users.groupId,
+      })
       .from(users)
       .where(eq(users.id, targetUserId))
       .limit(1);
@@ -374,7 +378,11 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     }
 
     const rows = await db.execute(sql`
-      SELECT fn_list_user_children(${targetUserId}::uuid) AS data
+      SELECT fn_list_owner_users(
+        ${targetUserId}::uuid,
+        ${target.groupId ?? 0}::int,
+        ${target.whitelabelId ?? null}::uuid
+      ) AS data
     `);
     const rowArray = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
     const data: any[] = (rowArray[0]?.data as any[] | null) ?? [];

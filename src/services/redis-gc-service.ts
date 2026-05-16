@@ -153,16 +153,11 @@ export const RedisGCService = {
   },
 
   /**
-   * Schedule the GC to run every 30 minutes. Also runs once shortly after
-   * startup so a freshly-booted instance starts cleaning immediately.
+   * Schedule the GC to run every 30 minutes. The caller is expected to have
+   * already awaited an initial `runOnce()` during startup so memory is freed
+   * before traffic hits the server.
    */
   start() {
-    setTimeout(() => {
-      this.runOnce().catch((e) =>
-        console.error("[RedisGC] Initial pass failed:", (e as Error).message)
-      );
-    }, 60_000);
-
     cron.schedule("*/30 * * * *", () => {
       this.runOnce().catch((e) =>
         console.error("[RedisGC] Scheduled pass failed:", (e as Error).message)

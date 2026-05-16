@@ -134,13 +134,15 @@ async function initializeServices() {
   await loadWhitelabelOrigins();
   console.log("[Init] Whitelabel origins loaded");
 
-  // Step 3: Sync admin overrides from DB to Redis
-  // try {
-  //   await AdminMarketService.syncOverridesToRedis();
-  //   console.log("[Init] Admin overrides synced");
-  // } catch (e) {
-  //   console.error("[Init] Admin sync failed (non-fatal):", e);
-  // }
+  // Step 3: Sync admin overrides from DB to Redis. Skips events older than
+  // 3 days (handled inside the sync) so a flushed Redis is self-healing on
+  // restart without re-bloating from historical events.
+  try {
+    await AdminMarketService.syncOverridesToRedis();
+    console.log("[Init] Admin overrides synced");
+  } catch (e) {
+    console.error("[Init] Admin sync failed (non-fatal):", e);
+  }
 
   // Step 4: Start odds history worker
   try {
@@ -181,8 +183,14 @@ async function initializeServices() {
   // Step 6: Clean up stale Redis keys and trim bloated streams
   await cleanupRedis();
 
-  // Step 7: Schedule periodic Redis GC (every 30 minutes) so admin override
-  // hashes for finished events don't accumulate until Redis hits maxmemory.
+  // Step 7: Run the Redis GC once synchronously to free memory now (in case
+  // Redis is already near maxmemory from a long-running instance), then
+  // schedule the periodic pass every 30 minutes.
+  try {
+    await RedisGCService.runOnce();
+  } catch (e) {
+    console.error("[Init] Redis GC initial pass failed (non-fatal):", e);
+  }
   try {
     RedisGCService.start();
   } catch (e) {

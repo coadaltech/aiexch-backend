@@ -17,6 +17,66 @@
 -- already verified the current user can see `p_parent_user_id`; the children
 -- of that user are by definition reachable.
 
+/* ─────────────────────────────────────────────────────────────────────────
+   OLD VERSION — kept for reference. Replaced by the version below which
+   adds the per-whitelabel `totalpnl` aggregate, matching fn_list_owner_users.
+
+CREATE OR REPLACE FUNCTION fn_list_user_children(
+  p_parent_user_id uuid
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+AS $$
+  WITH visible AS (
+    SELECT u.*
+    FROM users u
+    WHERE u.created_by = p_parent_user_id
+       OR (u.created_by IS NULL AND u.added_by = p_parent_user_id)
+  )
+  SELECT COALESCE(
+    jsonb_agg(
+      jsonb_build_object(
+        'id',                   u.id,
+        'username',             u.username,
+        'email',                u.email,
+        'role',                 u.role,
+        'groupId',              u.group_id,
+        'whitelabelId',         u.whitelabel_id,
+        'accountStatus',        u.account_status,
+        'parentAccountStatus',  u.parent_account_status,
+        'createdBy',            u.created_by,
+        'addedBy',              u.added_by,
+        'addedDate',            u.added_date,
+        'updateDate',           u.update_date,
+        'recordStatus',         u.record_status,
+        'membership',           COALESCE(p.membership,         0),
+        'betStatus',            COALESCE(p.bet_status,         true),
+        'parentBetStatus',      COALESCE(p.parent_bet_status,  true),
+        'upline',               COALESCE(p.upline,             '0.00'),
+        'downline',             COALESCE(p.downline,           '0.00'),
+        'currencyId',           p.currency_id,
+        'firstName',            NULLIF(p.first_name, ''),
+        'lastName',             NULLIF(p.last_name,  ''),
+        'phone',                NULLIF(p.phone,      ''),
+        'country',              NULLIF(p.country,    ''),
+        'balance',              COALESCE(TRUNC(l.user_balance)::text,      '0'),
+        'userLimit',            COALESCE(TRUNC(l.user_limit)::text,        '0'),
+        'limitConsumed',        COALESCE(TRUNC(l.limit_consumed)::text,    '0'),
+        'fixLimit',             COALESCE(TRUNC(l.fix_limit)::text,         '0'),
+        'finalLimit',           COALESCE(TRUNC(l.final_limit)::text,       '0'),
+        'transactionLimit',     COALESCE(TRUNC(l.transaction_limit)::text, '0')
+      )
+      ORDER BY u.added_date DESC
+    ),
+    '[]'::jsonb
+  )
+  FROM visible u
+  LEFT JOIN profiles      p ON p.user_id = u.id
+  LEFT JOIN ledger_limit  l ON l.user_id = u.id;
+$$;
+   ───────────────────────────────────────────────────────────────────────── */
+
 CREATE OR REPLACE FUNCTION fn_list_user_children(
   p_parent_user_id uuid
 )
@@ -31,6 +91,16 @@ AS $$
     FROM users u
     WHERE u.created_by = p_parent_user_id
        OR (u.created_by IS NULL AND u.added_by = p_parent_user_id)
+  ),
+  vd AS (
+    SELECT whitelabel_id,
+           SUM(CASE WHEN voucher_details.dr_cr = 0
+                    THEN -voucher_details.amount
+                    ELSE  voucher_details.amount END) AS totalpnl
+    FROM voucher_details
+    WHERE voucher_type = 6
+      AND record_status = 0
+    GROUP BY whitelabel_id
   )
   SELECT COALESCE(
     jsonb_agg(
@@ -66,13 +136,15 @@ AS $$
         'limitConsumed',        COALESCE(TRUNC(l.limit_consumed)::text,    '0'),
         'fixLimit',             COALESCE(TRUNC(l.fix_limit)::text,         '0'),
         'finalLimit',           COALESCE(TRUNC(l.final_limit)::text,       '0'),
-        'transactionLimit',     COALESCE(TRUNC(l.transaction_limit)::text, '0')
+        'transactionLimit',     COALESCE(TRUNC(l.transaction_limit)::text, '0'),
+        'totalpnl',             COALESCE(TRUNC(vd.totalpnl)::text,         '0')
       )
       ORDER BY u.added_date DESC
     ),
     '[]'::jsonb
   )
   FROM visible u
-  LEFT JOIN profiles      p ON p.user_id = u.id
-  LEFT JOIN ledger_limit  l ON l.user_id = u.id;
+  LEFT JOIN profiles      p  ON p.user_id       = u.id
+  LEFT JOIN ledger_limit  l  ON l.user_id       = u.id
+  LEFT JOIN vd               ON vd.whitelabel_id = u.whitelabel_id;
 $$;
