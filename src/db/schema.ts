@@ -557,6 +557,33 @@ export const sportsGames = pgTable("sports_games", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
+// ── Casino Games (Ace Gamings catalog mirror) ────────────────────────────────
+// Synced periodically from GET /games on the Ace Gamings Platform.
+// `externalId` is Ace's numeric `id` (treated as opaque, non-sequential).
+// Real bet/wallet flow uses casino_transactions (added in a later migration).
+export const casinoGames = pgTable("casino_games", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  externalId: integer("external_id").notNull().unique(),
+  slug: varchar("slug", { length: 100 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  lang: varchar("lang", { length: 10 }).default("en-US").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  specialNote: varchar("special_note", { length: 50 }),
+  // Operator-controlled visibility. Sync sets this to true on new games; admin
+  // can hide individual games from the lobby without dropping the row.
+  visible: boolean("visible").default(true).notNull(),
+  // When the upstream catalog last reported this game. Older rows can be
+  // hidden if no longer in the feed.
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
 // ── Home Sections ────────────────────────────────────────────────────────────
 export const homeSections = pgTable("home_sections", {
   id: uuid("id").primaryKey().defaultRandom(),

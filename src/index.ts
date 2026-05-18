@@ -21,7 +21,10 @@ import { seriesRoutes } from "./routes/series-route";
 import { matkaRoutes } from "./routes/matka";
 import { jamboRoutes } from "./routes/jambo";
 import { kalyanNewRoutes } from "./routes/kalyan-new";
-import { qtechRoutes } from "./routes/qtech";
+// import { qtechRoutes } from "./routes/qtech"; // legacy stub, replaced
+import { casinoWalletStubRoutes } from "./routes/casino-wallet-stub";
+import { casinoDevProxyRoutes } from "./routes/casino-dev-proxy";
+import { casinoAceRoutes } from "./routes/casino-ace";
 import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
@@ -99,7 +102,9 @@ const app = new Elysia()
   .use(matkaRoutes)
   .use(jamboRoutes)
   .use(kalyanNewRoutes)
-  .use(qtechRoutes)
+  .use(casinoWalletStubRoutes)
+  .use(casinoDevProxyRoutes)
+  .use(casinoAceRoutes)
   .listen(port);
 
 
