@@ -1,0 +1,1 @@
+ALTER TABLE "transaction_details_declare" ADD COLUMN "base_price" numeric(10, 4) NOT NULL;
