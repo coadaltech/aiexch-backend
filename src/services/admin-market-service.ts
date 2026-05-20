@@ -12,8 +12,10 @@ import {
   runnerSettings,
   customMarketOdds,
   users,
+  transactions,
+  marketResults,
 } from "@db/schema";
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, or, desc, inArray, sql } from "drizzle-orm";
 import { parseMarketType, marketTypeToString } from "../types/enums";
 import { SportsService } from "./sports";
 import { LiveDataService } from "./live-data-service";
@@ -469,6 +471,19 @@ export const AdminMarketService = {
 
     if (market.length === 0) return { success: false, error: "Market not found" };
 
+    // Block deletion when the market already has bets/related data.
+    const existingBet = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(eq(transactions.marketId, marketId))
+      .limit(1);
+    if (existingBet.length > 0) {
+      return {
+        success: false,
+        error: "Cannot delete: this market has bets or related data",
+      };
+    }
+
     const eventId = market[0].eventId;
 
     // Delete from DB
@@ -594,7 +609,31 @@ export const AdminMarketService = {
       markets = filtered.slice(offset, offset + limit);
     }
 
-    // Enrich markets with event names and runners
+    // Exclude markets whose results have already been declared. Once a result
+    // is declared the market is effectively closed and should not appear on
+    // the custom-markets management page.
+    // declare_process stored procedure writes the status in lowercase
+    // ('declared') — match case-insensitively to be safe across producers.
+    if (markets.length > 0) {
+      const declaredRows = await db
+        .select({ marketId: marketResults.marketId })
+        .from(marketResults)
+        .where(
+          and(
+            inArray(
+              marketResults.marketId,
+              markets.map((m) => m.marketId)
+            ),
+            sql`lower(${marketResults.status}) = 'declared'`
+          )
+        );
+      const declaredSet = new Set(declaredRows.map((r) => String(r.marketId)));
+      if (declaredSet.size > 0) {
+        markets = markets.filter((m) => !declaredSet.has(String(m.marketId)));
+      }
+    }
+
+    // Enrich markets with event names, runners, and hasBets flag.
     const enrichedMarkets = await Promise.all(
       markets.map(async (m) => {
         const eventRow = await db
@@ -608,10 +647,17 @@ export const AdminMarketService = {
           .from(runnerSettings)
           .where(eq(runnerSettings.marketId, m.marketId));
 
+        const betRow = await db
+          .select({ id: transactions.id })
+          .from(transactions)
+          .where(eq(transactions.marketId, m.marketId))
+          .limit(1);
+
         return {
           ...m,
           eventName: eventRow[0]?.name || `Event ${m.eventId}`,
           runners,
+          hasBets: betRow.length > 0,
         };
       })
     );

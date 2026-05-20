@@ -59,36 +59,6 @@ export const users = pgTable("users", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
-// ── Casino Games ─────────────────────────────────────────────────────────────
-export const casino_games = pgTable("casino_games", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  uuid: varchar("uuid", { length: 255 }).notNull().unique(),
-  name: text("name").notNull(),
-  image: text("image").notNull(),
-  type: varchar("type").notNull(),
-  provider: varchar("provider").notNull(),
-  provider_id: integer("provider_id").notNull(),
-  technology: varchar("technology").notNull(),
-  label: varchar("label"),
-  has_lobby: boolean("has_lobby").notNull().default(false),
-  is_mobile: boolean("is_mobile").notNull().default(false),
-  has_freespins: boolean("has_freespins").notNull().default(false),
-  has_tables: boolean("has_tables").notNull().default(false),
-  tags: jsonb("tags")
-    .$type<{ code: string; label: string }[]>()
-    .notNull()
-    .default([]),
-  freespin_valid_until_full_day: integer("freespin_valid_until_full_day")
-    .notNull()
-    .default(0),
-  // ── Audit ──
-  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
-  addedDate: timestamp("added_date").defaultNow().notNull(),
-  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
-  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
-  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
-});
-
 // ── OTPs ─────────────────────────────────────────────────────────────────────
 export const otps = pgTable("otps", {
   id: uuid("id").primaryKey().defaultRandom(),

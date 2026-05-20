@@ -673,6 +673,13 @@
       "when": 1778485146483,
       "tag": "0095_burly_multiple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1779104191254,
+      "tag": "0096_funny_polaris",
+      "breakpoints": true
     }
   ]
 }

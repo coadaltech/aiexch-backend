@@ -1,7 +1,8 @@
 import { Elysia, t } from "elysia";
 import { db } from "@db/index";
-import { transactions, transactionDetails } from "@db/schema";
+import { transactions, transactionDetails, marketSettings } from "@db/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
+import { redis } from "@db/redis";
 import { SportsService } from "../../services/sports";
 import { MarketType } from "../../types/enums";
 import {
@@ -157,6 +158,38 @@ export const sportsResultRoutes = new Elysia({ prefix: "/sports-result" })
         await db.execute(sql`
           CALL public.update_limit_after_declare(${market.marketId}::numeric)
         `);
+
+        // After result declaration: mark the market inactive in market_settings
+        // and drop it from the live custom-markets Redis set so it disappears
+        // from both the custom-markets management page and the public matchid
+        // page. The market_results row (status='declared') keeps the audit trail.
+        const settingsRow = await db
+          .select({ eventId: marketSettings.eventId, isCustom: marketSettings.isCustom })
+          .from(marketSettings)
+          .where(eq(marketSettings.marketId, marketId))
+          .limit(1);
+
+        if (settingsRow.length > 0) {
+          await db
+            .update(marketSettings)
+            .set({ isActive: false })
+            .where(eq(marketSettings.marketId, marketId));
+
+          if (redis.isOpen) {
+            // Keep the Redis override hash in sync with the DB flag.
+            await redis.hSet(`admin:market:${marketId}`, "isActive", "false");
+
+            // For custom markets, drop the marketId from the per-event set so
+            // the live pipeline (getCustomMarkets) stops including it on the
+            // public matchid page.
+            if (settingsRow[0].isCustom) {
+              await redis.sRem(
+                `custom:markets:${settingsRow[0].eventId}`,
+                marketId
+              );
+            }
+          }
+        }
 
         return { success: true, message: `Market ${marketId} declared successfully` };
       } catch (error) {

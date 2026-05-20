@@ -9,9 +9,8 @@ import { publicRoutes } from "./routes/public";
 import { multimarketsRoutes } from "./routes/multimarkets";
 import { sportsRoutes } from "./routes/sports";
 import { bettingRoutes } from "./routes/betting";
-import { casinoAggregatorRoutes } from "./routes/casino/aggregator";
-import { casinoCallbackRoutes } from "./routes/casino/callback";
-import { casinoGamesRoutes } from "./routes/casino/games";
+// Legacy Slotegrator casino routes removed — replaced by Ace Gamings flow
+// (casinoAceRoutes / casinoWalletStubRoutes / casinoDevProxyRoutes below).
 import { startBetSettlementService } from "./services/bet-settlement";
 import { startMarketResultCronJobs } from "./services/market-result-cron-service";
 import { AdminMarketService } from "@services/admin-market-service";
@@ -95,9 +94,6 @@ const app = new Elysia()
   .use(multimarketsRoutes)
   .use(sportsRoutes)
   .use(bettingRoutes)
-  .use(casinoAggregatorRoutes)
-  .use(casinoCallbackRoutes)
-  .use(casinoGamesRoutes)
   .use(websocketRoutes)
   .use(matkaRoutes)
   .use(jamboRoutes)

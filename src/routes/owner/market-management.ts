@@ -396,7 +396,8 @@ export const marketManagementRoutes = new Elysia({
           params.marketId
         );
         if (!result.success) {
-          set.status = 404;
+          // 409 when the market has bets and can't be deleted; 404 otherwise.
+          set.status = result.error === "Market not found" ? 404 : 409;
           return result;
         }
         return { success: true };
