@@ -4,6 +4,7 @@ import { transactions, transactionDetails, marketSettings } from "@db/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { redis } from "@db/redis";
 import { SportsService } from "../../services/sports";
+import { LiveDataService } from "../../services/live-data-service";
 import { MarketType } from "../../types/enums";
 import {
   getUndeclaredMarkets,
@@ -190,6 +191,11 @@ export const sportsResultRoutes = new Elysia({ prefix: "/sports-result" })
             }
           }
         }
+
+        // Tell anyone watching this match (live page + bet slip) to refetch
+        // their open bets / exposure / ledger / balance so the settled bet
+        // disappears immediately. No-op if no one is subscribed.
+        LiveDataService.broadcastResultDeclared(String(market.matchId), market.marketId);
 
         return { success: true, message: `Market ${marketId} declared successfully` };
       } catch (error) {

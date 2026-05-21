@@ -437,6 +437,23 @@ export const LiveDataService = {
     }
   },
 
+  // Notify everyone watching this event that a market's result was just
+  // declared/voided. Clients use this signal to refetch settlement-dependent
+  // data (open bets, market exposure, ledger, balance) so a settled bet drops
+  // out of the bet slip instantly — event-driven, no client-side polling.
+  // No-op if nobody is currently subscribed to the event.
+  broadcastResultDeclared(eventId: string, marketId: string) {
+    const state = activeEvents.get(eventId);
+    if (!state || state.subscribers.size === 0) return;
+    const message = JSON.stringify({
+      type: "result-declared",
+      eventId,
+      marketId,
+      timestamp: Date.now(),
+    });
+    this._broadcast(state, message);
+  },
+
   _broadcast(state: EventState, message: string) {
     const deadClients: string[] = [];
     for (const [clientId, send] of state.subscribers) {

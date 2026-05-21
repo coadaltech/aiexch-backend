@@ -3,6 +3,7 @@ import { db } from "../db";
 import { transactions } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { SportsService } from "./sports";
+import { LiveDataService } from "./live-data-service";
 import { MarketType } from "../types/enums";
 
 export interface UndeclaredMarket {
@@ -298,6 +299,11 @@ export async function fetchAndStoreResult(market: UndeclaredMarket): Promise<voi
       console.log(
         `[MarketResultCron] Declared market ${market.marketId} via stored procedures`
       );
+
+      // Push a result-declared signal to anyone watching this match so their
+      // open bets / exposure / ledger / balance refetch and the settled bet
+      // drops out of the bet slip without polling. No-op if no subscribers.
+      LiveDataService.broadcastResultDeclared(String(market.matchId), market.marketId);
     } else if (status === "VOID" || status === "ROLLBACK") {
       await db
         .update(transactions)
@@ -341,6 +347,10 @@ export async function fetchAndStoreResult(market: UndeclaredMarket): Promise<voi
       console.log(
         `[MarketResultCron] Voided all bets for market ${market.marketId} (${status})`
       );
+
+      // Same as the declared path: nudge watchers to refetch so voided bets
+      // drop out of the bet slip immediately.
+      LiveDataService.broadcastResultDeclared(String(market.matchId), market.marketId);
     }
   } catch (error) {
     console.error(
