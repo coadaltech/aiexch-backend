@@ -554,6 +554,44 @@ export const casinoGames = pgTable("casino_games", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
+// ── Casino Transactions ──────────────────────────────────────────────────────
+// Records every debit / credit / rollback call from Ace Gamings.
+// `transaction_id` (Ace's UUID) is the idempotency key — duplicate callbacks
+// are detected here instead of in in-memory state.
+// Balance deduction / addition is NOT applied here yet; that is wired in a
+// later migration once credit + rollback DB handling is complete.
+export const casinoTransactions = pgTable("casino_transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // Ace's opaque transaction UUID — unique constraint enforces idempotency.
+  transactionId: varchar("transaction_id", { length: 100 }).notNull().unique(),
+  // debit | credit | rollback
+  type: varchar("type", { length: 20 }).notNull(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  // Ace's round / session identifiers
+  roundId: varchar("round_id", { length: 100 }),
+  gameId: integer("game_id"),
+  gameName: varchar("game_name", { length: 100 }),
+  gameType: varchar("game_type", { length: 50 }),
+  currency: varchar("currency", { length: 3 }),
+  amount: decimal("amount", { precision: 20, scale: 4 }).notNull(),
+  // For credit / rollback: the original debit transaction_id being referenced.
+  swBetTransactionId: varchar("sw_bet_transaction_id", { length: 100 }),
+  balanceBefore: decimal("balance_before", { precision: 15, scale: 2 }),
+  balanceAfter: decimal("balance_after", { precision: 15, scale: 2 }),
+  // Ace's idempotent request_id (their side)
+  requestId: varchar("request_id", { length: 100 }),
+  // applied | duplicate | failed
+  status: varchar("status", { length: 20 }).default("applied").notNull(),
+  // Full raw request body from Ace — kept for audits and dispute resolution.
+  rawPayload: jsonb("raw_payload"),
+  // ── Audit ──
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
 // ── Home Sections ────────────────────────────────────────────────────────────
 export const homeSections = pgTable("home_sections", {
   id: uuid("id").primaryKey().defaultRandom(),

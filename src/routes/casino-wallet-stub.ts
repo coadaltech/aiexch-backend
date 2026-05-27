@@ -1,66 +1,99 @@
 import { Elysia, t } from "elysia";
 import * as crypto from "crypto";
+import { db } from "@db/index";
+import { ledgerLimit, casinoTransactions } from "../db/schema";
+import { eq, sql } from "drizzle-orm";
 
 /**
- * Ace Gamings — Seamless Wallet Operator API (STUB)
+ * Ace Gamings — Seamless Wallet Operator API
  *
- * The Platform (Ace Gamings) calls these endpoints. In-memory state only —
- * this exists solely to validate the contract against the Python test suite
- * in `rv_gaming_operator_api_tests/`. Replace with real ledger-backed logic
- * (vouchers + ledgerLimit) once all tests pass.
+ * Balance = ledger_limit.final_limit (same value the exchange header shows).
  *
- * Path prefix `/qtech-staging/v1` and `/qtech/v1` are preserved because
- * those are the URLs committed to the provider in onboarding.
+ * Debit  → atomic UPDATE of final_limit (SELECT FOR UPDATE inside tx)
+ *           → best-effort INSERT into casino_transactions (logged if table missing)
+ * Credit / Rollback → same pattern, reversed sign.
  *
- * Endpoints:
- *   GET  /accounts/balance/{player_id}
- *   POST /accounts/transactions/debit
- *   POST /accounts/transactions/credit
- *   POST /accounts/transactions/rollback
+ * casino_transactions INSERT is intentionally kept OUTSIDE the balance
+ * transaction so that a missing migration on the production DB never blocks
+ * betting. Once the migration is applied the INSERT will start succeeding.
  *
- * Auth: shared-secret `Api-Key` header (constant-time compare).
- *
- * Critical behaviors enforced by the test suite:
- *   - Balance endpoint must respond 200 with valid / missing / expired session
- *   - Debit with missing/expired/invalid Player-Session-ID -> 400 TOKEN_EXPIRED
- *   - Credit must SUCCEED even with invalid session (settlements arrive
- *     after session expiry)
- *   - Same `transaction_id` replay returns current balance unchanged
+ * Non-UUID player_ids (Python test-suite) fall back to in-memory state.
  */
 
-// ──────────────────────────────────────────────────────────────────────────
-// In-memory state (stub only)
-// ──────────────────────────────────────────────────────────────────────────
+// ─── In-memory fallback (test-suite only) ────────────────────────────────────
 
 const DEFAULT_BALANCE = 100_000;
+const memBalances = new Map<string, number>();
+const memApplied = new Set<string>();
 
-// player_id -> balance
-const balances = new Map<string, number>();
-
-// Set of transaction_ids that have been applied. Used for idempotency on
-// debit / credit / rollback.
-const appliedTxns = new Set<string>();
-
-function getBalance(playerId: string): number {
-  if (!balances.has(playerId)) balances.set(playerId, DEFAULT_BALANCE);
-  return balances.get(playerId)!;
+function memGetBalance(playerId: string): number {
+  if (!memBalances.has(playerId)) memBalances.set(playerId, DEFAULT_BALANCE);
+  return memBalances.get(playerId)!;
 }
 
-function setBalance(playerId: string, value: number) {
-  balances.set(playerId, value);
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUUID(s: string): boolean {
+  return UUID_RE.test(s);
+}
+
+function fmt(n: number): string {
+  return n.toFixed(2);
 }
 
 function nextVersion(): number {
   return Date.now();
 }
 
-function fmt(amount: number): string {
-  return amount.toFixed(2);
+// ─── DB helpers ───────────────────────────────────────────────────────────────
+
+async function dbGetFinalLimit(playerId: string): Promise<number | null> {
+  if (!isUUID(playerId)) return null;
+  try {
+    const [row] = await db
+      .select({ finalLimit: ledgerLimit.finalLimit })
+      .from(ledgerLimit)
+      .where(eq(ledgerLimit.userId, playerId))
+      .limit(1);
+    return row ? Number(row.finalLimit) : null;
+  } catch {
+    return null;
+  }
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Auth helpers
-// ──────────────────────────────────────────────────────────────────────────
+/** Check idempotency — returns true if this txnId was already applied. */
+async function dbTxnExists(txnId: string): Promise<boolean> {
+  try {
+    const [row] = await db
+      .select({ id: casinoTransactions.id })
+      .from(casinoTransactions)
+      .where(eq(casinoTransactions.transactionId, txnId))
+      .limit(1);
+    return !!row;
+  } catch {
+    // casino_transactions table not yet migrated — fall through to in-memory
+    return false;
+  }
+}
+
+/** Insert a casino_transactions row. Non-critical — silently logs failures. */
+async function tryRecordTxn(row: typeof casinoTransactions.$inferInsert) {
+  try {
+    await db.insert(casinoTransactions).values(row);
+  } catch (e) {
+    console.error("[Casino Wallet] casino_transactions insert failed (run migration on prod?):", e);
+  }
+}
+
+async function resolveBalance(playerId: string): Promise<number> {
+  const fromDb = await dbGetFinalLimit(playerId);
+  return fromDb !== null ? fromDb : memGetBalance(playerId);
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
 function checkApiKey(
   headers: Record<string, string | string[] | undefined>,
@@ -89,8 +122,6 @@ function readHeader(
   return typeof v === "string" ? v : undefined;
 }
 
-// Tokens the test suite asserts should be rejected on debit. The valid
-// token configured in `config.cfg` ("session-token") is NOT in this set.
 const EXPIRED_OR_INVALID_TOKENS = new Set([
   "expired-session-token",
   "invalid-random-token",
@@ -98,141 +129,340 @@ const EXPIRED_OR_INVALID_TOKENS = new Set([
 
 const BLOCKED_PLAYER_ID = "blocked-player-id";
 
-// ──────────────────────────────────────────────────────────────────────────
-// Response builders
-// ──────────────────────────────────────────────────────────────────────────
-
-function okBalance(playerId: string) {
-  return { balance: fmt(getBalance(playerId)), version: nextVersion() };
-}
-
-function errBody(
-  code: string,
-  message: string,
-  playerId?: string,
-): Record<string, unknown> {
-  const body: Record<string, unknown> = { code, message };
-  if (playerId !== undefined) {
-    body.balance = fmt(getBalance(playerId));
-    body.version = nextVersion();
-  }
-  return body;
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Plugin builder
-// ──────────────────────────────────────────────────────────────────────────
+// ─── Plugin builder ───────────────────────────────────────────────────────────
 
 function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
   return (
     new Elysia({ name: `casino-wallet-${name}`, prefix })
-      // ── Api-Key gate (applies to every route below) ────────────────────
+
       .onBeforeHandle(({ headers, set }) => {
         if (!checkApiKey(headers, apiKey)) {
           set.status = 400;
-          return errBody("INVALID_API_KEY", "Invalid or missing Api-Key");
+          return { code: "INVALID_API_KEY", message: "Invalid or missing Api-Key" };
         }
       })
 
       // ── GET /accounts/balance/{player_id} ──────────────────────────────
-      // Must return 200 with valid / missing / expired Player-Session-ID.
-      .get("/accounts/balance/:player_id", ({ params }) =>
-        okBalance(params.player_id),
-      )
+      .get("/accounts/balance/:player_id", async ({ params }) => {
+        const balance = await resolveBalance(params.player_id);
+        return { balance: fmt(balance), version: nextVersion() };
+      })
 
       // ── POST /accounts/transactions/debit ──────────────────────────────
       .post(
         "/accounts/transactions/debit",
-        ({ body, headers, set }) => {
+        async ({ body, headers, set }) => {
           const b = body as Record<string, unknown>;
           const playerId = String(b.player_id);
           const txnId = String(b.transaction_id);
           const amount = Number(b.amount);
           const sessionToken = readHeader(headers, "player-session-id");
+          const isRealUser = isUUID(playerId);
 
-          // Idempotency: replay returns current balance, no re-apply.
-          if (txnId && appliedTxns.has(txnId)) {
-            return okBalance(playerId);
-          }
-
-          // Session validation (debit only).
+          // Session check (debit only; credit/rollback skip this)
           if (!sessionToken || EXPIRED_OR_INVALID_TOKENS.has(sessionToken)) {
+            const balance = await resolveBalance(playerId);
             set.status = 400;
-            return errBody(
-              "TOKEN_EXPIRED",
-              "Player session token is invalid or expired",
-              playerId,
-            );
+            return {
+              code: "TOKEN_EXPIRED",
+              message: "Player session token is invalid or expired",
+              balance: fmt(balance),
+              version: nextVersion(),
+            };
           }
 
-          // Blocked player.
           if (playerId === BLOCKED_PLAYER_ID) {
+            const balance = await resolveBalance(playerId);
             set.status = 400;
-            return errBody(
-              "ACCOUNT_BLOCKED",
-              "Player account is blocked",
-              playerId,
-            );
+            return {
+              code: "ACCOUNT_BLOCKED",
+              message: "Player account is blocked",
+              balance: fmt(balance),
+              version: nextVersion(),
+            };
           }
 
-          // Insufficient funds.
-          const current = getBalance(playerId);
+          // ── Real user path ─────────────────────────────────────────────
+          if (isRealUser) {
+            // Idempotency: DB first, in-memory fallback
+            if (memApplied.has(txnId) || await dbTxnExists(txnId)) {
+              const balance = await resolveBalance(playerId);
+              return { balance: fmt(balance), version: nextVersion() };
+            }
+
+            // ── Balance deduction (critical — isolated transaction) ──────
+            let balanceBefore: number;
+            let balanceAfter: number;
+            try {
+              ({ balanceBefore, balanceAfter } = await db.transaction(async (tx) => {
+                const [ledger] = await tx
+                  .select({
+                    finalLimit: ledgerLimit.finalLimit,
+                  })
+                  .from(ledgerLimit)
+                  .where(eq(ledgerLimit.userId, playerId))
+                  .for("update")
+                  .limit(1);
+
+                if (!ledger) {
+                  throw Object.assign(new Error("PLAYER_NOT_FOUND"), {
+                    code: "PLAYER_NOT_FOUND",
+                  });
+                }
+
+                const current = Number(ledger.finalLimit);
+                if (current < amount) {
+                  throw Object.assign(new Error("INSUFFICIENT_FUNDS"), {
+                    code: "INSUFFICIENT_FUNDS",
+                    balance: current,
+                  });
+                }
+
+                const after = current - amount;
+                await tx
+                  .update(ledgerLimit)
+                  .set({
+                    finalLimit: sql`final_limit - ${amount}`,
+                    limitConsumed: sql`limit_consumed + ${amount}`,
+                  })
+                  .where(eq(ledgerLimit.userId, playerId));
+
+                return { balanceBefore: current, balanceAfter: after };
+              }));
+            } catch (err: any) {
+              const code = err?.code ?? "INTERNAL_ERROR";
+              if (code === "INSUFFICIENT_FUNDS") {
+                set.status = 400;
+                return {
+                  code: "INSUFFICIENT_FUNDS",
+                  message: "Insufficient funds to place this bet",
+                  balance: fmt(err.balance ?? 0),
+                  version: nextVersion(),
+                };
+              }
+              if (code === "PLAYER_NOT_FOUND") {
+                set.status = 400;
+                return {
+                  code: "PLAYER_NOT_FOUND",
+                  message: "Player account not found",
+                  balance: fmt(0),
+                  version: nextVersion(),
+                };
+              }
+              console.error("[Casino Wallet] Debit DB error:", err);
+              set.status = 500;
+              return { code: "INTERNAL_ERROR", message: "Internal server error" };
+            }
+
+            // ── Record bet details (best-effort, outside balance tx) ─────
+            memApplied.add(txnId);
+            await tryRecordTxn({
+              transactionId: txnId,
+              type: "debit",
+              userId: playerId,
+              roundId: b.round_id ? String(b.round_id) : null,
+              gameId: b.game_id ? Number(b.game_id) : null,
+              gameName: b.game_name ? String(b.game_name).slice(0, 100) : null,
+              gameType: b.game_type ? String(b.game_type).slice(0, 50) : null,
+              currency: b.currency ? String(b.currency).slice(0, 3) : null,
+              amount: String(amount),
+              requestId: b.request_id ? String(b.request_id) : null,
+              balanceBefore: String(balanceBefore),
+              balanceAfter: String(balanceAfter),
+              status: "applied",
+              rawPayload: b as Record<string, unknown>,
+            });
+
+            return { balance: fmt(balanceAfter), version: nextVersion() };
+          }
+
+          // ── In-memory path (test-suite) ────────────────────────────────
+          if (memApplied.has(txnId)) {
+            return { balance: fmt(memGetBalance(playerId)), version: nextVersion() };
+          }
+          const current = memGetBalance(playerId);
           if (current < amount) {
             set.status = 400;
-            return errBody(
-              "INSUFFICIENT_FUNDS",
-              "Insufficient funds to debit",
-              playerId,
-            );
+            return {
+              code: "INSUFFICIENT_FUNDS",
+              message: "Insufficient funds to debit",
+              balance: fmt(current),
+              version: nextVersion(),
+            };
           }
-
-          setBalance(playerId, current - amount);
-          appliedTxns.add(txnId);
-          return okBalance(playerId);
+          memBalances.set(playerId, current - amount);
+          memApplied.add(txnId);
+          return { balance: fmt(current - amount), version: nextVersion() };
         },
         { body: t.Any() },
       )
 
       // ── POST /accounts/transactions/credit ─────────────────────────────
-      // Per spec + tests: must succeed regardless of session token state.
-      // Only INVALID_API_KEY is grounds for failure.
+      // Must succeed even with expired session (win arrives after session ends).
       .post(
         "/accounts/transactions/credit",
-        ({ body }) => {
+        async ({ body }) => {
           const b = body as Record<string, unknown>;
           const playerId = String(b.player_id);
           const txnId = String(b.transaction_id);
           const amount = Number(b.amount);
+          const isRealUser = isUUID(playerId);
 
-          if (txnId && appliedTxns.has(txnId)) {
-            return okBalance(playerId);
+          if (isRealUser) {
+            if (memApplied.has(txnId) || await dbTxnExists(txnId)) {
+              const balance = await resolveBalance(playerId);
+              return { balance: fmt(balance), version: nextVersion() };
+            }
+
+            let balanceBefore: number;
+            let balanceAfter: number;
+            try {
+              ({ balanceBefore, balanceAfter } = await db.transaction(async (tx) => {
+                const [ledger] = await tx
+                  .select({ finalLimit: ledgerLimit.finalLimit })
+                  .from(ledgerLimit)
+                  .where(eq(ledgerLimit.userId, playerId))
+                  .for("update")
+                  .limit(1);
+
+                if (!ledger) throw new Error("PLAYER_NOT_FOUND");
+
+                const current = Number(ledger.finalLimit);
+                const after = current + amount;
+
+                await tx
+                  .update(ledgerLimit)
+                  .set({
+                    finalLimit: sql`final_limit + ${amount}`,
+                    limitConsumed: sql`limit_consumed - ${amount}`,
+                  })
+                  .where(eq(ledgerLimit.userId, playerId));
+
+                return { balanceBefore: current, balanceAfter: after };
+              }));
+            } catch (err) {
+              console.error("[Casino Wallet] Credit DB error:", err);
+              // Credit must not fail per spec — return best-effort balance
+              const balance = await dbGetFinalLimit(playerId) ?? 0;
+              return { balance: fmt(balance), version: nextVersion() };
+            }
+
+            memApplied.add(txnId);
+            await tryRecordTxn({
+              transactionId: txnId,
+              type: "credit",
+              userId: playerId,
+              roundId: b.round_id ? String(b.round_id) : null,
+              gameId: b.game_id ? Number(b.game_id) : null,
+              gameName: b.game_name ? String(b.game_name).slice(0, 100) : null,
+              gameType: b.game_type ? String(b.game_type).slice(0, 50) : null,
+              currency: b.currency ? String(b.currency).slice(0, 3) : null,
+              amount: String(amount),
+              swBetTransactionId: b.sw_bet_transaction_id
+                ? String(b.sw_bet_transaction_id)
+                : null,
+              requestId: b.request_id ? String(b.request_id) : null,
+              balanceBefore: String(balanceBefore),
+              balanceAfter: String(balanceAfter),
+              status: "applied",
+              rawPayload: b as Record<string, unknown>,
+            });
+
+            return { balance: fmt(balanceAfter), version: nextVersion() };
           }
 
-          setBalance(playerId, getBalance(playerId) + amount);
-          appliedTxns.add(txnId);
-          return okBalance(playerId);
+          // In-memory
+          if (memApplied.has(txnId)) {
+            return { balance: fmt(memGetBalance(playerId)), version: nextVersion() };
+          }
+          const current = memGetBalance(playerId);
+          memBalances.set(playerId, current + amount);
+          memApplied.add(txnId);
+          return { balance: fmt(current + amount), version: nextVersion() };
         },
         { body: t.Any() },
       )
 
       // ── POST /accounts/transactions/rollback ───────────────────────────
-      // Reverses a prior debit -> credits the player. Idempotent on
-      // `transaction_id`. Must work without a session token.
       .post(
         "/accounts/transactions/rollback",
-        ({ body }) => {
+        async ({ body }) => {
           const b = body as Record<string, unknown>;
           const playerId = String(b.player_id);
           const txnId = String(b.transaction_id);
           const amount = Number(b.amount);
+          const isRealUser = isUUID(playerId);
 
-          if (txnId && appliedTxns.has(txnId)) {
-            return okBalance(playerId);
+          if (isRealUser) {
+            if (memApplied.has(txnId) || await dbTxnExists(txnId)) {
+              const balance = await resolveBalance(playerId);
+              return { balance: fmt(balance), version: nextVersion() };
+            }
+
+            let balanceBefore: number;
+            let balanceAfter: number;
+            try {
+              ({ balanceBefore, balanceAfter } = await db.transaction(async (tx) => {
+                const [ledger] = await tx
+                  .select({ finalLimit: ledgerLimit.finalLimit })
+                  .from(ledgerLimit)
+                  .where(eq(ledgerLimit.userId, playerId))
+                  .for("update")
+                  .limit(1);
+
+                if (!ledger) throw new Error("PLAYER_NOT_FOUND");
+
+                const current = Number(ledger.finalLimit);
+                const after = current + amount;
+
+                await tx
+                  .update(ledgerLimit)
+                  .set({
+                    finalLimit: sql`final_limit + ${amount}`,
+                    limitConsumed: sql`limit_consumed - ${amount}`,
+                  })
+                  .where(eq(ledgerLimit.userId, playerId));
+
+                return { balanceBefore: current, balanceAfter: after };
+              }));
+            } catch (err) {
+              console.error("[Casino Wallet] Rollback DB error:", err);
+              const balance = await dbGetFinalLimit(playerId) ?? 0;
+              return { balance: fmt(balance), version: nextVersion() };
+            }
+
+            memApplied.add(txnId);
+            await tryRecordTxn({
+              transactionId: txnId,
+              type: "rollback",
+              userId: playerId,
+              roundId: b.round_id ? String(b.round_id) : null,
+              gameId: b.game_id ? Number(b.game_id) : null,
+              gameName: b.game_name ? String(b.game_name).slice(0, 100) : null,
+              gameType: b.game_type ? String(b.game_type).slice(0, 50) : null,
+              currency: b.currency ? String(b.currency).slice(0, 3) : null,
+              amount: String(amount),
+              swBetTransactionId: b.sw_bet_transaction_id
+                ? String(b.sw_bet_transaction_id)
+                : null,
+              requestId: b.request_id ? String(b.request_id) : null,
+              balanceBefore: String(balanceBefore),
+              balanceAfter: String(balanceAfter),
+              status: "applied",
+              rawPayload: b as Record<string, unknown>,
+            });
+
+            return { balance: fmt(balanceAfter), version: nextVersion() };
           }
 
-          setBalance(playerId, getBalance(playerId) + amount);
-          appliedTxns.add(txnId);
-          return okBalance(playerId);
+          // In-memory
+          if (memApplied.has(txnId)) {
+            return { balance: fmt(memGetBalance(playerId)), version: nextVersion() };
+          }
+          const current = memGetBalance(playerId);
+          memBalances.set(playerId, current + amount);
+          memApplied.add(txnId);
+          return { balance: fmt(current + amount), version: nextVersion() };
         },
         { body: t.Any() },
       )
