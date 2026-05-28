@@ -61,10 +61,13 @@ async function loadPlayer(playerId: string): Promise<{
   if (!playerId) return null;
   // Username is unique. Look up case-insensitively because QT preserves the
   // exact playerId we sent at launch but a few providers normalise it.
+  // Balance is `finalLimit` — the same "available to bet" number every other
+  // game in this app reads (matka exposure, exchange bets, etc.). Plain
+  // userBalance excludes credit-style limits and shows 0 for most users.
   const [row] = await db
     .select({
       userId: users.id,
-      userBalance: ledgerLimit.userBalance,
+      finalLimit: ledgerLimit.finalLimit,
     })
     .from(users)
     .leftJoin(ledgerLimit, eq(ledgerLimit.userId, users.id))
@@ -73,7 +76,7 @@ async function loadPlayer(playerId: string): Promise<{
   if (!row) return null;
   return {
     userId: row.userId,
-    balance: Number(row.userBalance ?? 0),
+    balance: Number(row.finalLimit ?? 0),
     currency: DEFAULT_CURRENCY,
   };
 }
