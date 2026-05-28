@@ -99,21 +99,26 @@ export const qtechGamesRoutes = new Elysia({ prefix: "/qtech-casino" })
       // playerId. (Session-binding lands when wallet moves do.)
       const walletSessionId = crypto.randomUUID();
 
+      const launchReq = {
+        gameId: b.gameId,
+        mode: "real" as const,
+        currency: b.currency || DEFAULT_CURRENCY,
+        device: b.device,
+        returnUrl: b.returnUrl,
+        playerId,
+        walletSessionId,
+        country: "IN",
+      };
+      // eslint-disable-next-line no-console
+      console.log("[qtech:launch] →", JSON.stringify(launchReq));
       try {
-        const resp = await getLaunchUrl({
-          gameId: b.gameId,
-          mode: "real",
-          currency: b.currency || DEFAULT_CURRENCY,
-          device: b.device,
-          returnUrl: b.returnUrl,
-          playerId,
-          walletSessionId,
-          country: "IN",
-        });
+        const resp = await getLaunchUrl(launchReq);
         if (!resp?.url) {
           set.status = 502;
           return { success: false, message: "Launch URL not returned", upstream: resp };
         }
+        // eslint-disable-next-line no-console
+        console.log("[qtech:launch] ←", JSON.stringify({ url: resp.url }));
         return {
           success: true,
           url: resp.url,

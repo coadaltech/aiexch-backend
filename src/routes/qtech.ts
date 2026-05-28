@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import crypto from "crypto";
 import { db } from "@db/index";
 import { users, ledgerLimit, casinoTransactions } from "@db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 // QTech Games "Common Wallet" endpoints.
 //
@@ -59,9 +59,8 @@ async function loadPlayer(playerId: string): Promise<{
   currency: string;
 } | null> {
   if (!playerId) return null;
-  // Username is unique. If we ever truncate at 34 chars there could be
-  // collisions on very long usernames — accepted for now since usernames
-  // here are short.
+  // Username is unique. Look up case-insensitively because QT preserves the
+  // exact playerId we sent at launch but a few providers normalise it.
   const [row] = await db
     .select({
       userId: users.id,
@@ -69,7 +68,7 @@ async function loadPlayer(playerId: string): Promise<{
     })
     .from(users)
     .leftJoin(ledgerLimit, eq(ledgerLimit.userId, users.id))
-    .where(eq(users.username, playerId))
+    .where(sql`lower(${users.username}) = lower(${playerId})`)
     .limit(1);
   if (!row) return null;
   return {
@@ -77,6 +76,12 @@ async function loadPlayer(playerId: string): Promise<{
     balance: Number(row.userBalance ?? 0),
     currency: DEFAULT_CURRENCY,
   };
+}
+
+/** Tiny logger so QT's callback chain is visible in stdout while we debug. */
+function logQt(env: string, msg: string, extra?: Record<string, unknown>) {
+  // eslint-disable-next-line no-console
+  console.log(`[qtech:${env}] ${msg}`, extra ? JSON.stringify(extra) : "");
 }
 
 interface TxnBody {
@@ -112,23 +117,39 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
     })
 
     // §3.1 Verify Session — GET /accounts/{playerId}/session?gameId=…
-    .get("/accounts/:playerId/session", async ({ params, set }) => {
+    .get("/accounts/:playerId/session", async ({ params, query, headers, set }) => {
+      logQt(name, "verify-session ←", {
+        playerId: params.playerId,
+        gameId: query?.gameId,
+        walletSession: headers["wallet-session"],
+      });
       const player = await loadPlayer(params.playerId);
       if (!player) {
+        logQt(name, "verify-session player NOT FOUND", { playerId: params.playerId });
         set.status = 400;
         return { code: "INVALID_TOKEN", message: "Player not found." };
       }
-      return { balance: player.balance, currency: player.currency };
+      const resp = { balance: player.balance, currency: player.currency };
+      logQt(name, "verify-session →", resp);
+      return resp;
     })
 
     // §3.2 Get Balance — GET /accounts/{playerId}/balance?gameId=…
-    .get("/accounts/:playerId/balance", async ({ params, set }) => {
+    .get("/accounts/:playerId/balance", async ({ params, query, headers, set }) => {
+      logQt(name, "get-balance ←", {
+        playerId: params.playerId,
+        gameId: query?.gameId,
+        walletSession: headers["wallet-session"],
+      });
       const player = await loadPlayer(params.playerId);
       if (!player) {
+        logQt(name, "get-balance player NOT FOUND", { playerId: params.playerId });
         set.status = 400;
         return { code: "REQUEST_DECLINED", message: "Player not found." };
       }
-      return { balance: player.balance, currency: player.currency };
+      const resp = { balance: player.balance, currency: player.currency };
+      logQt(name, "get-balance →", resp);
+      return resp;
     })
 
     // §3.3 Withdrawal (txnType=DEBIT) and §3.4 Deposit (txnType=CREDIT)
@@ -137,6 +158,14 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
       "/transactions",
       async ({ body, set }) => {
         const b = body as TxnBody;
+        logQt(name, "transactions ←", {
+          txnType: b?.txnType,
+          txnId: b?.txnId,
+          playerId: b?.playerId,
+          roundId: b?.roundId,
+          amount: b?.amount,
+          gameId: b?.gameId,
+        });
         if (!b?.txnId || !b?.playerId || !b?.roundId) {
           set.status = 400;
           return { code: "REQUEST_DECLINED", message: "Missing required fields." };
@@ -144,6 +173,7 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
 
         const player = await loadPlayer(b.playerId);
         if (!player) {
+          logQt(name, "transactions player NOT FOUND", { playerId: b.playerId });
           set.status = 400;
           return { code: "REQUEST_DECLINED", message: "Player not found." };
         }
