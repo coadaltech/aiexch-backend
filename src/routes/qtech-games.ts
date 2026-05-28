@@ -114,6 +114,11 @@ export const qtechGamesRoutes = new Elysia({ prefix: "/qtech-casino" })
       try {
         const resp = await getLaunchUrl(launchReq);
         if (!resp?.url) {
+          // eslint-disable-next-line no-console
+          console.log(
+            "[qtech:launch] ← NO URL",
+            JSON.stringify({ resp: resp ?? null }),
+          );
           set.status = 502;
           return { success: false, message: "Launch URL not returned", upstream: resp };
         }
@@ -127,7 +132,13 @@ export const qtechGamesRoutes = new Elysia({ prefix: "/qtech-casino" })
           walletSessionId,
         };
       } catch (err: any) {
+        const status = err?.response?.status;
         const upstream = err?.response?.data ?? err?.message ?? String(err);
+        // eslint-disable-next-line no-console
+        console.log(
+          "[qtech:launch] ← ERROR",
+          JSON.stringify({ status, upstream }),
+        );
         set.status = 502;
         return { success: false, message: "Failed to generate launch URL", upstream };
       }
