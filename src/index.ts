@@ -20,7 +20,7 @@ import { seriesRoutes } from "./routes/series-route";
 import { matkaRoutes } from "./routes/matka";
 import { jamboRoutes } from "./routes/jambo";
 import { kalyanNewRoutes } from "./routes/kalyan-new";
-// import { qtechRoutes } from "./routes/qtech"; // legacy stub, replaced
+import { qtechRoutes } from "./routes/qtech";
 import { qtechGamesRoutes } from "./routes/qtech-games";
 import { casinoWalletStubRoutes } from "./routes/casino-wallet-stub";
 import { casinoDevProxyRoutes } from "./routes/casino-dev-proxy";
@@ -100,6 +100,7 @@ const app = new Elysia()
   .use(jamboRoutes)
   .use(kalyanNewRoutes)
   .use(qtechGamesRoutes)
+  .use(qtechRoutes)
   .use(casinoWalletStubRoutes)
   .use(casinoDevProxyRoutes)
   .use(casinoAceRoutes)

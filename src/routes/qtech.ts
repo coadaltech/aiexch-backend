@@ -109,8 +109,27 @@ interface RollbackBody {
 
 function buildQtechPlugin(name: string, prefix: string, passKey: string) {
   return new Elysia({ name: `qtech-${name}`, prefix })
-    .onBeforeHandle(({ headers, set }) => {
+    .onBeforeHandle(({ headers, request, set }) => {
+      // Log EVERY incoming hit before auth so we can tell "QT never called us"
+      // from "QT called us but passkey didn't match". Never log the passkey
+      // itself — just whether one was sent and whether it matched.
+      const raw = headers["pass-key"];
+      const sent = Array.isArray(raw) ? raw[0] : raw;
+      const hasPassKey = Boolean(sent);
+      const passKeyConfigured = Boolean(passKey);
+      const url = new URL(request.url);
+      logQt(name, "REQ", {
+        method: request.method,
+        path: url.pathname,
+        hasPassKey,
+        passKeyConfigured,
+      });
       if (!checkPassKey(headers, passKey)) {
+        logQt(name, "REQ rejected — passkey mismatch", {
+          path: url.pathname,
+          hasPassKey,
+          passKeyConfigured,
+        });
         set.status = 401;
         return loginFailed;
       }
