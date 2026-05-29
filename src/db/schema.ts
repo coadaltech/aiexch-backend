@@ -587,8 +587,20 @@ export const casinoBets = pgTable("casino_bets", {
   currency: varchar("currency", { length: 3 }),
   // matched | won | lost | cancelled | void | rolled_back
   status: varchar("status", { length: 20 }).default("matched").notNull(),
-  // Filled at settlement (later phase).
+  // Per-bet P/L from the provider's settlement payload (positive = won,
+  // negative = lost). For display in the user's bet history.
   settledAmount: decimal("settled_amount", { precision: 15, scale: 2 }),
+  // Total amount credited back to user on settlement:
+  //   WON       → stake + winnings
+  //   LOST      → 0
+  //   VOID/CANCEL → stake (refund)
+  payout: decimal("payout", { precision: 15, scale: 2 }),
+  // Provider's raw outcome string for the bet (WON | LOST | VOIDED |
+  // CANCELLED | DELETED) — kept verbatim for the bet-history label.
+  outcome: varchar("outcome", { length: 20 }),
+  // SYSTEM_USER_ID for provider callbacks, or an admin id for manual
+  // overrides (when result handling is exposed in the panel later).
+  settledBy: uuid("settled_by"),
   ipAddress: varchar("ip_address", { length: 45 }),
   placedAt: timestamp("placed_at").defaultNow().notNull(),
   settledAt: timestamp("settled_at"),
@@ -633,6 +645,36 @@ export const casinoTransactionLogs = pgTable("casino_transaction_logs", {
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
+
+// ── Casino Settlements ───────────────────────────────────────────────────────
+// One row per settlement / rollback callback received from a provider. Used
+// for idempotency (unique on provider + provider_transaction_id) and for
+// keeping the raw payload around for dispute resolution. The per-bet result
+// data lives on casino_bets — this table is the wallet-callback audit log.
+export const casinoSettlements = pgTable("casino_settlements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  provider: varchar("provider", { length: 20 }).notNull(),
+  // Ace's settlement transaction_id or QT's CREDIT txnId.
+  providerTransactionId: varchar("provider_transaction_id", { length: 100 }).notNull(),
+  providerRoundId: varchar("provider_round_id", { length: 100 }),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  // Total per-player P/L from this callback (sum of bets[].pl).
+  totalPl: decimal("total_pl", { precision: 15, scale: 2 }),
+  // Total exposure released — Ace's exposure model carries this; null for QT.
+  totalExposureReleased: decimal("total_exposure_released", { precision: 15, scale: 2 }),
+  // Full callback payload — jsonb for replay / disputes.
+  rawPayload: jsonb("raw_payload"),
+  // applied | failed
+  status: varchar("status", { length: 20 }).default("applied").notNull(),
+  // ── Audit ──
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+}, (table) => [
+  unique("casino_settlements_provider_txn_uniq").on(table.provider, table.providerTransactionId),
+]);
 
 // ── Casino Transaction Commissions ───────────────────────────────────────────
 // Mirrors transaction_commissions for sports. Hierarchy snapshot computed at
