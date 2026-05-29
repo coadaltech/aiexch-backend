@@ -554,40 +554,107 @@ export const casinoGames = pgTable("casino_games", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
-// ── Casino Transactions ──────────────────────────────────────────────────────
-// Records every debit / credit / rollback call from Ace Gamings.
-// `transaction_id` (Ace's UUID) is the idempotency key — duplicate callbacks
-// are detected here instead of in in-memory state.
-// Balance deduction / addition is NOT applied here yet; that is wired in a
-// later migration once credit + rollback DB handling is complete.
-export const casinoTransactions = pgTable("casino_transactions", {
+// ── Casino Bets ──────────────────────────────────────────────────────────────
+// One row per bet placed via any casino provider (Ace or QTech). Mirrors the
+// sports `transactions` table in shape and intent — this is the single source
+// of truth for "what bets did the user place." Wallet-callback details (full
+// raw payloads from Ace's exposure/settlement/rollback) are no longer kept;
+// `rawPayload` here stores the original bet object so disputes can still
+// reconstruct what the provider sent.
+export const casinoBets = pgTable("casino_bets", {
   id: uuid("id").primaryKey().defaultRandom(),
-  // Ace's opaque transaction UUID — unique constraint enforces idempotency.
-  transactionId: varchar("transaction_id", { length: 100 }).notNull().unique(),
-  // debit | credit | rollback
-  type: varchar("type", { length: 20 }).notNull(),
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
-  // Ace's round / session identifiers
-  roundId: varchar("round_id", { length: 100 }),
-  gameId: integer("game_id"),
+  // Snapshot from users.whitelabel_id at placement time, mirroring sports.
+  whitelabelId: uuid("whitelabel_id"),
+  // 'ace' | 'qtech' — disambiguates the providerBetId/roundId namespace.
+  provider: varchar("provider", { length: 20 }).notNull(),
+  // Ace's numeric bet id or QTech's betId/txnId. Unique within a provider.
+  providerBetId: varchar("provider_bet_id", { length: 100 }).notNull(),
+  providerRoundId: varchar("provider_round_id", { length: 100 }),
+  // Ace's request_id / QTech's txnId — ties bets placed in the same callback.
+  providerTransactionId: varchar("provider_transaction_id", { length: 100 }),
+  gameId: varchar("game_id", { length: 100 }),
   gameName: varchar("game_name", { length: 100 }),
-  gameType: varchar("game_type", { length: 50 }),
+  // Ace-only: bet shape details. NULL for QTech (they don't surface them).
+  selectionId: varchar("selection_id", { length: 100 }),
+  selectionName: varchar("selection_name", { length: 255 }),
+  betType: varchar("bet_type", { length: 10 }), // BACK | LAY
+  stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
+  odds: decimal("odds", { precision: 10, scale: 4 }),
+  exposure: decimal("exposure", { precision: 15, scale: 2 }),
   currency: varchar("currency", { length: 3 }),
-  amount: decimal("amount", { precision: 20, scale: 4 }).notNull(),
-  // For credit / rollback: the original debit transaction_id being referenced.
-  swBetTransactionId: varchar("sw_bet_transaction_id", { length: 100 }),
-  balanceBefore: decimal("balance_before", { precision: 15, scale: 2 }),
-  balanceAfter: decimal("balance_after", { precision: 15, scale: 2 }),
-  // Ace's idempotent request_id (their side)
-  requestId: varchar("request_id", { length: 100 }),
-  // applied | duplicate | failed
-  status: varchar("status", { length: 20 }).default("applied").notNull(),
-  // Full raw request body from Ace — kept for audits and dispute resolution.
+  // matched | won | lost | cancelled | void | rolled_back
+  status: varchar("status", { length: 20 }).default("matched").notNull(),
+  // Filled at settlement (later phase).
+  settledAmount: decimal("settled_amount", { precision: 15, scale: 2 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  placedAt: timestamp("placed_at").defaultNow().notNull(),
+  settledAt: timestamp("settled_at"),
+  // Original bet object from the provider — preserved for audit / disputes.
   rawPayload: jsonb("raw_payload"),
   // ── Audit ──
+  addedBy: uuid("added_by").notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+}, (table) => [
+  unique("casino_bets_provider_bet_uniq").on(table.provider, table.providerBetId),
+]);
+
+// ── Casino Transaction Logs ──────────────────────────────────────────────────
+// Mirrors transaction_logs for sports. One row per casino bet placement,
+// carrying the device / network metadata available at that moment.
+//
+// For Ace: ipAddress comes from the bet payload (`bet.ip`). userAgent and the
+// derived browser/os/device fields are NULL because Ace callbacks originate
+// from their server, not the player's browser.
+// For QTech: most fields are NULL — QTech sends no device info on callbacks.
+export const casinoTransactionLogs = pgTable("casino_transaction_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  casinoBetId: uuid("casino_bet_id").notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  browser: varchar("browser", { length: 100 }),
+  browserVersion: varchar("browser_version", { length: 50 }),
+  os: varchar("os", { length: 100 }),
+  osVersion: varchar("os_version", { length: 50 }),
+  deviceType: varchar("device_type", { length: 20 }),
+  deviceBrand: varchar("device_brand", { length: 100 }),
+  deviceModel: varchar("device_model", { length: 100 }),
+  country: varchar("country", { length: 100 }),
+  city: varchar("city", { length: 100 }),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
+// ── Casino Transaction Commissions ───────────────────────────────────────────
+// Mirrors transaction_commissions for sports. Hierarchy snapshot computed at
+// placement time using the same recursive `users.added_by` walk + downline%
+// rule as sports bets, so commission reports work identically.
+export const casinoTransactionCommissions = pgTable("casino_transaction_commissions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  casinoBetId: uuid("casino_bet_id").notNull(),
+  agentId: uuid("agent_id"),
+  agentPercent: decimal("agent_percent", { precision: 5, scale: 2 }).default("0"),
+  masterId: uuid("master_id"),
+  masterPercent: decimal("master_percent", { precision: 5, scale: 2 }).default("0"),
+  superId: uuid("super_id"),
+  superPercent: decimal("super_percent", { precision: 5, scale: 2 }).default("0"),
+  adminId: uuid("admin_id"),
+  adminPercent: decimal("admin_percent", { precision: 5, scale: 2 }).default("0"),
+  ownerId: uuid("owner_id"),
+  ownerPercent: decimal("owner_percent", { precision: 5, scale: 2 }).default("0"),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });

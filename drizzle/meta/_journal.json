@@ -694,6 +694,13 @@
       "when": 1779882398851,
       "tag": "0098_previous_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1780057461662,
+      "tag": "0099_special_cable",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,10 @@
 import { Elysia, t } from "elysia";
 import crypto from "crypto";
 import { db } from "@db/index";
-import { users, ledgerLimit, casinoTransactions } from "@db/schema";
+import { users, ledgerLimit } from "@db/schema";
 import { eq, sql } from "drizzle-orm";
+import { parseUserAgent } from "../utils/parse-ua";
+import { recordCasinoBet } from "../services/casino/casino-bet-recording";
 
 // QTech Games "Common Wallet" endpoints.
 //
@@ -19,13 +21,14 @@ import { eq, sql } from "drizzle-orm";
 // /transactions/rollback. Promotion Status and Rewards live at the paths
 // submitted on the QT handover form.
 //
-// Money flow today (intentional, in-progress):
-//   * Verify Session + Get Balance reflect the user's real wallet
-//     (ledger_limit.user_balance).
-//   * Withdrawal / Deposit / Rollback RECORD the transaction in
-//     `casino_transactions` (idempotent on transactionId) but DO NOT yet
-//     move money. Balance returned to QT is the current wallet balance.
-//     Actual debit/credit is the next step.
+// Money + bet flow:
+//   * DEBIT (bet placed): inserts one row into casino_bets +
+//     casino_transaction_logs + casino_transaction_commissions and deducts
+//     the stake from ledger_limit.final_limit. Idempotent on
+//     (provider='qtech', provider_bet_id=txnId).
+//   * CREDIT (payout) / Rollback / Rewards: acknowledged only — they return
+//     the current balance so QT stops retrying, but do not modify any state.
+//     Result + payout handling lands in the next phase.
 
 const DEFAULT_CURRENCY = process.env.QT_LAUNCH_CURRENCY || "USD";
 
@@ -176,9 +179,12 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
 
     // §3.3 Withdrawal (txnType=DEBIT) and §3.4 Deposit (txnType=CREDIT)
     // share POST /transactions; the txnType discriminates.
+    //   DEBIT  → record the bet (casino_bets + logs + commissions) and
+    //            deduct the stake from ledger_limit.
+    //   CREDIT → acknowledge only (payout handling lands in the next phase).
     .post(
       "/transactions",
-      async ({ body, set }) => {
+      async ({ body, set, request }) => {
         const b = body as TxnBody;
         logQt(name, "transactions ←", {
           txnType: b?.txnType,
@@ -200,84 +206,66 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
           return { code: "REQUEST_DECLINED", message: "Player not found." };
         }
 
-        const type = b.txnType === "CREDIT" ? "credit" : "debit";
+        const isDebit = b.txnType !== "CREDIT";
         const amount = Number(b.amount ?? 0);
 
-        // Idempotency: txnId is unique. If we've already recorded this
-        // transaction, just return the original balance unchanged.
-        const [existing] = await db
-          .select({ id: casinoTransactions.id })
-          .from(casinoTransactions)
-          .where(eq(casinoTransactions.transactionId, b.txnId))
-          .limit(1);
-
-        if (!existing) {
-          await db.insert(casinoTransactions).values({
-            transactionId: b.txnId,
-            type,
-            userId: player.userId,
-            roundId: b.roundId,
-            // QT game id is a string (e.g. "TK-froggrog"); the legacy
-            // integer game_id column stays NULL — we keep the QT id in
-            // game_name + raw_payload.
-            gameName: (b.gameId ?? "").slice(0, 100) || null,
-            currency: (b.currency || player.currency).slice(0, 3),
-            amount: String(amount),
-            swBetTransactionId: b.betId ?? null,
-            balanceBefore: String(player.balance),
-            // Wallet move not applied yet — balanceAfter mirrors before
-            // so the audit row stays consistent once we wire the actual
-            // debit/credit.
-            balanceAfter: String(player.balance),
-            status: "applied",
-            rawPayload: b as unknown as object,
-          });
+        // CREDIT (and any non-DEBIT): ack only.
+        if (!isDebit) {
+          set.status = 201;
+          return { balance: player.balance, referenceId: b.txnId };
         }
 
-        // Wallet not moved yet — return current balance per spec shape.
-        set.status = 201;
-        return {
-          balance: player.balance,
-          referenceId: b.txnId,
-        };
+        // DEBIT: record the bet + deduct stake. Idempotent via the
+        // UNIQUE(provider, provider_bet_id) constraint on casino_bets.
+        const ua = parseUserAgent(request.headers.get("user-agent"));
+        try {
+          const result = await db.transaction((tx) =>
+            recordCasinoBet(tx, {
+              userId: player.userId,
+              provider: "qtech",
+              providerBetId: b.txnId,
+              providerRoundId: b.roundId,
+              providerTransactionId: b.betId ?? b.txnId,
+              // QT's gameId is a string like "TK-froggrog" — store as-is.
+              gameId: b.gameId ?? null,
+              gameName: b.gameId ?? null,
+              stake: amount,
+              currency: b.currency || player.currency,
+              ua,
+              rawPayload: b as unknown as Record<string, unknown>,
+            }),
+          );
+
+          if (!result.duplicate && result.finalLimit < 0) {
+            logQt(name, "transactions INSUFFICIENT_FUNDS", {
+              txnId: b.txnId,
+              finalLimit: result.finalLimit,
+            });
+            set.status = 400;
+            return {
+              code: "INSUFFICIENT_FUNDS",
+              message: "Insufficient funds to place bet.",
+            };
+          }
+
+          set.status = 201;
+          return { balance: result.finalLimit, referenceId: b.txnId };
+        } catch (err) {
+          logQt(name, "transactions DB error", { txnId: b.txnId, err: String(err) });
+          set.status = 500;
+          return { code: "UNKNOWN_ERROR", message: "Internal server error" };
+        }
       },
       { body: t.Any() },
     )
 
-    // §3.5 Rollback — POST /transactions/rollback
+    // §3.5 Rollback — ACK only. Result/refund handling lands in the next
+    // phase together with settlement.
     .post(
       "/transactions/rollback",
-      async ({ body, set }) => {
+      async ({ body }) => {
         const b = body as RollbackBody;
         const player = b?.playerId ? await loadPlayer(b.playerId) : null;
-
-        // Per spec, an unknown original bet must be treated as a successful
-        // rollback (idempotent "nothing to undo"). We still record the
-        // rollback row for audit.
-        if (b?.txnId && player) {
-          const [existing] = await db
-            .select({ id: casinoTransactions.id })
-            .from(casinoTransactions)
-            .where(eq(casinoTransactions.transactionId, b.txnId))
-            .limit(1);
-          if (!existing) {
-            await db.insert(casinoTransactions).values({
-              transactionId: b.txnId,
-              type: "rollback",
-              userId: player.userId,
-              roundId: b.roundId ?? null,
-              gameName: (b.gameId ?? "").slice(0, 100) || null,
-              currency: (b.currency || player.currency).slice(0, 3),
-              amount: String(Number(b.amount ?? 0)),
-              swBetTransactionId: b.betId ?? null,
-              balanceBefore: String(player.balance),
-              balanceAfter: String(player.balance),
-              status: "applied",
-              rawPayload: b as unknown as object,
-            });
-          }
-        }
-
         return {
           balance: player?.balance ?? 0,
           referenceId: b?.txnId ?? `rb_${Date.now()}`,
@@ -293,41 +281,16 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
       { body: t.Any() },
     )
 
-    // §3.7 Rewards — POST /rewards. Treated like a CREDIT row for audit;
-    // no wallet movement yet.
+    // §3.7 Rewards — ACK only. Bonus credit application is part of the
+    // payout phase, not bet recording.
     .post(
       "/rewards",
       async ({ body, set }) => {
         const b = body as {
           txnId?: string;
           playerId?: string;
-          amount?: number | string;
-          currency?: string;
-          rewardType?: string;
-          rewardTitle?: string;
         };
         const player = b?.playerId ? await loadPlayer(b.playerId) : null;
-        if (b?.txnId && player) {
-          const [existing] = await db
-            .select({ id: casinoTransactions.id })
-            .from(casinoTransactions)
-            .where(eq(casinoTransactions.transactionId, b.txnId))
-            .limit(1);
-          if (!existing) {
-            await db.insert(casinoTransactions).values({
-              transactionId: b.txnId,
-              type: "credit",
-              userId: player.userId,
-              gameName: (b.rewardTitle ?? "").slice(0, 100) || null,
-              currency: (b.currency || player.currency).slice(0, 3),
-              amount: String(Number(b.amount ?? 0)),
-              balanceBefore: String(player.balance),
-              balanceAfter: String(player.balance),
-              status: "applied",
-              rawPayload: b as unknown as object,
-            });
-          }
-        }
         set.status = 201;
         return {
           balance: player?.balance ?? 0,
