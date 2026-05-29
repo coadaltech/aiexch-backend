@@ -227,17 +227,18 @@ export async function recordCasinoBet(
 
   await tx.insert(casinoTransactionCommissions).values(snapshot);
 
-  // 5. Deduct stake from the user's limit. set_limit_used_of_user (sports')
-  // doesn't yet sum from casino_bets, so we apply the move directly. When
-  // the procedure is updated to include casino bets, swap this for the CALL.
+  // 5. Recalculate the user's limit via the shared stored procedure (same
+  // call sports betting uses, see src/routes/betting.ts). The procedure
+  // sums potential losses across sports markets, matka, and casino_bets,
+  // then writes limit_consumed and final_limit. Casino bets are picked up
+  // because they're inserted above with status='matched'.
+  await tx.execute(sql`CALL set_limit_used_of_user(${input.userId}::uuid)`);
+
   const [updated] = await tx
-    .update(ledgerLimit)
-    .set({
-      finalLimit: sql`final_limit - ${stakeNum}`,
-      limitConsumed: sql`limit_consumed + ${stakeNum}`,
-    })
+    .select({ finalLimit: ledgerLimit.finalLimit })
+    .from(ledgerLimit)
     .where(eq(ledgerLimit.userId, input.userId))
-    .returning({ finalLimit: ledgerLimit.finalLimit });
+    .limit(1);
 
   return {
     betId,
