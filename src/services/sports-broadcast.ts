@@ -15,7 +15,11 @@ type Send = (msg: string) => void;
 export type BroadcastChannel =
   | "sports-list"
   | "top-competitions"
-  | "recommended-events";
+  | "recommended-events"
+  // User-balance change. Carries `userId` in the payload so subscribers can
+  // ignore changes that don't belong to them (channel is global, fan-out is
+  // tiny — every client just filters in onMessage).
+  | "ledger";
 
 const channels = new Map<BroadcastChannel, Map<string, Send>>();
 
@@ -47,13 +51,17 @@ export const removeClientFromAllChannels = (clientId: string) => {
   for (const ch of channels.values()) ch.delete(clientId);
 };
 
-export const broadcastChange = (channel: BroadcastChannel) => {
+export const broadcastChange = (
+  channel: BroadcastChannel,
+  extra?: Record<string, unknown>,
+) => {
   const subs = channels.get(channel);
   if (!subs || subs.size === 0) return;
 
   const message = JSON.stringify({
     type: `${channel}-changed`,
     timestamp: Date.now(),
+    ...extra,
   });
   console.log(
     `[broadcast] ${channel}-changed -> ${subs.size} subscriber(s)`,

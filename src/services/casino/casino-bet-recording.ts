@@ -26,6 +26,7 @@ import {
 import { UserRole } from "../../types/enums";
 import type { ParsedUA } from "../../utils/parse-ua";
 import type { db as dbType } from "../../db";
+import { broadcastChange } from "../sports-broadcast";
 
 // Caller passes either the top-level `db` or a transaction handle.
 type Tx = Parameters<Parameters<typeof dbType.transaction>[0]>[0];
@@ -247,6 +248,12 @@ export async function recordCasinoBet(
     .from(ledgerLimit)
     .where(eq(ledgerLimit.userId, input.userId))
     .limit(1);
+
+  // Tell the user's open tabs that their ledger just moved so the header
+  // refetches without needing a page reload. Carries userId in the payload
+  // so other connected clients ignore it (channel is global, filter is
+  // client-side — see useChannelWatcher).
+  broadcastChange("ledger", { userId: input.userId });
 
   return {
     betId,

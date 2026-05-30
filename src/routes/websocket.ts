@@ -12,6 +12,7 @@ const KNOWN_CHANNELS: readonly BroadcastChannel[] = [
   "sports-list",
   "top-competitions",
   "recommended-events",
+  "ledger",
 ];
 const isKnownChannel = (v: any): v is BroadcastChannel =>
   typeof v === "string" && (KNOWN_CHANNELS as readonly string[]).includes(v);

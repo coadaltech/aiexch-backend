@@ -72,7 +72,7 @@ WITH trans as
     WHERE td.market_type = 4
 	group by td.market_id,market_id_runs.run
 	),
-	minlimit_marketid AS 
+	minlimit_marketid AS
     (SELECT
 	  COALESCE(min((case when mp.runner_profit <= 0 then mp.runner_profit else 0 end)),0) as limit_use
       FROM market_profit mp
@@ -80,6 +80,13 @@ WITH trans as
 	  UNION ALL
 	  select sum(total_amount) from matka_transactions
 	  where user_id = varuser_id and record_status = 0
+	  UNION ALL
+	  -- Casino bets: each matched bet's worst-case loss is its `exposure`
+	  -- (Ace sets this per bet — for BACK it equals stake, for LAY it's the
+	  -- liability = (odds-1)*stake). Helper guarantees exposure is populated
+	  -- (falls back to stake for QT). Settled bets are excluded automatically.
+	  select -sum(coalesce(exposure, stake)) from casino_bets
+	  where user_id = varuser_id and status = 'matched' and record_status = 0
 	)
 	update ledger_limit set limit_consumed = COALESCE((select -sum(limit_use) from minlimit_marketid),0)
 	where user_id = varuser_id 

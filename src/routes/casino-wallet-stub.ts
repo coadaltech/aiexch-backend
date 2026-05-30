@@ -5,6 +5,7 @@ import { ledgerLimit } from "../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { parseUserAgent } from "../utils/parse-ua";
 import { recordCasinoBet } from "../services/casino/casino-bet-recording";
+import { broadcastChange } from "../services/sports-broadcast";
 
 /**
  * Ace Gamings — Operator Wallet (Exposure + Seamless models)
@@ -368,6 +369,9 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
               console.log(
                 `[Casino Wallet:${name}] settlement → CALL ok for player=${playerId} round=${roundId}`,
               );
+              // Push a ledger-changed signal so the player's open tabs
+              // refetch balance + limit without a page reload.
+              broadcastChange("ledger", { userId: playerId });
             } catch (err: any) {
               // Drizzle wraps the original pg error in err.cause. Pull every
               // field the underlying driver offers so the postgres-level
