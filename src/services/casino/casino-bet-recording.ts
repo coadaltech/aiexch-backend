@@ -108,7 +108,15 @@ export async function recordCasinoBet(
       betType: input.betType ?? null,
       stake: String(stakeNum),
       odds: input.odds != null ? String(input.odds) : null,
-      exposure: input.exposure != null ? String(input.exposure) : null,
+      // Exposure = worst-case liability for this bet. Ace provides it per
+      // bet (correctly accounting for LAY odds where liability != stake);
+      // QT sends none, so we fall back to the stake (single-amount model).
+      // The limit + settlement procedures both rely on this column being
+      // populated — never leave it NULL.
+      exposure:
+        input.exposure != null
+          ? String(Math.abs(Number(input.exposure)))
+          : String(stakeNum),
       currency: input.currency ? input.currency.slice(0, 3) : null,
       status: "matched",
       ipAddress: input.ipAddress ?? null,
