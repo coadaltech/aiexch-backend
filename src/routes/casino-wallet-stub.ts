@@ -5,7 +5,7 @@ import { ledgerLimit } from "../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { parseUserAgent } from "../utils/parse-ua";
 import { recordCasinoBet } from "../services/casino/casino-bet-recording";
-import { broadcastChange } from "../services/sports-broadcast";
+import { broadcastLedgerSnapshot } from "../services/casino/broadcast-ledger";
 
 /**
  * Ace Gamings — Operator Wallet (Exposure + Seamless models)
@@ -250,10 +250,12 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
               return lastBalance;
             });
 
-            // Post-commit: tell this player's open tabs to refetch ledger.
-            // Doing this AFTER the transaction matters — broadcasting inside
-            // races the commit and subscribers get a stale balance.
-            broadcastChange("ledger", { userId: playerId });
+            // Post-commit: push the new ledger snapshot to this player's
+            // open tabs. Subscribers populate the react-query cache directly
+            // from the payload, so the header updates instantly without an
+            // HTTP round-trip. Doing this AFTER the transaction matters —
+            // broadcasting inside races the commit and reads stale balance.
+            await broadcastLedgerSnapshot(playerId);
 
             return { balance: fmt(finalBalance), version: b.version };
           } catch (err: any) {
@@ -374,9 +376,8 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
               console.log(
                 `[Casino Wallet:${name}] settlement → CALL ok for player=${playerId} round=${roundId}`,
               );
-              // Push a ledger-changed signal so the player's open tabs
-              // refetch balance + limit without a page reload.
-              broadcastChange("ledger", { userId: playerId });
+              // Push the new ledger snapshot so the header updates instantly.
+              await broadcastLedgerSnapshot(playerId);
             } catch (err: any) {
               // Drizzle wraps the original pg error in err.cause. Pull every
               // field the underlying driver offers so the postgres-level
@@ -531,7 +532,7 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
             // Post-commit ledger refresh (skip on duplicate retry — balance
             // didn't actually change).
             if (!result.duplicate) {
-              broadcastChange("ledger", { userId: playerId });
+              await broadcastLedgerSnapshot(playerId);
             }
 
             return {

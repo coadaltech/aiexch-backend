@@ -1,11 +1,11 @@
 import { Elysia, t } from "elysia";
 import crypto from "crypto";
 import { db } from "@db/index";
-import { users, ledgerLimit } from "@db/schema";
-import { eq, sql } from "drizzle-orm";
+import { users, ledgerLimit, casinoBets } from "@db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { parseUserAgent } from "../utils/parse-ua";
 import { recordCasinoBet } from "../services/casino/casino-bet-recording";
-import { broadcastChange } from "../services/sports-broadcast";
+import { broadcastLedgerSnapshot } from "../services/casino/broadcast-ledger";
 
 // QTech Games "Common Wallet" endpoints.
 //
@@ -182,7 +182,14 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
     // share POST /transactions; the txnType discriminates.
     //   DEBIT  → record the bet (casino_bets + logs + commissions) and
     //            deduct the stake from ledger_limit.
-    //   CREDIT → acknowledge only (payout handling lands in the next phase).
+    //   CREDIT → settle the matched bet for this round. Calls the same
+    //            casino_declare_round procedure used by Ace so:
+    //              - casino_bets.status flips to won/lost/void
+    //              - payout / settled_amount / outcome get filled
+    //              - voucher + voucher_details rows are created
+    //              - voucher trigger updates user_balance & final_limit
+    //              - set_limit_used_of_user releases the matched-bet hold
+    //            Idempotency: provider_transaction_id = CREDIT's txnId.
     .post(
       "/transactions",
       async ({ body, set, request }) => {
@@ -210,10 +217,84 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
         const isDebit = b.txnType !== "CREDIT";
         const amount = Number(b.amount ?? 0);
 
-        // CREDIT (and any non-DEBIT): ack only.
+        // ── CREDIT path: settle the round via casino_declare_round ───────
         if (!isDebit) {
+          // Find the matched bet for this round. One QT round = one bet,
+          // so (provider, roundId, userId, status='matched') is unique.
+          const [bet] = await db
+            .select({
+              providerBetId: casinoBets.providerBetId,
+              stake: casinoBets.stake,
+            })
+            .from(casinoBets)
+            .where(
+              and(
+                eq(casinoBets.provider, "qtech"),
+                eq(casinoBets.providerRoundId, b.roundId),
+                eq(casinoBets.userId, player.userId),
+                eq(casinoBets.status, "matched"),
+              ),
+            )
+            .limit(1);
+
+          if (!bet) {
+            // No matching DEBIT (race, already settled, or unknown round).
+            // Per QT semantics: ack successfully, balance unchanged.
+            logQt(name, "credit: no matched DEBIT for round, ack only", {
+              roundId: b.roundId,
+              txnId: b.txnId,
+            });
+            set.status = 201;
+            return { balance: player.balance, referenceId: b.txnId };
+          }
+
+          const stake = Number(bet.stake);
+          const pl = amount - stake;
+          // outcome is informational (the voucher dr_cr is driven by sign of pl).
+          const outcome = pl > 0 ? "WON" : pl < 0 ? "LOST" : "VOIDED";
+
+          try {
+            await db.execute(sql`
+              CALL casino_declare_round(
+                ${player.userId}::uuid,
+                ${"qtech"}::varchar,
+                ${b.roundId}::varchar,
+                ${b.txnId}::varchar,
+                NULL::numeric,
+                ${JSON.stringify([
+                  {
+                    provider_bet_id: bet.providerBetId,
+                    outcome,
+                    pl,
+                  },
+                ])}::jsonb,
+                ${JSON.stringify(b)}::jsonb
+              )
+            `);
+            logQt(name, "credit settle ok", {
+              roundId: b.roundId,
+              outcome,
+              pl,
+            });
+            await broadcastLedgerSnapshot(player.userId);
+          } catch (err: any) {
+            const cause = err?.cause ?? err?.original ?? {};
+            logQt(name, "credit CALL FAILED", {
+              txnId: b.txnId,
+              pgMessage: cause?.message,
+              pgCode: cause?.code,
+              pgDetail: cause?.detail,
+            });
+            set.status = 500;
+            return { code: "UNKNOWN_ERROR", message: "Internal server error" };
+          }
+
+          const updated = await loadPlayer(b.playerId);
           set.status = 201;
-          return { balance: player.balance, referenceId: b.txnId };
+          return {
+            balance: updated?.balance ?? player.balance,
+            referenceId: b.txnId,
+          };
         }
 
         // DEBIT: record the bet + deduct stake. Idempotent via the
@@ -249,10 +330,10 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
             };
           }
 
-          // Post-commit: notify this player's open tabs so the main header
-          // refetches the ledger. Skip on duplicate (idempotent retry).
+          // Post-commit: push the new ledger snapshot to this player's open
+          // tabs. Skip on duplicate (idempotent retry — balance unchanged).
           if (!result.duplicate) {
-            broadcastChange("ledger", { userId: player.userId });
+            await broadcastLedgerSnapshot(player.userId);
           }
 
           set.status = 201;
@@ -266,16 +347,106 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
       { body: t.Any() },
     )
 
-    // §3.5 Rollback — ACK only. Result/refund handling lands in the next
-    // phase together with settlement.
+    // §3.5 Rollback — settle the original DEBIT as VOIDED via the same
+    // casino_declare_round procedure. The procedure sets payout = exposure
+    // (full stake refund), settled_amount = 0, status = 'void', and
+    // releases the matched-bet hold via set_limit_used_of_user. No voucher
+    // rows are created (net_pl = 0).
+    //
+    // Per QT spec, an unknown betId must still return success ("idempotent
+    // nothing-to-undo"). Same for a bet that's already settled — we can't
+    // undo a payout via this endpoint.
     .post(
       "/transactions/rollback",
-      async ({ body }) => {
+      async ({ body, set }) => {
         const b = body as RollbackBody;
-        const player = b?.playerId ? await loadPlayer(b.playerId) : null;
+        logQt(name, "rollback ←", {
+          betId: b?.betId,
+          txnId: b?.txnId,
+          roundId: b?.roundId,
+        });
+
+        if (!b?.playerId || !b?.txnId || !b?.betId) {
+          set.status = 201;
+          return {
+            balance: 0,
+            referenceId: b?.txnId ?? `rb_${Date.now()}`,
+          };
+        }
+
+        const player = await loadPlayer(b.playerId);
+        if (!player) {
+          set.status = 201;
+          return { balance: 0, referenceId: b.txnId };
+        }
+
+        // Rollback's betId in QT semantics equals the original DEBIT's txnId,
+        // which is what we stored as casino_bets.provider_bet_id.
+        const [bet] = await db
+          .select({
+            providerBetId: casinoBets.providerBetId,
+            providerRoundId: casinoBets.providerRoundId,
+            status: casinoBets.status,
+          })
+          .from(casinoBets)
+          .where(
+            and(
+              eq(casinoBets.provider, "qtech"),
+              eq(casinoBets.providerBetId, b.betId),
+              eq(casinoBets.userId, player.userId),
+            ),
+          )
+          .limit(1);
+
+        if (!bet) {
+          logQt(name, "rollback: unknown bet, ack only", { betId: b.betId });
+          set.status = 201;
+          return { balance: player.balance, referenceId: b.txnId };
+        }
+
+        if (bet.status !== "matched") {
+          logQt(name, "rollback: bet already settled, ack only", {
+            betId: b.betId,
+            status: bet.status,
+          });
+          set.status = 201;
+          return { balance: player.balance, referenceId: b.txnId };
+        }
+
+        try {
+          await db.execute(sql`
+            CALL casino_declare_round(
+              ${player.userId}::uuid,
+              ${"qtech"}::varchar,
+              ${bet.providerRoundId ?? b.roundId ?? ""}::varchar,
+              ${b.txnId}::varchar,
+              NULL::numeric,
+              ${JSON.stringify([
+                {
+                  provider_bet_id: bet.providerBetId,
+                  outcome: "VOIDED",
+                  pl: 0,
+                },
+              ])}::jsonb,
+              ${JSON.stringify(b)}::jsonb
+            )
+          `);
+          logQt(name, "rollback ok", { betId: b.betId });
+          await broadcastLedgerSnapshot(player.userId);
+        } catch (err: any) {
+          const cause = err?.cause ?? err?.original ?? {};
+          logQt(name, "rollback CALL FAILED", {
+            txnId: b.txnId,
+            pgMessage: cause?.message,
+            pgCode: cause?.code,
+          });
+        }
+
+        const updated = await loadPlayer(b.playerId);
+        set.status = 201;
         return {
-          balance: player?.balance ?? 0,
-          referenceId: b?.txnId ?? `rb_${Date.now()}`,
+          balance: updated?.balance ?? player.balance,
+          referenceId: b.txnId,
         };
       },
       { body: t.Any() },
