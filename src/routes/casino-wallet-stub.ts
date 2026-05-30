@@ -295,6 +295,12 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
           const items = Array.isArray(b.settlements)
             ? (b.settlements as Array<Record<string, unknown>>)
             : [];
+
+          console.log(
+            `[Casino Wallet:${name}] /accounts/settlement HIT — items=${items.length}`,
+            JSON.stringify(b),
+          );
+
           const results: Array<{
             player_id: string;
             balance: string;
@@ -314,7 +320,9 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
               : [];
 
             if (!isUUID(playerId)) {
-              // In-memory path (test suite): nothing to settle, just echo balance.
+              console.log(
+                `[Casino Wallet:${name}] settlement: skip non-UUID player_id=${playerId}`,
+              );
               results.push({
                 player_id: playerId,
                 balance: fmt(memGetBalance(playerId)),
@@ -333,6 +341,18 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
                 pl: Number(bet.pl ?? 0),
               }));
 
+            console.log(
+              `[Casino Wallet:${name}] settlement → CALL casino_declare_round`,
+              JSON.stringify({
+                playerId,
+                provider: "ace",
+                roundId,
+                txnId,
+                exposure,
+                bets: betsJson,
+              }),
+            );
+
             try {
               await db.execute(sql`
                 CALL casino_declare_round(
@@ -345,11 +365,14 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
                   ${JSON.stringify(item)}::jsonb
                 )
               `);
-            } catch (err) {
+              console.log(
+                `[Casino Wallet:${name}] settlement → CALL ok for player=${playerId} round=${roundId}`,
+              );
+            } catch (err: any) {
               console.error(
-                "[Casino Wallet] casino_declare_round failed for",
-                playerId,
-                err,
+                `[Casino Wallet:${name}] settlement → CALL FAILED for player=${playerId} round=${roundId}`,
+                err?.message ?? err,
+                err?.stack ?? "",
               );
               // Per Ace spec: 500 triggers retry. Per-player failure inside a
               // batch is rare — log and continue so other players still settle.
