@@ -369,10 +369,24 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
                 `[Casino Wallet:${name}] settlement → CALL ok for player=${playerId} round=${roundId}`,
               );
             } catch (err: any) {
+              // Drizzle wraps the original pg error in err.cause. Pull every
+              // field the underlying driver offers so the postgres-level
+              // reason is visible (column missing, type mismatch, etc.).
+              const cause = err?.cause ?? err?.original ?? {};
               console.error(
                 `[Casino Wallet:${name}] settlement → CALL FAILED for player=${playerId} round=${roundId}`,
-                err?.message ?? err,
-                err?.stack ?? "",
+                JSON.stringify({
+                  message: err?.message,
+                  pgMessage: cause?.message,
+                  pgCode: cause?.code,
+                  pgDetail: cause?.detail,
+                  pgHint: cause?.hint,
+                  pgWhere: cause?.where,
+                  pgSchema: cause?.schema,
+                  pgTable: cause?.table,
+                  pgColumn: cause?.column,
+                  pgRoutine: cause?.routine,
+                }),
               );
               // Per Ace spec: 500 triggers retry. Per-player failure inside a
               // batch is rare — log and continue so other players still settle.
