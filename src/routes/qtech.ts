@@ -5,6 +5,7 @@ import { users, ledgerLimit } from "@db/schema";
 import { eq, sql } from "drizzle-orm";
 import { parseUserAgent } from "../utils/parse-ua";
 import { recordCasinoBet } from "../services/casino/casino-bet-recording";
+import { broadcastChange } from "../services/sports-broadcast";
 
 // QTech Games "Common Wallet" endpoints.
 //
@@ -246,6 +247,12 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
               code: "INSUFFICIENT_FUNDS",
               message: "Insufficient funds to place bet.",
             };
+          }
+
+          // Post-commit: notify this player's open tabs so the main header
+          // refetches the ledger. Skip on duplicate (idempotent retry).
+          if (!result.duplicate) {
+            broadcastChange("ledger", { userId: player.userId });
           }
 
           set.status = 201;

@@ -250,6 +250,11 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
               return lastBalance;
             });
 
+            // Post-commit: tell this player's open tabs to refetch ledger.
+            // Doing this AFTER the transaction matters — broadcasting inside
+            // races the commit and subscribers get a stale balance.
+            broadcastChange("ledger", { userId: playerId });
+
             return { balance: fmt(finalBalance), version: b.version };
           } catch (err: any) {
             const code = err?.code ?? "UNKNOWN_ERROR";
@@ -522,6 +527,13 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
                 version: nextVersion(),
               };
             }
+
+            // Post-commit ledger refresh (skip on duplicate retry — balance
+            // didn't actually change).
+            if (!result.duplicate) {
+              broadcastChange("ledger", { userId: playerId });
+            }
+
             return {
               balance: fmt(result.finalLimit),
               version: nextVersion(),
