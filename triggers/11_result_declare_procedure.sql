@@ -1142,6 +1142,15 @@ BEGIN
     ,varSystemUserId, CURRENT_TIMESTAMP, varSystemUserId, CURRENT_TIMESTAMP, 0
 	, varwin_run)
 	;
+
+    	-- Suspend the market the instant its result is declared, so the betting
+	-- layer stops accepting new bets on it even if the live odds feed still
+	-- reports it as active. Defence-in-depth alongside the market_results guard
+	-- in the placement route. No-op for markets without a settings row.
+	UPDATE public.market_settings
+	   SET suspended   = true,
+	       update_date = CURRENT_TIMESTAMP
+	 WHERE market_id = varmarket_id;
 /*
 	if varmarket_type = 0 THEN
 		INSERT INTO public.declared_events(
@@ -1153,6 +1162,7 @@ BEGIN
 		DELETE from events
 		where event_id = varEventId
 		;
+        
 	end if;
 */	
 	-- Optional: commit or raise notice if varwin_run = 0 (test mode)

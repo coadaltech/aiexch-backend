@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { db } from "../db";
-import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings, customMarketOdds } from "../db/schema";
+import { transactions, transactionDetails, transactionLogs, users, profiles, ledgerLimit, transactionCommissions, marketSettings, customMarketOdds, marketResults } from "../db/schema";
 // Note: profiles is still imported for betStatus/parentBetStatus checks
 import { parseUserAgent } from "../utils/parse-ua";
 import { eq, and, sql } from "drizzle-orm";
@@ -391,7 +391,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       const ua = parseUserAgent(request.headers.get("user-agent"));
 
       // Fire all independent queries in parallel
-      const [userData, userRecord, [ledger], marketStatusResult] = await Promise.all([
+      const [userData, userRecord, [ledger], marketStatusResult, settledResult] = await Promise.all([
         // 1. User profile (betStatus check)
         db.select({
           betStatus: profiles.betStatus,
@@ -447,6 +447,16 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           }
           return { rejected: false, resolvedMinBet, resolvedMaxBet };
         })(),
+
+        // 5. Settlement guard — has this market already been resulted?
+        //    Authoritative and local: a declared/void/rollback market must
+        //    never accept a bet, even if the live odds feed or Redis still
+        //    report it as active, and even on the verifyOdds timeout-allow path.
+        db
+          .select({ status: marketResults.status })
+          .from(marketResults)
+          .where(eq(marketResults.marketId, canonicalMarketId))
+          .limit(1),
       ]);
 
       if (!userData[0]) {
@@ -464,6 +474,15 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       if (marketStatusResult.rejected) {
         set.status = 400;
         return { success: false, error: (marketStatusResult as any).error };
+      }
+
+      // Hard settlement guard: once a market is declared/voided/rolled back it
+      // can never accept another bet, regardless of what the live feed says.
+      // PENDING is a not-yet-resulted placeholder, so it is still bettable.
+      const settledStatus = settledResult[0]?.status?.toUpperCase();
+      if (settledStatus && settledStatus !== "PENDING") {
+        set.status = 400;
+        return { success: false, error: "Bet rejected: market result already declared" };
       }
 
       let { resolvedMinBet = 0, resolvedMaxBet = 0 } = marketStatusResult as { rejected: false; resolvedMinBet: number; resolvedMaxBet: number };

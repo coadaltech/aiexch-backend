@@ -344,6 +344,15 @@ export async function fetchAndStoreResult(market: UndeclaredMarket): Promise<voi
           update_date = CURRENT_TIMESTAMP
       `);
 
+      // Suspend the market so no further bets are accepted on it. The DECLARED
+      // path does this inside declare_process; the void/rollback path has to do
+      // it here since it doesn't call that procedure. No-op if no settings row.
+      await db.execute(sql`
+        UPDATE public.market_settings
+           SET suspended = true, update_date = CURRENT_TIMESTAMP
+         WHERE market_id = ${market.marketId}::numeric
+      `);
+
       console.log(
         `[MarketResultCron] Voided all bets for market ${market.marketId} (${status})`
       );
