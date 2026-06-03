@@ -363,6 +363,51 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }
   })
 
+  // Get user casino bet history (Ace / QTech). Mirrors /bet-history but for the
+  // casino_bets table so the Bet History page can show a casino section.
+  .get("/casino-bet-history", async ({ userId, query, set, db }) => {
+    try {
+      const { casinoBets } = await import("../db/schema");
+
+      let whereConditions = [
+        eq(casinoBets.userId, userId),
+        eq(casinoBets.recordStatus, 0),
+      ];
+
+      if (query.status && query.status !== "all") {
+        whereConditions.push(eq(casinoBets.status, query.status));
+      }
+
+      const userCasinoBets = await db
+        .select({
+          id: casinoBets.id,
+          provider: casinoBets.provider,
+          gameName: casinoBets.gameName,
+          selectionName: casinoBets.selectionName,
+          betType: casinoBets.betType,
+          stake: casinoBets.stake,
+          odds: casinoBets.odds,
+          exposure: casinoBets.exposure,
+          status: casinoBets.status,
+          settledAmount: casinoBets.settledAmount,
+          payout: casinoBets.payout,
+          outcome: casinoBets.outcome,
+          placedAt: casinoBets.placedAt,
+          settledAt: casinoBets.settledAt,
+          addedDate: casinoBets.addedDate,
+        })
+        .from(casinoBets)
+        .where(and(...whereConditions))
+        .orderBy(desc(casinoBets.placedAt));
+
+      set.status = 200;
+      return { success: true, data: userCasinoBets };
+    } catch (error) {
+      set.status = 200;
+      return { success: true, data: [] }; // Return empty array if table doesn't exist
+    }
+  })
+
   // Get user notifications
   .get("/notifications/user/:userId", async ({ params, set, db }) => {
     const userId = params.userId;

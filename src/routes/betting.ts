@@ -929,8 +929,40 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         `
       );
       const data = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
+
+      // Casino exposure is summed into the user's total limit by
+      // set_limit_used_of_user, but get_limituse_of_user_detail above only
+      // covers sports + matka. Append one row per casino game (matched bets)
+      // so the breakdown reconciles with the total. intFlag = 2 marks casino;
+      // the row is keyed by game_name + provider for the drill-down.
+      const casinoRows = await db.execute(sql`
+        SELECT
+          NULL                                  AS "marketId",
+          NULL                                  AS "shiftId",
+          2                                     AS "intFlag",
+          SUM(COALESCE(cb.exposure, cb.stake))  AS "limitUse",
+          'Casino'                              AS "sportName",
+          NULL                                  AS "marketName",
+          NULL                                  AS "competitionName",
+          NULL                                  AS "eventName",
+          NULL                                  AS "shiftName",
+          COALESCE(cb.game_name, cb.provider)   AS "gameName",
+          cb.provider                           AS "provider",
+          COUNT(*)                              AS "betCount"
+        FROM casino_bets cb
+        WHERE cb.user_id = ${userId}::uuid
+          AND cb.status = 'matched'
+          AND cb.record_status = 0
+        GROUP BY COALESCE(cb.game_name, cb.provider), cb.provider
+        HAVING SUM(COALESCE(cb.exposure, cb.stake)) <> 0
+        ORDER BY SUM(COALESCE(cb.exposure, cb.stake)) DESC
+      `);
+      const casinoData = Array.isArray(casinoRows)
+        ? casinoRows
+        : (casinoRows as any)?.rows || [];
+
       set.status = 200;
-      return { success: true, data };
+      return { success: true, data: [...data, ...casinoData] };
     } catch (error) {
       console.error("Failed to fetch exposure usage:", error);
       set.status = 500;
@@ -989,6 +1021,70 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       console.error("Failed to fetch exposure shift detail:", error);
       set.status = 500;
       return { success: false, error: "Failed to fetch exposure shift detail" };
+    }
+  })
+
+  // Drill-down for the Exposure Usage modal — casino game row.
+  // Returns the user's matched (unsettled) casino bets for one game, keyed by
+  // game_name + provider (the grouping used in /exposure-usage above).
+  .get("/exposure-usage/casino", async ({ userId, query, set }) => {
+    try {
+      const gameName = query?.gameName ? String(query.gameName) : "";
+      const provider = query?.provider ? String(query.provider) : "";
+      if (!gameName || !provider) {
+        set.status = 400;
+        return { success: false, error: "gameName and provider are required" };
+      }
+      const rows = await db.execute(sql`
+        SELECT
+          cb.id                                 AS "betId",
+          cb.provider                           AS "provider",
+          cb.provider_bet_id                    AS "providerBetId",
+          cb.provider_round_id                  AS "providerRoundId",
+          cb.game_name                          AS "gameName",
+          cb.selection_name                     AS "selectionName",
+          cb.bet_type                           AS "betType",
+          cb.stake                              AS "stake",
+          cb.odds                               AS "odds",
+          COALESCE(cb.exposure, cb.stake)       AS "exposure",
+          cb.status                             AS "status",
+          cb.placed_at                          AS "placedAt",
+          ctl.ip_address                        AS "ipAddress"
+        FROM casino_bets cb
+        LEFT JOIN casino_transaction_logs ctl ON ctl.casino_bet_id = cb.id
+        WHERE cb.user_id = ${userId}::uuid
+          AND cb.status = 'matched'
+          AND cb.record_status = 0
+          AND cb.provider = ${provider}
+          AND COALESCE(cb.game_name, cb.provider) = ${gameName}
+        ORDER BY cb.placed_at DESC
+      `);
+      const bets = Array.isArray(rows) ? rows : (rows as any)?.rows || [];
+      const totalStake = bets.reduce(
+        (s: number, b: any) => s + Number(b.stake ?? 0),
+        0,
+      );
+      const totalExposure = bets.reduce(
+        (s: number, b: any) => s + Number(b.exposure ?? 0),
+        0,
+      );
+      set.status = 200;
+      return {
+        success: true,
+        data: {
+          game: { gameName, provider },
+          bets,
+          summary: {
+            totalBets: bets.length,
+            totalStake: String(totalStake),
+            totalExposure: String(totalExposure),
+          },
+        },
+      };
+    } catch (error) {
+      console.error("Failed to fetch exposure casino detail:", error);
+      set.status = 500;
+      return { success: false, error: "Failed to fetch exposure casino detail" };
     }
   })
 
