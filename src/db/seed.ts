@@ -11,8 +11,20 @@ const API_BASE_URL = "https://api.aiexch.com/Soe81s9017b44b6d822da257xk055b11/sp
 
 // ── ID remappings: API returns one ID but competitions live under a different ID ─
 const SPORT_ID_REMAPPINGS: Record<number, number> = {
-  2378961: 500, // Politics — API event ID is 2378961, but competitions are fetched under 500
+  2378961: 500, // Election — API event ID is 2378961, but competitions are fetched under 500
 };
+
+// ── Display-name overrides keyed by sport_id ──────────────────────────────────
+// Enforce a rename in the DB regardless of what the external API returns or what
+// MANUAL_SPORTS lists, so no manual migration is needed. Mirrors the frontend
+// SPORT_DISPLAY_NAME_OVERRIDES in lib/sports-config.ts — keep the two in sync.
+const SPORT_NAME_OVERRIDES: Record<number, string> = {
+  500: "Election", // was "Politics"
+  1005: "Bombay Bazar", // was "Kalyan-New"
+};
+
+const applyNameOverride = (sportId: number, name: string): string =>
+  SPORT_NAME_OVERRIDES[sportId] ?? name;
 
 // ── Manually managed sports that are not returned by the external API ──────────
 const MANUAL_SPORTS = [
@@ -20,7 +32,7 @@ const MANUAL_SPORTS = [
   { sport_id: 1002, name: "Lottery" },
   { sport_id: 1003, name: "Skill Games" },
   { sport_id: 1004, name: "Jambo" },
-  { sport_id: 1005, name: "Kalyan-New" },
+  { sport_id: 1005, name: "Bombay Bazar" },
 ];
 
 // Helper function for API calls
@@ -100,11 +112,13 @@ const upsertSport = async (sportData: any) => {
     if (sportId && SPORT_ID_REMAPPINGS[Number(sportId)]) {
       sportId = SPORT_ID_REMAPPINGS[Number(sportId)];
     }
-    const sportName =
+    const sportName = applyNameOverride(
+      Number(sportId),
       sportData.name ||
-      sportData.eventTypeName ||
-      sportData.eventType?.name ||
-      "Unknown Sport";
+        sportData.eventTypeName ||
+        sportData.eventType?.name ||
+        "Unknown Sport",
+    );
 
     if (!sportId) {
       console.log("Skipping sport - missing ID:", sportData);
@@ -215,6 +229,7 @@ const upsertCompetition = async (compData: any, sportId: number) => {
 // existing rows; new rows default to inactive so an admin must explicitly enable).
 const syncManualSports = async () => {
   for (const manual of MANUAL_SPORTS) {
+    const name = applyNameOverride(manual.sport_id, manual.name);
     try {
       const existing = await db
         .select()
@@ -225,13 +240,13 @@ const syncManualSports = async () => {
       if (existing.length > 0) {
         await db
           .update(sports)
-          .set({ name: manual.name, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
+          .set({ name, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
           .where(eq(sports.sport_id, manual.sport_id));
-        console.log(`Manual sport updated: ${manual.name} (ID: ${manual.sport_id})`);
+        console.log(`Manual sport updated: ${name} (ID: ${manual.sport_id})`);
       } else {
         await db.insert(sports).values({
           sport_id: manual.sport_id,
-          name: manual.name,
+          name,
           is_active: false,
           sort_order: 0,
           addedBy: SYSTEM_USER_ID,
@@ -239,10 +254,36 @@ const syncManualSports = async () => {
           updateBy: SYSTEM_USER_ID,
           updateDate: new Date(),
         });
-        console.log(`Manual sport added: ${manual.name} (ID: ${manual.sport_id})`);
+        console.log(`Manual sport added: ${name} (ID: ${manual.sport_id})`);
       }
     } catch (err: any) {
-      console.error(`Error upserting manual sport ${manual.name}:`, err.message);
+      console.error(`Error upserting manual sport ${name}:`, err.message);
+    }
+  }
+};
+
+// Force the display name of any renamed sport that already lives in the DB
+// (e.g. Politics → Election, id 500, which is seeded from the external API and
+// so is not covered by MANUAL_SPORTS). Only updates rows that already exist —
+// never creates one — and leaves is_active untouched.
+const applySportNameOverrides = async () => {
+  for (const [idStr, name] of Object.entries(SPORT_NAME_OVERRIDES)) {
+    const sportId = Number(idStr);
+    try {
+      const existing = await db
+        .select({ sport_id: sports.sport_id })
+        .from(sports)
+        .where(eq(sports.sport_id, sportId))
+        .limit(1);
+      if (existing.length === 0) continue;
+
+      await db
+        .update(sports)
+        .set({ name, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
+        .where(eq(sports.sport_id, sportId));
+      console.log(`Sport name override applied: ${name} (ID: ${sportId})`);
+    } catch (err: any) {
+      console.error(`Error applying name override for sport ${sportId}:`, err.message);
     }
   }
 };
@@ -421,9 +462,10 @@ export const startCronJobs = async () => {
   // Safe to run on cron — preserves is_active on existing rows.
   cron.schedule(
     "0 */12 * * *",
-    () => {
+    async () => {
       console.log("[Seed] Running scheduled manual sports sync...");
-      syncManualSports();
+      await syncManualSports();
+      await applySportNameOverrides();
     },
     { timezone: "UTC" },
   );
@@ -454,6 +496,7 @@ export const startCronJobs = async () => {
   console.log("[Seed] Running initial sync...");
   // await syncSports();
   await syncManualSports();
+  await applySportNameOverrides();
   await syncCompetitions();
   await syncAllActiveCompetitionEvents();
   console.log("[Seed] Initial sync completed!");
@@ -463,6 +506,8 @@ export const startCronJobs = async () => {
 export const runAll = async () => {
   console.log("Starting manual sync...");
   await syncSports();
+  await syncManualSports();
+  await applySportNameOverrides();
   await syncCompetitions();
   console.log("Manual sync completed!");
 };
@@ -480,4 +525,4 @@ export const runAll = async () => {
 //     });
 // }
 
-export { syncSports, syncCompetitions, syncManualSports };
+export { syncSports, syncCompetitions, syncManualSports, applySportNameOverrides };
