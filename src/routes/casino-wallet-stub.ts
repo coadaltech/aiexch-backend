@@ -202,11 +202,21 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
           // ── DB path (real user) ───────────────────────────────────────
           const ua = parseUserAgent(request.headers.get("user-agent"));
           try {
+            // Ace's top-level `exposure` is the NET worst-case liability for
+            // the whole round — already netting BACK against LAY across the
+            // full outcome set (which only Ace can see). It arrives as a
+            // running TOTAL on every call. We hold exactly this per round, the
+            // same way sports holds a single worst-case per market. Stored as a
+            // positive amount; absent → null (function falls back to per-bet).
+            const roundNetExposure =
+              b.exposure != null && b.exposure !== ""
+                ? Math.abs(Number(b.exposure))
+                : null;
+
             const finalBalance = await db.transaction(async (tx) => {
-              let lastBalance = 0;
               for (const bet of newBets) {
                 if (!bet?.id) continue;
-                const result = await recordCasinoBet(tx, {
+                await recordCasinoBet(tx, {
                   userId: playerId,
                   provider: "ace",
                   providerBetId: String(bet.id),
@@ -238,8 +248,33 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
                   ua,
                   rawPayload: bet,
                 });
-                lastBalance = result.finalLimit;
               }
+
+              // Stamp Ace's netted round total onto every still-open row of
+              // this round, then recompute the limit ONCE so it reflects the
+              // netted hold (recordCasinoBet's per-bet recalcs ran before this
+              // and saw no round figure yet — this is the authoritative pass).
+              if (roundNetExposure != null && topRoundId) {
+                await tx.execute(sql`
+                  UPDATE casino_transactions
+                     SET round_exposure = ${String(roundNetExposure)}::numeric,
+                         update_date = now()
+                   WHERE user_id = ${playerId}::uuid
+                     AND provider = 'ace'
+                     AND provider_round_id = ${topRoundId}
+                     AND status = 'matched'
+                `);
+                await tx.execute(
+                  sql`CALL set_limit_used_of_user(${playerId}::uuid)`,
+                );
+              }
+
+              const [ledger] = await tx
+                .select({ finalLimit: ledgerLimit.finalLimit })
+                .from(ledgerLimit)
+                .where(eq(ledgerLimit.userId, playerId))
+                .limit(1);
+              const lastBalance = Number(ledger?.finalLimit ?? 0);
 
               if (lastBalance < 0) {
                 throw Object.assign(new Error("INSUFFICIENT_FUNDS"), {

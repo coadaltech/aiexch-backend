@@ -583,7 +583,19 @@ export const casinoTransactions = pgTable("casino_transactions", {
   betType: varchar("bet_type", { length: 10 }), // BACK | LAY
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   odds: decimal("odds", { precision: 10, scale: 4 }),
+  // Per-bet worst-case liability (Ace's per-bet `exposure`). Used by
+  // casino_declare_round for payout. NOT used for the limit hold — see below.
   exposure: decimal("exposure", { precision: 15, scale: 2 }),
+  // NET worst-case liability for the WHOLE round, as computed by Ace knowing
+  // the full outcome set and pushed as the top-level `exposure` on every
+  // /accounts/exposure call (a running TOTAL, already netting BACK against LAY
+  // across selections). This is the casino analog of sports knowing its full
+  // runner set: we can't re-derive it from the user's own bets alone (we never
+  // see the unbacked selections), so we store Ace's authoritative number and
+  // the limit holds it per round. Same value on every matched row of a round;
+  // fn_casino_round_exposure takes MAX per round. NULL for QTech / legacy rows,
+  // which fall back to the per-bet stake sum.
+  roundExposure: decimal("round_exposure", { precision: 15, scale: 2 }),
   currency: varchar("currency", { length: 3 }),
   // matched | won | lost | cancelled | void | rolled_back
   status: varchar("status", { length: 20 }).default("matched").notNull(),
