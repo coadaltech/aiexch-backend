@@ -504,7 +504,16 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         }
       }
 
-      // Enforce min/max bet limits
+      // Enforce min/max bet limits.
+      // Impossible range first: a positive minimum that exceeds the maximum means
+      // no stake can ever be valid (e.g. min=1, max=0). Here max=0 is a hard zero,
+      // NOT the "no upper limit" sentinel — that meaning only applies when there is
+      // no minimum (min=0). Without this guard the maxBet check below is skipped
+      // for max=0 and the bet slips through despite the market being un-bettable.
+      if (resolvedMinBet > 0 && resolvedMinBet > resolvedMaxBet) {
+        set.status = 400;
+        return { success: false, error: `Bet rejected: betting is not available on this market` };
+      }
       if (resolvedMinBet > 0 && stake < resolvedMinBet) {
         set.status = 400;
         return { success: false, error: `Bet rejected: minimum bet is ${resolvedMinBet}` };
