@@ -960,30 +960,28 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
       // Casino exposure is summed into the user's total limit by
       // set_limit_used_of_user, but get_limituse_of_user_detail above only
-      // covers sports + matka. Append one row per casino game (matched bets)
+      // covers sports + matka. Append one row per casino game using the SAME
+      // per-round netted worst-case the limit uses (fn_casino_round_exposure),
       // so the breakdown reconciles with the total. intFlag = 2 marks casino;
       // the row is keyed by game_name + provider for the drill-down.
       const casinoRows = await db.execute(sql`
         SELECT
-          NULL                                  AS "marketId",
-          NULL                                  AS "shiftId",
-          2                                     AS "intFlag",
-          SUM(COALESCE(cb.exposure, cb.stake))  AS "limitUse",
-          'Casino'                              AS "sportName",
-          NULL                                  AS "marketName",
-          NULL                                  AS "competitionName",
-          NULL                                  AS "eventName",
-          NULL                                  AS "shiftName",
-          COALESCE(cb.game_name, cb.provider)   AS "gameName",
-          cb.provider                           AS "provider",
-          COUNT(*)                              AS "betCount"
-        FROM casino_bets cb
-        WHERE cb.user_id = ${userId}::uuid
-          AND cb.status = 'matched'
-          AND cb.record_status = 0
-        GROUP BY COALESCE(cb.game_name, cb.provider), cb.provider
-        HAVING SUM(COALESCE(cb.exposure, cb.stake)) <> 0
-        ORDER BY SUM(COALESCE(cb.exposure, cb.stake)) DESC
+          NULL                                       AS "marketId",
+          NULL                                       AS "shiftId",
+          2                                          AS "intFlag",
+          SUM(re.exposure)                           AS "limitUse",
+          'Casino'                                   AS "sportName",
+          NULL                                       AS "marketName",
+          NULL                                       AS "competitionName",
+          NULL                                       AS "eventName",
+          NULL                                       AS "shiftName",
+          COALESCE(re.game_name, re.provider)        AS "gameName",
+          re.provider                                AS "provider",
+          COUNT(*)                                   AS "betCount"
+        FROM fn_casino_round_exposure(${userId}::uuid) re
+        GROUP BY COALESCE(re.game_name, re.provider), re.provider
+        HAVING SUM(re.exposure) <> 0
+        ORDER BY SUM(re.exposure) DESC
       `);
       const casinoData = Array.isArray(casinoRows)
         ? casinoRows
