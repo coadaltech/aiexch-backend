@@ -6,12 +6,12 @@
  *
  * One call to recordCasinoBet does, inside the caller's transaction:
  *   1. Snapshot the user's whitelabel + hierarchy commission shares
- *   2. INSERT casino_bets               (one row per bet)
+ *   2. INSERT casino_transactions               (one row per bet)
  *   3. INSERT casino_transaction_logs   (one row, matched by casinoBetId)
  *   4. INSERT casino_transaction_commissions (one row, matched by casinoBetId)
  *   5. UPDATE ledger_limit              (final_limit -= stake, limit_consumed += stake)
  *
- * Idempotency: relies on the casino_bets UNIQUE(provider, provider_bet_id)
+ * Idempotency: relies on the casino_transactions UNIQUE(provider, provider_bet_id)
  * constraint. A duplicate insert returns null and skips the rest — caller
  * treats this as "already recorded" and returns the current balance.
  */
@@ -19,7 +19,7 @@ import { sql, eq } from "drizzle-orm";
 import {
   users,
   ledgerLimit,
-  casinoBets,
+  casinoTransactions,
   casinoTransactionLogs,
   casinoTransactionCommissions,
 } from "../../db/schema";
@@ -55,7 +55,7 @@ export interface RecordCasinoBetInput {
 }
 
 export interface RecordCasinoBetResult {
-  /** The inserted casino_bets row, or null if the bet was already recorded. */
+  /** The inserted casino_transactions row, or null if the bet was already recorded. */
   betId: string | null;
   /** ledger_limit.final_limit AFTER this bet's deduction. */
   finalLimit: number;
@@ -89,9 +89,9 @@ export async function recordCasinoBet(
     throw new Error(`Invalid stake: ${input.stake}`);
   }
 
-  // 2. Insert casino_bets — ON CONFLICT DO NOTHING handles retries.
+  // 2. Insert casino_transactions — ON CONFLICT DO NOTHING handles retries.
   const inserted = await tx
-    .insert(casinoBets)
+    .insert(casinoTransactions)
     .values({
       userId: input.userId,
       whitelabelId: user.whitelabelId ?? null,
@@ -126,9 +126,9 @@ export async function recordCasinoBet(
       updateBy: input.userId,
     })
     .onConflictDoNothing({
-      target: [casinoBets.provider, casinoBets.providerBetId],
+      target: [casinoTransactions.provider, casinoTransactions.providerBetId],
     })
-    .returning({ id: casinoBets.id });
+    .returning({ id: casinoTransactions.id });
 
   if (inserted.length === 0) {
     // Duplicate — return current balance without re-deducting.
@@ -237,7 +237,7 @@ export async function recordCasinoBet(
 
   // 5. Recalculate the user's limit via the shared stored procedure (same
   // call sports betting uses, see src/routes/betting.ts). The procedure
-  // sums potential losses across sports markets, matka, and casino_bets,
+  // sums potential losses across sports markets, matka, and casino_transactions,
   // then writes limit_consumed and final_limit. Casino bets are picked up
   // because they're inserted above with status='matched'.
   await tx.execute(sql`CALL set_limit_used_of_user(${input.userId}::uuid)`);

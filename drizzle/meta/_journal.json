@@ -708,6 +708,13 @@
       "when": 1780064074003,
       "tag": "0100_kind_lady_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1780100000000,
+      "tag": "0101_rename_casino_bets_to_casino_transactions",
+      "breakpoints": true
     }
   ]
 }

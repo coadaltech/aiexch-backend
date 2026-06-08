@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import crypto from "crypto";
 import { db } from "@db/index";
-import { users, ledgerLimit, casinoBets } from "@db/schema";
+import { users, ledgerLimit, casinoTransactions } from "@db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { parseUserAgent } from "../utils/parse-ua";
 import { recordCasinoBet } from "../services/casino/casino-bet-recording";
@@ -23,7 +23,7 @@ import { broadcastLedgerSnapshot } from "../services/casino/broadcast-ledger";
 // submitted on the QT handover form.
 //
 // Money + bet flow:
-//   * DEBIT (bet placed): inserts one row into casino_bets +
+//   * DEBIT (bet placed): inserts one row into casino_transactions +
 //     casino_transaction_logs + casino_transaction_commissions and deducts
 //     the stake from ledger_limit.final_limit. Idempotent on
 //     (provider='qtech', provider_bet_id=txnId).
@@ -180,11 +180,11 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
 
     // §3.3 Withdrawal (txnType=DEBIT) and §3.4 Deposit (txnType=CREDIT)
     // share POST /transactions; the txnType discriminates.
-    //   DEBIT  → record the bet (casino_bets + logs + commissions) and
+    //   DEBIT  → record the bet (casino_transactions + logs + commissions) and
     //            deduct the stake from ledger_limit.
     //   CREDIT → settle the matched bet for this round. Calls the same
     //            casino_declare_round procedure used by Ace so:
-    //              - casino_bets.status flips to won/lost/void
+    //              - casino_transactions.status flips to won/lost/void
     //              - payout / settled_amount / outcome get filled
     //              - voucher + voucher_details rows are created
     //              - voucher trigger updates user_balance & final_limit
@@ -223,16 +223,16 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
           // so (provider, roundId, userId, status='matched') is unique.
           const [bet] = await db
             .select({
-              providerBetId: casinoBets.providerBetId,
-              stake: casinoBets.stake,
+              providerBetId: casinoTransactions.providerBetId,
+              stake: casinoTransactions.stake,
             })
-            .from(casinoBets)
+            .from(casinoTransactions)
             .where(
               and(
-                eq(casinoBets.provider, "qtech"),
-                eq(casinoBets.providerRoundId, b.roundId),
-                eq(casinoBets.userId, player.userId),
-                eq(casinoBets.status, "matched"),
+                eq(casinoTransactions.provider, "qtech"),
+                eq(casinoTransactions.providerRoundId, b.roundId),
+                eq(casinoTransactions.userId, player.userId),
+                eq(casinoTransactions.status, "matched"),
               ),
             )
             .limit(1);
@@ -298,7 +298,7 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
         }
 
         // DEBIT: record the bet + deduct stake. Idempotent via the
-        // UNIQUE(provider, provider_bet_id) constraint on casino_bets.
+        // UNIQUE(provider, provider_bet_id) constraint on casino_transactions.
         const ua = parseUserAgent(request.headers.get("user-agent"));
         try {
           const result = await db.transaction((tx) =>
@@ -381,19 +381,19 @@ function buildQtechPlugin(name: string, prefix: string, passKey: string) {
         }
 
         // Rollback's betId in QT semantics equals the original DEBIT's txnId,
-        // which is what we stored as casino_bets.provider_bet_id.
+        // which is what we stored as casino_transactions.provider_bet_id.
         const [bet] = await db
           .select({
-            providerBetId: casinoBets.providerBetId,
-            providerRoundId: casinoBets.providerRoundId,
-            status: casinoBets.status,
+            providerBetId: casinoTransactions.providerBetId,
+            providerRoundId: casinoTransactions.providerRoundId,
+            status: casinoTransactions.status,
           })
-          .from(casinoBets)
+          .from(casinoTransactions)
           .where(
             and(
-              eq(casinoBets.provider, "qtech"),
-              eq(casinoBets.providerBetId, b.betId),
-              eq(casinoBets.userId, player.userId),
+              eq(casinoTransactions.provider, "qtech"),
+              eq(casinoTransactions.providerBetId, b.betId),
+              eq(casinoTransactions.userId, player.userId),
             ),
           )
           .limit(1);

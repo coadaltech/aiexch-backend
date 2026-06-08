@@ -561,7 +561,7 @@ export const casinoGames = pgTable("casino_games", {
 // raw payloads from Ace's exposure/settlement/rollback) are no longer kept;
 // `rawPayload` here stores the original bet object so disputes can still
 // reconstruct what the provider sent.
-export const casinoBets = pgTable("casino_bets", {
+export const casinoTransactions = pgTable("casino_transactions", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
@@ -613,7 +613,7 @@ export const casinoBets = pgTable("casino_bets", {
   updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 }, (table) => [
-  unique("casino_bets_provider_bet_uniq").on(table.provider, table.providerBetId),
+  unique("casino_transactions_provider_bet_uniq").on(table.provider, table.providerBetId),
 ]);
 
 // ── Casino Transaction Logs ──────────────────────────────────────────────────
@@ -650,7 +650,7 @@ export const casinoTransactionLogs = pgTable("casino_transaction_logs", {
 // One row per settlement / rollback callback received from a provider. Used
 // for idempotency (unique on provider + provider_transaction_id) and for
 // keeping the raw payload around for dispute resolution. The per-bet result
-// data lives on casino_bets — this table is the wallet-callback audit log.
+// data lives on casino_transactions — this table is the wallet-callback audit log.
 export const casinoSettlements = pgTable("casino_settlements", {
   id: uuid("id").primaryKey().defaultRandom(),
   provider: varchar("provider", { length: 20 }).notNull(),

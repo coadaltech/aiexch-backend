@@ -16,7 +16,7 @@ import { broadcastLedgerSnapshot } from "../services/casino/broadcast-ledger";
  * Bet-placement model:
  *   /accounts/exposure  (Exposure model — production)
  *   /accounts/transactions/debit  (Seamless model — kept for compat)
- *       → For each bet in the request we insert one row into casino_bets +
+ *       → For each bet in the request we insert one row into casino_transactions +
  *         casino_transaction_logs + casino_transaction_commissions, and
  *         deduct the stake from ledger_limit (final_limit). Idempotent on
  *         (provider, provider_bet_id) via the UNIQUE constraint.
@@ -289,8 +289,8 @@ function buildWalletPlugin(name: string, prefix: string, apiKey: string) {
 
       // ── POST /accounts/settlement ──────────────────────────────────────
       // For each player settlement, call casino_declare_round which:
-      //   - flips casino_bets.status (matched → won/lost/void/cancelled)
-      //   - fills casino_bets.payout, settled_amount, outcome, settled_at
+      //   - flips casino_transactions.status (matched → won/lost/void/cancelled)
+      //   - fills casino_transactions.payout, settled_amount, outcome, settled_at
       //   - credits ledger_limit.user_balance by SUM(payout - stake)
       //   - inserts a casino_settlements audit row (idempotent on
       //     (provider, provider_transaction_id))

@@ -1076,7 +1076,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
           cb.status                             AS "status",
           cb.placed_at                          AS "placedAt",
           ctl.ip_address                        AS "ipAddress"
-        FROM casino_bets cb
+        FROM casino_transactions cb
         LEFT JOIN casino_transaction_logs ctl ON ctl.casino_bet_id = cb.id
         WHERE cb.user_id = ${userId}::uuid
           AND cb.status = 'matched'
