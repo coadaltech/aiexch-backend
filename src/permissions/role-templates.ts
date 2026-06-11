@@ -60,7 +60,7 @@ export const OPERATIONS_FULL_TEMPLATE_KEY = "operations_full";
  *   - routes/owner/whitelabels.ts    → create/edit/delete/assign (list is open)
  *   - routes/owner/matka.ts          → ownerOnly applied to shift/result mutations
  *   - routes/owner/jambo.ts          → ditto
- *   - routes/owner/kalyan-new.ts     → ditto
+ *   - routes/owner/bombay-bazar.ts     → ditto
  *   - routes/owner/settings.ts       → no role guard at API level (UI hides it)
  */
 const OWNER_ONLY_KEYS_PRE_RBAC: string[] = [
@@ -73,10 +73,10 @@ const OWNER_ONLY_KEYS_PRE_RBAC: string[] = [
   "currency.create", "currency.edit", "currency.delete", "currency.set_rates",
   // Whitelabels — list stays open, mutations Owner-only
   "whitelabels.create", "whitelabels.edit", "whitelabels.delete", "whitelabels.assign_admin",
-  // Matka / Jambo / Kalyan — view stays open, shift CRUD Owner-only
+  // Matka / Jambo / Bombay Bazar — view stays open, shift CRUD Owner-only
   "matka.create", "matka.edit", "matka.delete", "matka.reorder",
   "jambo.create", "jambo.edit", "jambo.delete", "jambo.reorder",
-  "kalyan.create", "kalyan.edit", "kalyan.delete", "kalyan.reorder",
+  "bombay-bazar.create", "bombay-bazar.edit", "bombay-bazar.delete", "bombay-bazar.reorder",
   // Live prediction / sports result — UI shows them as Owner-only, declaring
   // results affects accounting. Conservatively keep the declare/edit verbs
   // out of the backfill set so existing admins can't suddenly post results.
@@ -106,7 +106,7 @@ export const ROLE_TEMPLATES: StaffRoleTemplate[] = [
     templateKey: OPERATIONS_FULL_TEMPLATE_KEY,
     name: "Operations Full Access",
     description:
-      "Auto-assigned to existing Admin/Super/Master/Agent users during the migration to preserve their pre-RBAC behavior, plus the ability to manage their own staff. Excludes Owner-only operations (marketing, currency mutations, whitelabel mutations, matka/jambo/kalyan shift CRUD, result declaration).",
+      "Auto-assigned to existing Admin/Super/Master/Agent users during the migration to preserve their pre-RBAC behavior, plus the ability to manage their own staff. Excludes Owner-only operations (marketing, currency mutations, whitelabel mutations, matka/jambo/bombay-bazar shift CRUD, result declaration).",
     scopeRole: UserRole.Admin,
     // Staff management is scoped to the caller's own staff (parent_user_id = caller),
     // so it's safe to include for every tier — admins can manage *their* staff,
@@ -129,7 +129,7 @@ export const ROLE_TEMPLATES: StaffRoleTemplate[] = [
         "Custom Markets",
         "Matka",
         "Jambo",
-        "Kalyan",
+        "Bombay Bazar",
       ]),
     ],
   },

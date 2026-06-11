@@ -15,13 +15,13 @@ import { app_middleware } from "../middleware/auth";
 import { parseUserAgent } from "../utils/parse-ua";
 import { RecordStatus, UserRole, MatkaSportType } from "../types/enums";
 import {
-  KALYAN_PANA_SET,
+  BOMBAY_BAZAR_PANA_SET,
   isSinglePana,
   isDoublePana,
   isTriplePana,
-} from "../utils/kalyan-panas";
+} from "../utils/bombay-bazar-panas";
 
-// ── Kalyan-New number-type enum ─────────────────────────────────────────────
+// ── Bombay Bazar number-type enum ─────────────────────────────────────────────
 //   0 - single pana   (3 different digits, e.g. 128)
 //   1 - double pana   (2 same + 1 different, e.g. 119, 577)
 //   2 - triple pana   (3 same digits, e.g. 333, 000)
@@ -30,7 +30,7 @@ import {
 //   5 - akhar andar   (0-9)
 //   6 - sangam        (opening pana + closing pana, stored as concat "OOOCCC")
 
-function validateKalyanNewNumber(numberType: number, raw: string): string | null {
+function validateBombayBazarNumber(numberType: number, raw: string): string | null {
   if (typeof raw !== "string") return "Invalid number";
   const s = raw.trim();
   if (!s) return "Number required";
@@ -40,12 +40,12 @@ function validateKalyanNewNumber(numberType: number, raw: string): string | null
     case 0:
       if (s.length !== 3) return "Single pana must be 3 digits";
       if (!isSinglePana(s)) return "Not a valid single pana";
-      if (!KALYAN_PANA_SET.has(s)) return "Pana not in master list";
+      if (!BOMBAY_BAZAR_PANA_SET.has(s)) return "Pana not in master list";
       return null;
     case 1:
       if (s.length !== 3) return "Double pana must be 3 digits";
       if (!isDoublePana(s)) return "Not a valid double pana";
-      if (!KALYAN_PANA_SET.has(s)) return "Pana not in master list";
+      if (!BOMBAY_BAZAR_PANA_SET.has(s)) return "Pana not in master list";
       return null;
     case 2:
       if (s.length !== 3) return "Triple pana must be 3 digits";
@@ -66,8 +66,8 @@ function validateKalyanNewNumber(numberType: number, raw: string): string | null
       if (s.length !== 6) return "Sangam must be 6 digits (open+close)";
       const open = s.slice(0, 3);
       const close = s.slice(3, 6);
-      if (!KALYAN_PANA_SET.has(open)) return "Sangam opening pana not in master list";
-      if (!KALYAN_PANA_SET.has(close)) return "Sangam closing pana not in master list";
+      if (!BOMBAY_BAZAR_PANA_SET.has(open)) return "Sangam opening pana not in master list";
+      if (!BOMBAY_BAZAR_PANA_SET.has(close)) return "Sangam closing pana not in master list";
       return null;
     }
     default:
@@ -75,9 +75,9 @@ function validateKalyanNewNumber(numberType: number, raw: string): string | null
   }
 }
 
-export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
+export const bombayBazarRoutes = new Elysia({ prefix: "/bombay-bazar" })
 
-  // ── Public: list active kalyan-new shifts (mirrors jambo's listing rules) ─
+  // ── Public: list active bombay-bazar shifts (mirrors jambo's listing rules) ─
   .get("/shifts", async ({ set, query }) => {
     try {
       const dateFilter = query?.date || new Date().toISOString().split("T")[0];
@@ -89,7 +89,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
           and(
             eq(matkaShifts.isActive, true),
             eq(matkaShifts.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
             eq(matkaShifts.shiftDate, dateFilter)
           )
         )
@@ -106,7 +106,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
           and(
             eq(matkaShifts.isActive, true),
             eq(matkaShifts.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
             eq(matkaShifts.shiftDate, yesterdayStr),
             eq(matkaShifts.nextDayAllow, true)
           )
@@ -129,7 +129,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
           and(
             eq(matkaShifts.isActive, true),
             eq(matkaShifts.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
             eq(matkaShifts.shiftDate, "1970-01-01")
           )
         )
@@ -180,7 +180,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   })
 
-  // ── Public: single kalyan-new shift ──────────────────────────────────────
+  // ── Public: single bombay-bazar shift ──────────────────────────────────────
   .get("/shifts/:id", async ({ params, set }) => {
     try {
       const [shift] = await db
@@ -189,7 +189,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
         .where(
           and(
             eq(matkaShifts.id, params.id),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
             eq(matkaShifts.recordStatus, RecordStatus.Active)
           )
         );
@@ -209,7 +209,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   })
 
-  // ── Public: aggregated jantri totals for a kalyan-new shift ──────────────
+  // ── Public: aggregated jantri totals for a bombay-bazar shift ──────────────
   .get("/shifts/:id/jantri", async ({ params, set }) => {
     try {
       const totals = await db
@@ -228,7 +228,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
         .where(
           and(
             eq(matkaTransactions.shiftId, params.id),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
             eq(matkaTransactionDetails.recordStatus, RecordStatus.Active)
           )
@@ -259,7 +259,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
     };
   })
 
-  // ── Place kalyan-new bet ─────────────────────────────────────────────────
+  // ── Place bombay-bazar bet ─────────────────────────────────────────────────
   .post(
     "/place",
     async ({ body, userId, set, request }) => {
@@ -277,7 +277,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
         }
 
         for (const bet of bets) {
-          const err = validateKalyanNewNumber(bet.numberType, bet.number);
+          const err = validateBombayBazarNumber(bet.numberType, bet.number);
           if (err) {
             set.status = 400;
             return { success: false, error: `${err} (got ${bet.number})` };
@@ -301,7 +301,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
             and(
               eq(matkaShifts.id, shiftId),
               eq(matkaShifts.isActive, true),
-              eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+              eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
               eq(matkaShifts.recordStatus, RecordStatus.Active)
             )
           );
@@ -390,7 +390,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
           }
         }
 
-        // Kalyan-New rate routing by numberType:
+        // Bombay Bazar rate routing by numberType:
         //   0 single pana → singlePanaRate
         //   1 double pana → doublePanaRate
         //   2 triple pana → tripleRate
@@ -606,7 +606,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   )
 
-  // ── User's own kalyan-new bet history ────────────────────────────────────
+  // ── User's own bombay-bazar bet history ────────────────────────────────────
   .get("/my-bets", async ({ userId, set, query }) => {
     try {
       const today = new Date().toISOString().split("T")[0];
@@ -616,7 +616,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
       const whereConditions: any[] = [
         eq(matkaTransactions.userId, userId),
         eq(matkaTransactions.recordStatus, RecordStatus.Active),
-        eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+        eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
       ];
 
       if (filterShiftId) {
@@ -657,7 +657,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   })
 
-  // ── Single kalyan-new transaction ────────────────────────────────────────
+  // ── Single bombay-bazar transaction ────────────────────────────────────────
   .get("/transactions/:id", async ({ params, userId, set }) => {
     try {
       const [txn] = await db
@@ -682,7 +682,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
             eq(matkaTransactions.id, params.id),
             eq(matkaTransactions.userId, userId),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew)
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar)
           )
         );
 
@@ -718,7 +718,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   })
 
-  // ── Soft-delete a kalyan-new transaction ─────────────────────────────────
+  // ── Soft-delete a bombay-bazar transaction ─────────────────────────────────
   .delete("/transactions/:id", async ({ params, userId, set }) => {
     try {
       const [txn] = await db
@@ -730,7 +730,7 @@ export const kalyanNewRoutes = new Elysia({ prefix: "/kalyan-new" })
             eq(matkaTransactions.id, params.id),
             eq(matkaTransactions.userId, userId),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew)
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar)
           )
         );
 

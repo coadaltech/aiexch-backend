@@ -26,7 +26,7 @@ export type PermissionGroup =
   | "Custom Markets"
   | "Matka"
   | "Jambo"
-  | "Kalyan"
+  | "Bombay Bazar"
   | "Home Sections"
   | "Marketing"
   | "Vouchers"
@@ -110,12 +110,12 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "jambo.delete", group: "Jambo", label: "Delete Jambo Shift", description: "Delete jambo shift" },
   { key: "jambo.reorder", group: "Jambo", label: "Reorder Jambo", description: "Reorder jambo shifts" },
 
-  // ── Kalyan ────────────────────────────────────────────────────────────────
-  { key: "kalyan.view", group: "Kalyan", label: "View Kalyan", description: "View kalyan-new shifts" },
-  { key: "kalyan.create", group: "Kalyan", label: "Create Kalyan Shift", description: "Add a kalyan shift" },
-  { key: "kalyan.edit", group: "Kalyan", label: "Edit Kalyan Shift", description: "Edit kalyan shift" },
-  { key: "kalyan.delete", group: "Kalyan", label: "Delete Kalyan Shift", description: "Delete kalyan shift" },
-  { key: "kalyan.reorder", group: "Kalyan", label: "Reorder Kalyan", description: "Reorder kalyan shifts" },
+  // ── Bombay Bazar ────────────────────────────────────────────────────────────────
+  { key: "bombay-bazar.view", group: "Bombay Bazar", label: "View Bombay Bazar", description: "View bombay-bazar shifts" },
+  { key: "bombay-bazar.create", group: "Bombay Bazar", label: "Create Bombay Bazar Shift", description: "Add a bombay-bazar shift" },
+  { key: "bombay-bazar.edit", group: "Bombay Bazar", label: "Edit Bombay Bazar Shift", description: "Edit bombay-bazar shift" },
+  { key: "bombay-bazar.delete", group: "Bombay Bazar", label: "Delete Bombay Bazar Shift", description: "Delete bombay-bazar shift" },
+  { key: "bombay-bazar.reorder", group: "Bombay Bazar", label: "Reorder Bombay Bazar", description: "Reorder bombay-bazar shifts" },
 
   // ── Home Sections ─────────────────────────────────────────────────────────
   { key: "home_sections.view", group: "Home Sections", label: "View Home Sections", description: "View homepage content sections" },
@@ -235,7 +235,7 @@ export const PERMISSION_GROUPS_ORDERED: PermissionGroup[] = [
   "Custom Markets",
   "Matka",
   "Jambo",
-  "Kalyan",
+  "Bombay Bazar",
   "Home Sections",
   "Marketing",
   "Vouchers",

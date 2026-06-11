@@ -1202,7 +1202,7 @@ export const transactionLogsDeclare = pgTable("transaction_logs_declare", {
 // ── Matka Shifts ────────────────────────────────────────────────────────────
 // `sport_type` differentiates shift families that share this table:
 //   1001 = Matka (numbers 1-100), 1004 = Jambo (numbers 1-1000),
-//   1005 = Kalyan-New (declares twice a day → closing_time + sangam/pana rates).
+//   1005 = Bombay Bazar (declares twice a day → closing_time + sangam/pana rates).
 export const matkaShifts = pgTable("matka_shifts", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 100 }).notNull(),
@@ -1210,15 +1210,15 @@ export const matkaShifts = pgTable("matka_shifts", {
   shiftDate: date("shift_date").notNull(),
   endTime: varchar("end_time", { length: 30 }).notNull(),        // e.g. "14:00"
   shiftOrder: integer("shift_order").default(0).notNull(),
-  // Matka: dara=main (1-100). Jambo: dara=jodi (1,2). Kalyan-New: dara=jodi. akhar shared.
+  // Matka: dara=main (1-100). Jambo: dara=jodi (1,2). Bombay Bazar: dara=jodi. akhar shared.
   daraRate: decimal("dara_rate", { precision: 10, scale: 2 }).default("0").notNull(),
   daraCommission: decimal("dara_commission", { precision: 10, scale: 2 }).default("0").notNull(),
   akharRate: decimal("akhar_rate", { precision: 10, scale: 2 }).default("0").notNull(),
   akharCommission: decimal("akhar_commission", { precision: 10, scale: 2 }).default("0").notNull(),
-  // Jambo: triple (number_type 0). Kalyan-New: triple pana. Unused for matka.
+  // Jambo: triple (number_type 0). Bombay Bazar: triple pana. Unused for matka.
   tripleRate: decimal("triple_rate", { precision: 10, scale: 2 }).default("0").notNull(),
   tripleCommission: decimal("triple_commission", { precision: 10, scale: 2 }).default("0").notNull(),
-  // Kalyan-New only — additional rate buckets and the second (closing) result time.
+  // Bombay Bazar only — additional rate buckets and the second (closing) result time.
   singlePanaRate: decimal("single_pana_rate", { precision: 10, scale: 2 }).default("0").notNull(),
   singlePanaCommission: decimal("single_pana_commission", { precision: 10, scale: 2 }).default("0").notNull(),
   doublePanaRate: decimal("double_pana_rate", { precision: 10, scale: 2 }).default("0").notNull(),
@@ -1277,8 +1277,8 @@ export const matkaTransactionDetails = pgTable("matka_transaction_details", {
   transactionId: uuid("transaction_id")
     .references(() => matkaTransactions.id, { onDelete: "no action" })
     .notNull(),
-  numberType: integer("number_type").notNull(),                   // 1=main, 2/3=akhar, plus jambo 0-5 and kalyan-new 0-6
-  number: varchar("number", { length: 10 }).notNull(),            // matka "1"-"100" / "A0"-"B9", jambo "1"-"1000", kalyan-new sangam "OOOCCC" (6)
+  numberType: integer("number_type").notNull(),                   // 1=main, 2/3=akhar, plus jambo 0-5 and bombay-bazar 0-6
+  number: varchar("number", { length: 10 }).notNull(),            // matka "1"-"100" / "A0"-"B9", jambo "1"-"1000", bombay-bazar sangam "OOOCCC" (6)
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
   rate: decimal("rate", { precision: 10, scale: 2 }).notNull(),
   commission: decimal("commission", { precision: 10, scale: 2 }).default("0").notNull(),

@@ -19,7 +19,7 @@ import { RedisGCService } from "@services/redis-gc-service";
 import { seriesRoutes } from "./routes/series-route";
 import { matkaRoutes } from "./routes/matka";
 import { jamboRoutes } from "./routes/jambo";
-import { kalyanNewRoutes } from "./routes/kalyan-new";
+import { bombayBazarRoutes } from "./routes/bombay-bazar";
 import { qtechRoutes } from "./routes/qtech";
 import { qtechGamesRoutes } from "./routes/qtech-games";
 import { casinoWalletStubRoutes } from "./routes/casino-wallet-stub";
@@ -98,7 +98,7 @@ const app = new Elysia()
   .use(websocketRoutes)
   .use(matkaRoutes)
   .use(jamboRoutes)
-  .use(kalyanNewRoutes)
+  .use(bombayBazarRoutes)
   .use(qtechGamesRoutes)
   .use(qtechRoutes)
   .use(casinoWalletStubRoutes)

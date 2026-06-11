@@ -20,7 +20,7 @@ const SPORT_ID_REMAPPINGS: Record<number, number> = {
 // SPORT_DISPLAY_NAME_OVERRIDES in lib/sports-config.ts — keep the two in sync.
 const SPORT_NAME_OVERRIDES: Record<number, string> = {
   500: "Election", // was "Politics"
-  1005: "Bombay Bazar", // was "Kalyan-New"
+  1005: "Bombay Bazar", // was "Bombay Bazar"
 };
 
 const applyNameOverride = (sportId: number, name: string): string =>
@@ -458,7 +458,7 @@ export const startCronJobs = async () => {
   //   { timezone: "UTC" },
   // );
 
-  // Manual sports (matka, jambo, lottery, kalyan-new, etc.): every 12 hours
+  // Manual sports (matka, jambo, lottery, bombay-bazar, etc.): every 12 hours
   // Safe to run on cron — preserves is_active on existing rows.
   cron.schedule(
     "0 */12 * * *",

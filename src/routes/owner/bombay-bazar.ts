@@ -10,27 +10,27 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { RecordStatus, MatkaSportType } from "../../types/enums";
 import { requirePermission } from "../../middleware/permissions";
 
-// Pre-RBAC: shift CRUD was Owner-only. OPS_FULL backfill excludes kalyan.* CRUD.
-const canCreateShift = requirePermission("kalyan.create");
-const canEditShift = requirePermission("kalyan.edit");
-const canDeleteShift = requirePermission("kalyan.delete");
-const canReorderShifts = requirePermission("kalyan.reorder");
+// Pre-RBAC: shift CRUD was Owner-only. OPS_FULL backfill excludes bombay-bazar.* CRUD.
+const canCreateShift = requirePermission("bombay-bazar.create");
+const canEditShift = requirePermission("bombay-bazar.edit");
+const canDeleteShift = requirePermission("bombay-bazar.delete");
+const canReorderShifts = requirePermission("bombay-bazar.reorder");
 
-// Kalyan-New rate mapping (sport_type = 1005):
-//   singlePanaRate / doublePanaRate / sangamRate → kalyan-new only columns
+// Bombay Bazar rate mapping (sport_type = 1005):
+//   singlePanaRate / doublePanaRate / sangamRate → bombay-bazar only columns
 //   tripleRate  → triple pana
 //   daraRate    → jodi
 //   akharRate   → akhar
 //   mainJantriTime → opening result time
-//   closingTime    → closing result time (kalyan-new only, nullable)
-export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
+//   closingTime    → closing result time (bombay-bazar only, nullable)
+export const bombayBazarOwnerRoutes = new Elysia({ prefix: "/bombay-bazar" })
 
-  // ── List all kalyan-new shifts ───────────────────────────────────────────
+  // ── List all bombay-bazar shifts ───────────────────────────────────────────
   .get("/shifts", async ({ set, query }) => {
     try {
       const conditions = [
         eq(matkaShifts.recordStatus, RecordStatus.Active),
-        eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+        eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
       ];
 
       if (query?.date) {
@@ -53,7 +53,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   })
 
-  // ── Create kalyan-new shift (owner only) ─────────────────────────────────
+  // ── Create bombay-bazar shift (owner only) ─────────────────────────────────
   .post(
     "/shifts",
     async ({ body, set, userId }: any) => {
@@ -64,7 +64,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
           .where(
             and(
               eq(matkaShifts.recordStatus, RecordStatus.Active),
-              eq(matkaShifts.sportType, MatkaSportType.KalyanNew)
+              eq(matkaShifts.sportType, MatkaSportType.BombayBazar)
             )
           );
 
@@ -74,7 +74,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
           .insert(matkaShifts)
           .values({
             name: body.name,
-            sportType: MatkaSportType.KalyanNew,
+            sportType: MatkaSportType.BombayBazar,
             shiftDate: body.shiftDate,
             endTime: body.endTime,
             shiftOrder: nextOrder,
@@ -137,7 +137,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   )
 
-  // ── Reorder kalyan-new shifts (bulk) ─────────────────────────────────────
+  // ── Reorder bombay-bazar shifts (bulk) ─────────────────────────────────────
   .put(
     "/shifts/reorder",
     async ({ body, set, userId }: any) => {
@@ -152,7 +152,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
             .where(
               and(
                 eq(matkaShifts.id, item.id),
-                eq(matkaShifts.sportType, MatkaSportType.KalyanNew)
+                eq(matkaShifts.sportType, MatkaSportType.BombayBazar)
               )
             )
         );
@@ -181,7 +181,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   )
 
-  // ── Update kalyan-new shift ──────────────────────────────────────────────
+  // ── Update bombay-bazar shift ──────────────────────────────────────────────
   .put(
     "/shifts/:id",
     async ({ body, params, set, userId }: any) => {
@@ -192,7 +192,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
           .where(
             and(
               eq(matkaShifts.id, params.id),
-              eq(matkaShifts.sportType, MatkaSportType.KalyanNew)
+              eq(matkaShifts.sportType, MatkaSportType.BombayBazar)
             )
           );
 
@@ -270,7 +270,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
     }
   )
 
-  // ── Soft delete kalyan-new shift ─────────────────────────────────────────
+  // ── Soft delete bombay-bazar shift ─────────────────────────────────────────
   .delete(
     "/shifts/:id",
     async ({ params, set, userId }: any) => {
@@ -284,7 +284,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
           .where(
             and(
               eq(matkaShifts.id, params.id),
-              eq(matkaShifts.sportType, MatkaSportType.KalyanNew)
+              eq(matkaShifts.sportType, MatkaSportType.BombayBazar)
             )
           )
           .returning();
@@ -306,7 +306,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
     { beforeHandle: canDeleteShift }
   )
 
-  // ── Aggregated jantri summary for a kalyan-new shift ─────────────────────
+  // ── Aggregated jantri summary for a bombay-bazar shift ─────────────────────
   .get("/shifts/:id/jantri", async ({ params, set }) => {
     try {
       const totals = await db
@@ -328,7 +328,7 @@ export const kalyanNewOwnerRoutes = new Elysia({ prefix: "/kalyan-new" })
         .where(
           and(
             eq(matkaTransactions.shiftId, params.id),
-            eq(matkaShifts.sportType, MatkaSportType.KalyanNew),
+            eq(matkaShifts.sportType, MatkaSportType.BombayBazar),
             eq(matkaTransactions.recordStatus, RecordStatus.Active),
             eq(matkaTransactionDetails.recordStatus, RecordStatus.Active)
           )
