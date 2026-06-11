@@ -19,7 +19,7 @@
 --   var_bets                     jsonb    — [{provider_bet_id, outcome, pl}, ...]
 --   var_raw_payload              jsonb    — original settlement item, for audit
 --
--- Per-bet effect on casino_bets:
+-- Per-bet effect on casino_transactions:
 --   WON       → status='won',       payout = exposure + pl, settled_amount = pl
 --   LOST      → status='lost',      payout = 0,             settled_amount = pl  (negative)
 --   VOIDED    → status='void',      payout = exposure,      settled_amount = 0
@@ -75,9 +75,9 @@ BEGIN
       FROM users
      WHERE id = var_user_id;
 
-    -- ── 1. Update casino_bets per bet outcome. Payout is computed from
+    -- ── 1. Update casino_transactions per bet outcome. Payout is computed from
     -- exposure (the worst-case liability we held on placement), not stake.
-    UPDATE casino_bets cb
+    UPDATE casino_transactions cb
        SET status = (CASE upper(b.outcome)
                         WHEN 'WON' THEN 'won'
                         WHEN 'LOST' THEN 'lost'
@@ -109,7 +109,7 @@ BEGIN
         COALESCE(SUM(b.pl), 0),
         MAX(cb.game_name)
       INTO varTotalPl, varGameName
-      FROM casino_bets cb
+      FROM casino_transactions cb
       JOIN jsonb_to_recordset(var_bets)
             AS b(provider_bet_id varchar, outcome varchar, pl numeric)
         ON cb.provider_bet_id = b.provider_bet_id
@@ -169,7 +169,7 @@ BEGIN
                COALESCE(ctc.super_percent, 0)  AS super_percent,
                COALESCE(ctc.admin_percent, 0)  AS admin_percent,
                COALESCE(ctc.owner_percent, 0)  AS owner_percent
-          FROM casino_bets cb
+          FROM casino_transactions cb
           JOIN casino_transaction_commissions ctc
             ON ctc.casino_bet_id = cb.id
            AND COALESCE(ctc.record_status, 0) = 0
