@@ -4,17 +4,28 @@ import {
   matkaShifts,
   matkaTransactions,
   matkaTransactionDetails,
+  declareResult,
   SYSTEM_USER_ID,
 } from "../../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { RecordStatus, MatkaSportType } from "../../types/enums";
 import { requirePermission } from "../../middleware/permissions";
 
+// Highest jambo number. Triple bets span 1..1000; the live-prediction grid and
+// the declared result share this range. Jodi/akhar bets are folded into the
+// same 1..1000 space by the zambo SQL functions, so the UI only ever deals
+// with this single number axis.
+const JAMBO_MAX_NUMBER = 1000;
+
 // Pre-RBAC: shift CRUD was Owner-only. OPS_FULL backfill excludes jambo.* CRUD.
 const canCreateShift = requirePermission("jambo.create");
 const canEditShift = requirePermission("jambo.edit");
 const canDeleteShift = requirePermission("jambo.delete");
 const canReorderShifts = requirePermission("jambo.reorder");
+// Reuse the existing matka live-prediction declare permission so no new RBAC
+// key has to be seeded. Owners bypass it; staff explicitly granted it can
+// declare for both games.
+const canDeclarePrediction = requirePermission("live_prediction.declare");
 
 export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
 
@@ -310,6 +321,375 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
       return {
         success: false,
         error: error instanceof Error ? error.message : "Failed to fetch jantri",
+      };
+    }
+  })
+
+  // ── Live Prediction: per-number sale / profit + declared count ────────────
+  // Data comes entirely from the SQL function get_zambo_sel_preductiondata_allnumber
+  // (defined in triggers/all_jambo_procedures.sql) — no hand-written row SQL.
+  .get("/live-prediction/:shiftId", async ({ params, set }: any) => {
+    try {
+      const [shift] = await db
+        .select()
+        .from(matkaShifts)
+        .where(
+          and(
+            eq(matkaShifts.id, params.shiftId),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo)
+          )
+        );
+
+      if (!shift) {
+        set.status = 404;
+        return { success: false, error: "Shift not found" };
+      }
+
+      // Returns (shift_id, nums, amount, profit, declare_count) for nums 1..1000.
+      let predictionRows: any[] = [];
+      try {
+        const pr = await db.execute(sql`
+          SELECT nums, amount::text AS sale, profit::text AS profit, declare_count
+          FROM public.get_zambo_sel_preductiondata_allnumber(
+            ${params.shiftId}::uuid, ${shift.shiftDate}::date
+          )
+        `);
+        predictionRows = (pr as any).rows ?? pr;
+      } catch (e) {
+        console.error("[jambo live-prediction] prediction function call failed:", e);
+      }
+
+      // Always return a full 1..1000 grid; numbers with no bets fill with zeros.
+      const byNum = new Map<number, any>();
+      for (const r of predictionRows) byNum.set(Number(r.nums), r);
+      const numbers = Array.from({ length: JAMBO_MAX_NUMBER }, (_, i) => {
+        const n = i + 1;
+        const r = byNum.get(n);
+        return {
+          nums: n,
+          sale: r?.sale ?? "0",
+          profit: r?.profit ?? "0",
+          declared_count: Number(r?.declare_count ?? 0),
+        };
+      });
+
+      return { success: true, data: { shift, numbers } };
+    } catch (error) {
+      console.error("[jambo live-prediction] failed:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch live prediction",
+      };
+    }
+  })
+
+  // ── Live Prediction: party (user) breakdown for a single number ───────────
+  // Backed by get_zambo_sel_user_sale_profit — returns per-user sale, owner
+  // P&L, and the recent win/lose streak (mirrors matka's whitelabels endpoint).
+  .get(
+    "/live-prediction/:shiftId/whitelabels",
+    async ({ params, query, set }: any) => {
+      try {
+        const num = Number(query?.nums);
+        if (!Number.isInteger(num) || num < 1 || num > JAMBO_MAX_NUMBER) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `Invalid number (must be 1-${JAMBO_MAX_NUMBER})`,
+          };
+        }
+
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(
+            and(
+              eq(matkaShifts.id, params.shiftId),
+              eq(matkaShifts.sportType, MatkaSportType.Jambo)
+            )
+          );
+
+        if (!shift) {
+          set.status = 404;
+          return { success: false, error: "Shift not found" };
+        }
+
+        const rows = await db.execute(sql`
+          SELECT
+            user_id::text  AS user_id,
+            name,
+            amount::text   AS sale,
+            profit::text   AS profit,
+            COALESCE(streak, 0)::int AS streak,
+            streak_type
+          FROM public.get_zambo_sel_user_sale_profit(
+            ${params.shiftId}::uuid,
+            ${shift.shiftDate}::date,
+            ${num}
+          )
+        `);
+
+        return { success: true, data: (rows as any).rows ?? rows };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to fetch party breakdown",
+        };
+      }
+    }
+  )
+
+  // ── Live Prediction: per-whitelabel sale for a single number (Agent Group) ──
+  // Backed by get_zambo_sel_whitelabel_sale (mirrors matka's agent-sale endpoint).
+  .get(
+    "/live-prediction/:shiftId/agent-sale",
+    async ({ params, query, set }: any) => {
+      try {
+        const num = Number(query?.nums);
+        if (!Number.isInteger(num) || num < 1 || num > JAMBO_MAX_NUMBER) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `Invalid number (must be 1-${JAMBO_MAX_NUMBER})`,
+          };
+        }
+
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(
+            and(
+              eq(matkaShifts.id, params.shiftId),
+              eq(matkaShifts.sportType, MatkaSportType.Jambo)
+            )
+          );
+
+        if (!shift) {
+          set.status = 404;
+          return { success: false, error: "Shift not found" };
+        }
+
+        const rows = await db.execute(sql`
+          SELECT whitelabel_id::text AS whitelabel_id, name, amount::text AS amount
+          FROM public.get_zambo_sel_whitelabel_sale(
+            ${params.shiftId}::uuid,
+            ${shift.shiftDate}::date,
+            ${num}
+          )
+        `);
+
+        return { success: true, data: (rows as any).rows ?? rows };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to fetch agent sale",
+        };
+      }
+    }
+  )
+
+  // ── Live Prediction: full 1..1000 jantri grid ────────────────────────────
+  // partyId = "all" (or empty) → every user's consolidated grid, served by
+  // get_zambo_sel_preductiondata_allnumber. partyId = a user uuid → just that
+  // user's grid, served by get_user_zambo_jantri. (Mirrors matka's all/party jantri.)
+  .get(
+    "/live-prediction/:shiftId/jantri",
+    async ({ params, query, set }: any) => {
+      try {
+        const partyId = (query?.partyId as string | undefined) ?? "all";
+        const isAll = !partyId || partyId === "all";
+
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(
+            and(
+              eq(matkaShifts.id, params.shiftId),
+              eq(matkaShifts.sportType, MatkaSportType.Jambo)
+            )
+          );
+
+        if (!shift) {
+          set.status = 404;
+          return { success: false, error: "Shift not found" };
+        }
+
+        const rows = isAll
+          ? await db.execute(sql`
+              SELECT nums, amount::text AS sale
+              FROM public.get_zambo_sel_preductiondata_allnumber(
+                ${params.shiftId}::uuid,
+                ${shift.shiftDate}::date
+              )
+            `)
+          : await db.execute(sql`
+              SELECT nums, amount::text AS sale
+              FROM public.get_user_zambo_jantri(
+                ${partyId}::uuid,
+                ${params.shiftId}::uuid,
+                ${shift.shiftDate}::date
+              )
+            `);
+
+        return { success: true, data: (rows as any).rows ?? rows };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to fetch jantri grid",
+        };
+      }
+    }
+  )
+
+  // ── Live Prediction: declare a result for a jambo shift ───────────────────
+  .post(
+    "/live-prediction/:shiftId/declare",
+    async ({ params, body, set, userId }: any) => {
+      try {
+        const num = Number(body.result);
+        if (!Number.isInteger(num) || num < 0 || num > JAMBO_MAX_NUMBER) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `Result must be between 0 and ${JAMBO_MAX_NUMBER}`,
+          };
+        }
+
+        const [shift] = await db
+          .select()
+          .from(matkaShifts)
+          .where(
+            and(
+              eq(matkaShifts.id, params.shiftId),
+              eq(matkaShifts.sportType, MatkaSportType.Jambo)
+            )
+          );
+
+        if (!shift) {
+          set.status = 404;
+          return { success: false, error: "Shift not found" };
+        }
+
+        if (shift.shiftDate === "1970-01-01") {
+          set.status = 400;
+          return {
+            success: false,
+            error: "Result already declared for this shift",
+          };
+        }
+
+        // Server-side enforcement of the main-jantri cutoff (mirrors matka).
+        if (shift.mainJantriTime) {
+          const [jH, jM] = shift.mainJantriTime.split(":").map(Number);
+          const jantriAt = new Date(shift.shiftDate);
+          jantriAt.setHours(jH, jM, 0, 0);
+          if (shift.nextDayAllow) {
+            jantriAt.setDate(jantriAt.getDate() + 1);
+          }
+          const msLeft = jantriAt.getTime() - Date.now();
+          if (msLeft > 0) {
+            set.status = 400;
+            return {
+              success: false,
+              error: "Main jantri time not reached",
+              msLeft,
+              mainJantriAt: jantriAt.toISOString(),
+            };
+          }
+        }
+
+        // Full jambo declare flow: creates vouchers + voucher_details, archives
+        // matka_transactions* rows into their _declare counterparts, deletes the
+        // live rows, and inserts declare_result. Defined in
+        // triggers/all_jambo_procedures.sql.
+        await db.execute(sql`
+          CALL public.declare_process_zambo(
+            ${params.shiftId}::uuid,
+            CURRENT_DATE,
+            ${shift.shiftDate}::date,
+            ${num}::int
+          )
+        `);
+
+        // Park the shift at the epoch sentinel — same convention as matka, and
+        // the value the public jambo /shifts route reads to surface the result
+        // (it joins declare_result for shifts parked at 1970-01-01).
+        await db
+          .update(matkaShifts)
+          .set({
+            shiftDate: "1970-01-01",
+            updateBy: userId || SYSTEM_USER_ID,
+          })
+          .where(eq(matkaShifts.id, params.shiftId));
+
+        return { success: true, data: { shiftId: params.shiftId, result: num } };
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          error:
+            error instanceof Error ? error.message : "Failed to declare result",
+        };
+      }
+    },
+    {
+      beforeHandle: canDeclarePrediction,
+      body: t.Object({ result: t.Number() }),
+    }
+  )
+
+  // ── Live Prediction: history of previously declared jambo results ─────────
+  // Read straight from declare_result (joined to the shift for its name) — the
+  // same source the public jambo route uses, so matka's market_results history
+  // is untouched.
+  .get("/live-prediction/declared-history", async ({ query, set }: any) => {
+    try {
+      const limit = Math.min(Number(query?.limit ?? 50), 200);
+      const rows = await db
+        .select({
+          id: declareResult.declareId,
+          runs: declareResult.declareNumber,
+          declared_at: declareResult.addedDate,
+          shift_name: matkaShifts.name,
+          shift_date: declareResult.declareDate,
+          shift_id: declareResult.shiftId,
+        })
+        .from(declareResult)
+        .innerJoin(matkaShifts, eq(declareResult.shiftId, matkaShifts.id))
+        .where(
+          and(
+            eq(declareResult.recordStatus, RecordStatus.Active),
+            eq(matkaShifts.sportType, MatkaSportType.Jambo)
+          )
+        )
+        .orderBy(desc(declareResult.addedDate))
+        .limit(limit);
+
+      return { success: true, data: rows };
+    } catch (error) {
+      set.status = 500;
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch declared history",
       };
     }
   });
