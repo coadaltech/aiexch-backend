@@ -4,6 +4,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
 import { decodeToken, generateTokens } from "@services/token";
 import { getEffectivePermissions } from "@services/permissions";
+import { broadcastForceLogout } from "@services/sports-broadcast";
 import { getCurrentIP } from "@utils/user-ip";
 import { lookupGeo } from "@utils/geo";
 import { parseUserAgent } from "@utils/parse-ua";
@@ -234,6 +235,11 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         const sessionToken = crypto.randomUUID();
         await db.update(users).set({ sessionToken }).where(eq(users.id, user.id));
 
+        // Push an immediate logout to any device already logged in as this user.
+        // Their socket carries the previous session token, so they self-eject the
+        // moment this broadcast lands — no polling or page refresh required.
+        broadcastForceLogout(user.id, sessionToken);
+
         const { accessToken, refreshToken } = generateTokens(
           user.id,
           user.email,
@@ -266,6 +272,11 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             id: user.id,
             username: user.username,
             email: user.email,
+            // Opaque session id (also embedded in the httpOnly JWT). The client
+            // keeps it so its session socket can ignore force-logout broadcasts
+            // that carry this very token (i.e. its own login) and react to ones
+            // that don't (a newer login elsewhere).
+            sessionToken,
             membership: profile?.membership ?? MembershipType.Bronze,
             role: userRole,
             upline: profile?.upline ?? "0.00",

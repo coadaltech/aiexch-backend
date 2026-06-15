@@ -1,114 +1,4 @@
--- FUNCTION: public.get_matka_sel_user_sale_profit(uuid, date, integer)
-
--- DROP FUNCTION IF EXISTS public.get_matka_sel_user_sale_profit(uuid, date, integer);
-
-CREATE OR REPLACE FUNCTION public.get_matka_sel_user_sale_profit(
-	varshift_id uuid,
-	vartransaction_date date,
-	varnumber integer)
-    RETURNS TABLE(user_id uuid, name character varying, amount numeric, profit numeric, totalsale numeric, streak integer, streak_type integer) 
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-    ROWS 1000
-
-AS $BODY$
-BEGIN
-    RETURN QUERY
-	WITH mt AS (
-        SELECT matka_transactions.id,matka_transactions.user_id
-        FROM matka_transactions
-		where matka_transactions.shift_id = varshift_id
-		and matka_transactions.transaction_date = vartransaction_date
-		and matka_transactions.record_status = 0
-    ),
-	-- per-user outcome (won=1, lost=0) for each past declaration on this shift (last 30 days)
-	user_outcomes AS (
-		SELECT
-			mt_h.user_id,
-			dr.declare_id,
-			CASE WHEN SUM(
-				CASE WHEN mtd_h.number_type = 1 THEN
-					(CASE WHEN mtd_h.number::integer = dr.declare_number THEN mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount END)
-				WHEN mtd_h.number_type = 2 THEN
-					(CASE WHEN mtd_h.number::integer = (dr.declare_number % 10) * 111 THEN mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount END)
-				WHEN mtd_h.number_type = 3 THEN
-					(CASE WHEN mtd_h.number::integer = (round((dr.declare_number / 10),0)) * 1111 THEN mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount END)
-				ELSE 0 END
-			) > 0 THEN 1 ELSE 0 END AS won,
-			ROW_NUMBER() OVER (PARTITION BY mt_h.user_id ORDER BY dr.declare_date DESC, dr.declare_id DESC) AS rn
-		FROM declare_result dr
-		JOIN matka_transactions mt_h ON mt_h.shift_id = dr.shift_id
-			AND mt_h.transaction_date = dr.declare_date
-			AND mt_h.record_status = 0
-		JOIN matka_transaction_details mtd_h ON mtd_h.transaction_id = mt_h.id
-			AND mtd_h.record_status = 0
-		WHERE dr.record_status = 0
-			AND dr.shift_id = varshift_id
-			AND dr.declare_date BETWEEN vartransaction_date - INTERVAL '1 months' AND vartransaction_date - INTERVAL '1 days'
-		GROUP BY mt_h.user_id, dr.declare_id, dr.declare_date
-	),
-	-- gaps-and-islands: rn - row_number()OVER(user,won) groups consecutive same-won runs
-	outcomes_ranked AS (
-		SELECT uo.user_id, uo.rn, uo.won,
-			uo.rn - ROW_NUMBER() OVER (PARTITION BY uo.user_id, uo.won ORDER BY uo.rn) AS grp
-		FROM user_outcomes uo
-	),
-	-- pick the run that starts at rn=1 (most recent) → current streak
-	user_streak AS (
-		SELECT oru.user_id,
-			MAX(oru.won)::int AS streak_type,
-			COUNT(*)::int AS streak
-		FROM outcomes_ranked oru
-		WHERE oru.grp = 0
-		GROUP BY oru.user_id
-	)
-    SELECT mt.user_id, users.username
-		,round(sum((case when number_type = 1 then
-			(case when matka_transaction_details.number::integer = varnumber then matka_transaction_details.amount else 0 end)
-		when number_type = 2 then
-			(case when matka_transaction_details.number::integer = (varnumber % 10) * 111 then matka_transaction_details.amount/10 else 0 end)
-		when number_type = 3 then
-			(case when matka_transaction_details.number::integer = (round((varnumber / 10),0)) * 1111 then matka_transaction_details.amount/10 else 0 end)
-		else 0 end)),0) as amount
-
-		-- owner's P&L from this user when varnumber is declared
-		-- user's net P&L is negated so green(+) = owner wins, red(-) = owner pays
-		,- round((sum((case when number_type = 1 then
-			(case when matka_transaction_details.number::integer = varnumber then matka_transaction_details.amount * matka_transaction_details.rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
-		when number_type = 2 then
-			(case when matka_transaction_details.number::integer = (varnumber % 10) * 111 then matka_transaction_details.amount * matka_transaction_details.rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
-		when number_type = 3 then
-			(case when matka_transaction_details.number::integer = (round((varnumber / 10),0)) * 1111 then matka_transaction_details.amount * matka_transaction_details.rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
-		else 0 end)
-	  	* (
-			(mtc.owner_percent)
-		/ 100)
-		)),2) as profit
-
-		,round(sum(matka_transaction_details.amount ),0) as totalsale
-		,COALESCE(us.streak, 0) AS streak
-		,us.streak_type AS streak_type
-	FROM mt
-	join matka_transaction_details on mt.id = matka_transaction_details.transaction_id
-		and matka_transaction_details.record_status = 0
-	join users on users.id = mt.user_id
-	join matka_transaction_commissions mtc on mt.id = mtc.matka_transaction_id
-		and mtc.record_status = 0
-	left join user_streak us on us.user_id = mt.user_id
-	group by mt.user_id, users.username, us.streak, us.streak_type
-	order by amount desc
-	;
-END;
-$BODY$;
-
-ALTER FUNCTION public.get_matka_sel_user_sale_profit(uuid, date, integer)
-    OWNER TO postgres;
-
-
-
-
-CREATE OR REPLACE FUNCTION public.get_matka_sel_preductiondata_allnumber(
+CREATE OR REPLACE FUNCTION public.get_zambo_sel_preductiondata_allnumber(
     varshift_id uuid, 
 	vartransaction_date date
 	
@@ -122,23 +12,35 @@ BEGIN
     RETURN QUERY
     WITH table_num AS (
         SELECT generate_series AS nums
-        FROM generate_series(1, 100)
+        FROM generate_series(1, 1000)
     )
     SELECT varshift_id as shift_id, table_num.nums
-		,round(sum((case when number_type = 1 then 
+		,round(sum((case when number_type = 0 then 
 			(case when matka_transaction_details.number::integer = table_num.nums then matka_transaction_details.amount else 0 end)
+		when number_type = 1 then
+			(case when matka_transaction_details.number::integer = (table_num.nums % 100) then matka_transaction_details.amount/10 else 0 end)
 		when number_type = 2 then
-			(case when matka_transaction_details.number::integer = (table_num.nums % 10) * 111 then matka_transaction_details.amount/10 else 0 end)
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 100) then matka_transaction_details.amount/10 else 0 end)
 		when number_type = 3 then
-			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) * 1111 then matka_transaction_details.amount/10 else 0 end)
+			(case when matka_transaction_details.number::integer = (table_num.nums % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 4 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 100)::int % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 5 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) then matka_transaction_details.amount/100 else 0 end)
 		else 0 end)),0) as amount
 	
-		,- round((sum((case when number_type = 1 then 
+		,- round((sum((case when number_type = 0 then 
 			(case when matka_transaction_details.number::integer = table_num.nums then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 1 then
+			(case when matka_transaction_details.number::integer = (table_num.nums % 100) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
 		when number_type = 2 then
-			(case when matka_transaction_details.number::integer = (table_num.nums % 10) * 111 then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 100) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
 		when number_type = 3 then
-			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) * 1111 then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+			(case when matka_transaction_details.number::integer = (table_num.nums % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 4 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 100)::int % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 5 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
 		else 0 end) 
 	  	* (
 			mtc.owner_percent
@@ -167,57 +69,111 @@ BEGIN
 END;
 $function$;
 
-ALTER function public.get_matka_sel_preductiondata_allnumber(uuid,date)
+ALTER function public.get_zambo_sel_preductiondata_allnumber(uuid,date)
     OWNER TO postgres;
 
 
 
 
+CREATE OR REPLACE FUNCTION public.get_zambo_sel_whitelabel_sale(
+    varshift_id uuid, 
+	vartransaction_date date,
+	varnumber int
+)
+RETURNS TABLE(whitelabel_id uuid, name varchar(255),amount numeric
+)  -- added 'run' column
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY
+	WITH mt AS (
+        SELECT matka_transactions.id,matka_transactions.whitelabel_id 
+        FROM matka_transactions
+		where matka_transactions.shift_id = varshift_id
+		and matka_transactions.transaction_date = vartransaction_date
+		and matka_transactions.record_status = 0
+    )
+    SELECT mt.whitelabel_id, whitelabels.name
+		,round(sum((case when number_type = 0 then 
+			(case when matka_transaction_details.number::integer = varnumber then matka_transaction_details.amount else 0 end)
+		when number_type = 1 then
+			(case when matka_transaction_details.number::integer = (varnumber % 100) then matka_transaction_details.amount/10 else 0 end)
+		when number_type = 2 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 10)::int % 100) then matka_transaction_details.amount/10 else 0 end)
+		when number_type = 3 then
+			(case when matka_transaction_details.number::integer = (varnumber % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 4 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 100)::int % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 5 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 10)::int % 10) then matka_transaction_details.amount/100 else 0 end)
+		else 0 end)),0) as amount
+	
+	FROM mt  
+	join matka_transaction_details on mt.id = matka_transaction_details.transaction_id
+		and matka_transaction_details.record_status = 0
+	join whitelabels on whitelabels.id = mt.whitelabel_id 
+/*
+	join matka_transaction_commissions mtc on mt.id = mtc.matka_transaction_id
+		and mtc.record_status = 0
+*/
+	group by mt.whitelabel_id
+		,whitelabels.name
+	order by amount desc
+	;
+END;
+$function$;
 
-CREATE OR REPLACE FUNCTION public.get_user_matka_jantri_of_whitelabel(
-    varuser_id uuid,
+ALTER function public.get_zambo_sel_whitelabel_sale(uuid,date,int)
+    OWNER TO postgres;
+
+
+CREATE OR REPLACE FUNCTION public.get_user_zambo_jantri_of_whitelabel(
+    varwhitelabel_id uuid,
     varshift_id uuid, 
 	vartransaction_date date
 )
 RETURNS TABLE(whitelabel_id uuid, nums integer,amount numeric, profit numeric)  -- added 'run' column
 LANGUAGE plpgsql
 AS $function$
-DECLARE 
-varwhitelabel_id uuid; 
-varuser_group_type int;
 BEGIN
-
-SELECT users.group_id,users.whitelabel_id
-INTO varuser_group_type , varwhitelabel_id
-FROM users
-WHERE users.id = varuser_id;
-
     RETURN QUERY
     WITH table_num AS (
         SELECT generate_series AS nums
-        FROM generate_series(1, 100)
+        FROM generate_series(1, 1000)
     )
     SELECT varwhitelabel_id as whitelabel_id, table_num.nums
-		,sum((case when number_type = 1 then 
+		,round(sum((case when number_type = 0 then 
 			(case when matka_transaction_details.number::integer = table_num.nums then matka_transaction_details.amount else 0 end)
+		when number_type = 1 then
+			(case when matka_transaction_details.number::integer = (table_num.nums % 100) then matka_transaction_details.amount/10 else 0 end)
 		when number_type = 2 then
-			(case when matka_transaction_details.number::integer = (table_num.nums % 10) * 111 then matka_transaction_details.amount/10 else 0 end)
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 100) then matka_transaction_details.amount/10 else 0 end)
 		when number_type = 3 then
-			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) * 1111 then matka_transaction_details.amount/10 else 0 end)
-		else 0 end)) as amount
+			(case when matka_transaction_details.number::integer = (table_num.nums % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 4 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 100)::int % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 5 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) then matka_transaction_details.amount/100 else 0 end)
+		else 0 end)),0) as amount
 	
-		,- round((sum((case when number_type = 1 then 
-			(case when matka_transaction_details.number::integer = table_num.nums then matka_transaction_details.amount * matka_transaction_details.rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		,- round((sum((case when number_type = 0 then 
+			(case when matka_transaction_details.number::integer = table_num.nums then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 1 then
+			(case when matka_transaction_details.number::integer = (table_num.nums % 100) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
 		when number_type = 2 then
-			(case when matka_transaction_details.number::integer = (table_num.nums % 10) * 111 then matka_transaction_details.amount * matka_transaction_details.rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 100) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
 		when number_type = 3 then
-			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) * 1111 then matka_transaction_details.amount * matka_transaction_details.rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+			(case when matka_transaction_details.number::integer = (table_num.nums % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 4 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 100)::int % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 5 then
+			(case when matka_transaction_details.number::integer = (FLOOR(table_num.nums / 10)::int % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
 		else 0 end) 
 	  	* (
-			(mtc.admin_percent)
+			mtc.admin_percent
 		/ 100)
-		)),2) as profit
-	
+		)),0) as profit
+
 	FROM table_num 
 	join matka_transactions mt on mt.shift_id = varshift_id
 		and mt.record_status = 0
@@ -227,32 +183,19 @@ WHERE users.id = varuser_id;
 		and matka_transaction_details.record_status = 0
 	join matka_transaction_commissions mtc on mt.id = mtc.matka_transaction_id
 		and mtc.record_status = 0
-      and (case when varuser_group_type = 0 then mtc.owner_id = varuser_id
-			  when varuser_group_type = 3 then mtc.admin_id = varuser_id
-			  when varuser_group_type = 4 then mtc.super_id = varuser_id
-			  when varuser_group_type = 5 then mtc.master_id = varuser_id
-			  when varuser_group_type = 6 then mtc.agent_id = varuser_id
-			  when varuser_group_type = 7 then mt.user_id = varuser_id
-			else
-				1<>1
-		end)
-	  and (case when varuser_group_type = 0 then 1=1 else t.whitelabel_id = varwhitelabel_id end) 
 	group by table_num.nums
 	order by table_num.nums
 	;
 END;
 $function$;
 
-ALTER function public.get_user_matka_jantri_of_whitelabel(uuid,uuid,date)
+ALTER function public.get_user_zambo_jantri_of_whitelabel(uuid,uuid,date)
     OWNER TO postgres;
+-- PROCEDURE: public.declare_process_zambo(uuid, date, date, integer)
 
+-- DROP PROCEDURE IF EXISTS public.declare_process_zambo(uuid, date, date, integer);
 
--- call declare_process_matka('00000000-0000-0000-0000-000000000001','2026-01-01','2026-01-01',2)
--- PROCEDURE: public.declare_process_matka(uuid, date, date, integer)
-
--- DROP PROCEDURE IF EXISTS public.declare_process_matka(uuid, date, date, integer);
-
-CREATE OR REPLACE PROCEDURE public.declare_process_matka(
+CREATE OR REPLACE PROCEDURE public.declare_process_zambo(
 	IN varshift_id uuid,
 	IN vardeclare_date date,
 	IN vartransaction_date date,
@@ -308,44 +251,76 @@ BEGIN
 		SELECT
 			tp.user_id,
 			tp.whitelabel_id,			
-			sum((case when number_type = 1 then 
-				(case when td.number::integer = vardeclare_number then amount * rate - amount  else - amount end)
+			sum((case when number_type = 0 then 
+				(case when td.number::integer = vardeclare_number then amount * rate - amount else - amount end)
+			when number_type = 1 then
+				(case when td.number::integer = (vardeclare_number % 100) then amount * rate - amount else - amount end)
 			when number_type = 2 then
-				(case when td.number::integer = (vardeclare_number % 10) * 111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 100) then amount * rate - amount else - amount end)
 			when number_type = 3 then
-				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) * 1111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (vardeclare_number % 10) then amount * rate - amount else - amount end)
+			when number_type = 4 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 100)::integer % 10) then amount * rate - amount else - amount end)
+			when number_type = 5 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) then amount * rate - amount else - amount end)
 			else 0 end)) as net_pl
 			,			
-			SUM((case when number_type = 1 then 
-				(case when td.number::integer = vardeclare_number then amount * rate - amount  else - amount end)
+			sum((case when number_type = 0 then 
+				(case when td.number::integer = vardeclare_number then amount * rate - amount else - amount end)
+			when number_type = 1 then
+				(case when td.number::integer = (vardeclare_number % 100) then amount * rate - amount else - amount end)
 			when number_type = 2 then
-				(case when td.number::integer = (vardeclare_number % 10) * 111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 100) then amount * rate - amount else - amount end)
 			when number_type = 3 then
-				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) * 1111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (vardeclare_number % 10) then amount * rate - amount else - amount end)
+			when number_type = 4 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 100)::integer % 10) then amount * rate - amount else - amount end)
+			when number_type = 5 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) then amount * rate - amount else - amount end)
 			else 0 end)*COALESCE(tp.admin_percent, 0) / 100.0
-			) AS admin_commission,
-			SUM((case when number_type = 1 then 
-				(case when td.number::integer = vardeclare_number then amount * rate - amount  else - amount end)
+			) AS admin_commission
+			,			
+			sum((case when number_type = 0 then 
+				(case when td.number::integer = vardeclare_number then amount * rate - amount else - amount end)
+			when number_type = 1 then
+				(case when td.number::integer = (vardeclare_number % 100) then amount * rate - amount else - amount end)
 			when number_type = 2 then
-				(case when td.number::integer = (vardeclare_number % 10) * 111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 100) then amount * rate - amount else - amount end)
 			when number_type = 3 then
-				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) * 1111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (vardeclare_number % 10) then amount * rate - amount else - amount end)
+			when number_type = 4 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 100)::integer % 10) then amount * rate - amount else - amount end)
+			when number_type = 5 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) then amount * rate - amount else - amount end)
 			else 0 end)*COALESCE(tp.super_percent, 0) / 100.0
-			) AS super_commission,
-			SUM((case when number_type = 1 then 
-				(case when td.number::integer = vardeclare_number then amount * rate - amount  else - amount end)
+			) AS super_commission
+			,
+			sum((case when number_type = 0 then 
+				(case when td.number::integer = vardeclare_number then amount * rate - amount else - amount end)
+			when number_type = 1 then
+				(case when td.number::integer = (vardeclare_number % 100) then amount * rate - amount else - amount end)
 			when number_type = 2 then
-				(case when td.number::integer = (vardeclare_number % 10) * 111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 100) then amount * rate - amount else - amount end)
 			when number_type = 3 then
-				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) * 1111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (vardeclare_number % 10) then amount * rate - amount else - amount end)
+			when number_type = 4 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 100)::integer % 10) then amount * rate - amount else - amount end)
+			when number_type = 5 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) then amount * rate - amount else - amount end)
 			else 0 end)*COALESCE(tp.master_percent, 0) / 100.0
 			) AS master_commission,
-			SUM((case when number_type = 1 then 
-				(case when td.number::integer = vardeclare_number then amount * rate - amount  else - amount end)
+			sum((case when number_type = 0 then 
+				(case when td.number::integer = vardeclare_number then amount * rate - amount else - amount end)
+			when number_type = 1 then
+				(case when td.number::integer = (vardeclare_number % 100) then amount * rate - amount else - amount end)
 			when number_type = 2 then
-				(case when td.number::integer = (vardeclare_number % 10) * 111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 100) then amount * rate - amount else - amount end)
 			when number_type = 3 then
-				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) * 1111 then amount * rate - amount  else - amount end)
+				(case when td.number::integer = (vardeclare_number % 10) then amount * rate - amount else - amount end)
+			when number_type = 4 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 100)::integer % 10) then amount * rate - amount else - amount end)
+			when number_type = 5 then
+				(case when td.number::integer = (FLOOR(vardeclare_number / 10)::integer % 10) then amount * rate - amount else - amount end)
 			else 0 end)*COALESCE(tp.agent_percent, 0) / 100.0
 			) AS agent_commission,
 			tp.owner_id,
@@ -488,7 +463,7 @@ BEGIN
     SELECT
         gen_random_uuid(),
         varVoucherId,
-		(case when master_id is not null then master_id 
+        (case when master_id is not null then master_id 
 			when super_id is not null then super_id 
 			when admin_id is not null then admin_id 
 			when owner_id is not null then owner_id 
@@ -818,5 +793,128 @@ BEGIN
     
 END;
 $BODY$;
-ALTER PROCEDURE public.declare_process_matka(uuid, date, date, integer)
+ALTER PROCEDURE public.declare_process_zambo(uuid, date, date, integer)
+    OWNER TO postgres;
+
+	-- FUNCTION: public.get_zambo_sel_user_sale_profit(uuid, date, integer)
+
+-- DROP FUNCTION IF EXISTS public.get_zambo_sel_user_sale_profit(uuid, date, integer);
+
+CREATE OR REPLACE FUNCTION public.get_zambo_sel_user_sale_profit(
+	varshift_id uuid,
+	vartransaction_date date,
+	varnumber integer)
+    RETURNS TABLE(user_id uuid, name character varying, amount numeric, profit numeric, totalsale numeric, streak integer, streak_type integer) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+BEGIN
+    RETURN QUERY
+	WITH mt AS (
+        SELECT matka_transactions.id,matka_transactions.user_id
+        FROM matka_transactions
+		where matka_transactions.shift_id = varshift_id
+		and matka_transactions.transaction_date = vartransaction_date
+		and matka_transactions.record_status = 0
+    ),
+	-- per-user outcome (won=1, lost=0) for each past declaration on this shift (last 30 days)
+	user_outcomes AS (
+		SELECT
+			mt_h.user_id,
+			dr.declare_id,
+			CASE WHEN SUM(
+				case when mtd_h.number_type = 0 then 
+					(case when mtd_h.number::integer = dr.declare_number then mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount end)
+				when mtd_h.number_type = 1 then
+					(case when mtd_h.number::integer = (dr.declare_number % 100) then mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount end)
+				when mtd_h.number_type = 2 then
+					(case when mtd_h.number::integer = (FLOOR(dr.declare_number / 10)::int % 100) then mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount end)
+				when mtd_h.number_type = 3 then
+					(case when mtd_h.number::integer = (dr.declare_number % 10) then mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount end)
+				when mtd_h.number_type = 4 then
+					(case when mtd_h.number::integer = (FLOOR(dr.declare_number / 100)::int % 10) then mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount end)
+				when mtd_h.number_type = 5 then
+					(case when mtd_h.number::integer = (FLOOR(dr.declare_number / 10)::int % 10) then mtd_h.amount * mtd_h.rate - mtd_h.amount ELSE - mtd_h.amount end)
+				else 0 end
+			) > 0 THEN 1 ELSE 0 END AS won,
+			ROW_NUMBER() OVER (PARTITION BY mt_h.user_id ORDER BY dr.declare_date DESC, dr.declare_id DESC) AS rn
+		FROM declare_result dr
+		JOIN matka_transactions mt_h ON mt_h.shift_id = dr.shift_id
+			AND mt_h.transaction_date = dr.declare_date
+			AND mt_h.record_status = 0
+		JOIN matka_transaction_details mtd_h ON mtd_h.transaction_id = mt_h.id
+			AND mtd_h.record_status = 0
+		WHERE dr.record_status = 0
+			AND dr.shift_id = varshift_id
+			AND dr.declare_date BETWEEN vartransaction_date - INTERVAL '1 months' AND vartransaction_date - INTERVAL '1 days'
+		GROUP BY mt_h.user_id, dr.declare_id, dr.declare_date
+	),
+	-- gaps-and-islands: rn - row_number()OVER(user,won) groups consecutive same-won runs
+	outcomes_ranked AS (
+		SELECT uo.user_id, uo.rn, uo.won,
+			uo.rn - ROW_NUMBER() OVER (PARTITION BY uo.user_id, uo.won ORDER BY uo.rn) AS grp
+		FROM user_outcomes uo
+	),
+	-- pick the run that starts at rn=1 (most recent) → current streak
+	user_streak AS (
+		SELECT oru.user_id,
+			MAX(oru.won)::int AS streak_type,
+			COUNT(*)::int AS streak
+		FROM outcomes_ranked oru
+		WHERE oru.grp = 0
+		GROUP BY oru.user_id
+	)
+    SELECT mt.user_id, users.username
+		,round(sum((case when number_type = 0 then 
+			(case when matka_transaction_details.number::integer = varnumber then matka_transaction_details.amount else 0 end)
+		when number_type = 1 then
+			(case when matka_transaction_details.number::integer = (varnumber % 100) then matka_transaction_details.amount/10 else 0 end)
+		when number_type = 2 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 10)::int % 100) then matka_transaction_details.amount/10 else 0 end)
+		when number_type = 3 then
+			(case when matka_transaction_details.number::integer = (varnumber % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 4 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 100)::int % 10) then matka_transaction_details.amount/100 else 0 end)
+		when number_type = 5 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 10)::int % 10) then matka_transaction_details.amount/100 else 0 end)
+		else 0 end)),0) as amount
+	
+		,- round((sum((case when number_type = 0 then 
+			(case when matka_transaction_details.number::integer = varnumber then matka_transaction_details.amount * rate - matka_transaction_details.amount  else - matka_transaction_details.amount end)
+		when number_type = 1 then
+			(case when matka_transaction_details.number::integer = (varnumber % 100) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 2 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 10)::int % 100) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 3 then
+			(case when matka_transaction_details.number::integer = (varnumber % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 4 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 100)::int % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		when number_type = 5 then
+			(case when matka_transaction_details.number::integer = (FLOOR(varnumber / 10)::int % 10) then matka_transaction_details.amount * rate - matka_transaction_details.amount else - matka_transaction_details.amount end)
+		else 0 end) 
+	  	* (
+			mtc.owner_percent
+		/ 100)
+		)),0) as profit
+		
+		,round(sum(matka_transaction_details.amount ),0) as totalsale
+		,COALESCE(us.streak, 0) AS streak
+		,us.streak_type AS streak_type
+	FROM mt
+	join matka_transaction_details on mt.id = matka_transaction_details.transaction_id
+		and matka_transaction_details.record_status = 0
+	join users on users.id = mt.user_id
+	join matka_transaction_commissions mtc on mt.id = mtc.matka_transaction_id
+		and mtc.record_status = 0
+	left join user_streak us on us.user_id = mt.user_id
+	group by mt.user_id, users.username, us.streak, us.streak_type
+	order by amount desc
+	;
+END;
+$BODY$;
+
+ALTER FUNCTION public.get_zambo_sel_user_sale_profit(uuid, date, integer)
     OWNER TO postgres;

@@ -19,7 +19,12 @@ export type BroadcastChannel =
   // User-balance change. Carries `userId` in the payload so subscribers can
   // ignore changes that don't belong to them (channel is global, fan-out is
   // tiny — every client just filters in onMessage).
-  | "ledger";
+  | "ledger"
+  // Single-device session enforcement. When a user logs in somewhere new, we
+  // broadcast a `force-logout` on this channel; every connected device filters
+  // by `userId` + `sessionToken` and logs itself out immediately if the login
+  // belongs to it but carries a different (newer) session token.
+  | "session";
 
 const channels = new Map<BroadcastChannel, Map<string, Send>>();
 
@@ -66,6 +71,31 @@ export const broadcastChange = (
   console.log(
     `[broadcast] ${channel}-changed -> ${subs.size} subscriber(s)`,
   );
+  for (const [clientId, send] of subs) {
+    try {
+      send(message);
+    } catch {
+      subs.delete(clientId);
+    }
+  }
+};
+
+// ─── Single-device session enforcement ────────────────────────────────────
+// Push an immediate logout to every device currently connected for `userId`
+// whose session token differs from the one just issued. The brand-new device
+// hasn't opened its socket yet at login time, so it never receives its own
+// kick; older devices receive it and log out on the spot (no polling/refresh).
+export const broadcastForceLogout = (userId: string, sessionToken: string) => {
+  const subs = channels.get("session");
+  if (!subs || subs.size === 0) return;
+
+  const message = JSON.stringify({
+    type: "force-logout",
+    userId,
+    sessionToken,
+    timestamp: Date.now(),
+  });
+  console.log(`[broadcast] force-logout -> user ${userId} (${subs.size} listener(s))`);
   for (const [clientId, send] of subs) {
     try {
       send(message);

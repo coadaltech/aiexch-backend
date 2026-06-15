@@ -103,6 +103,9 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
         id: user.id,
         username: user.username,
         email: user.email,
+        // Lets the rehydrated client's session socket recognise its own login
+        // and ignore the matching force-logout broadcast (see AuthContext).
+        sessionToken: user.sessionToken,
         role: user.role,
         membership: profile?.membership ?? MembershipType.Bronze,
         upline: profile?.upline ?? "0.00",

@@ -213,40 +213,27 @@ CREATE OR REPLACE FUNCTION public.get_limituse_of_user_market(varuser_id uuid, v
 AS $function$
 BEGIN
 RETURN QUERY
+	-- transaction_details.potential_return already holds the fully-signed per-runner
+	-- P&L ("P&L for this runner if IT wins") for every runner row, set at bet-placement
+	-- time (see betting.ts). So the per-runner exposure is just the sum of that column
+	-- grouped by runner — no bet_type re-signing, no `- stake`, no selection filter.
+	-- This mirrors set_limit_used_of_user's non-fancy branch (sum(td.potential_return)).
 	SELECT
 	  t.market_id
-      ,market_id_runners.runner_id
-	  ,sum((case when td.bet_type = 0 then 1 else -1 end) 
-	  	*
-		  (case when market_id_runners.runner_id = td.runner_id then 
-		  		td.potential_return - td.stake
-			else
-				- td.stake
-			end) 
-	  	) as runner_profit 
+	  ,td.runner_id
+	  ,sum(td.potential_return) as runner_profit
     FROM transactions t
     JOIN transaction_details td
-      ON td.transaction_id = t.id 
-	  and COALESCE(t.record_status,0) = 0 
-	  and COALESCE(td.record_status,0) = 0 
-	  and td.is_user_selection = TRUE 
-	left join (SELECT
-      t2.market_id
-      ,td2.runner_id
-		FROM transactions t2
-	    JOIN transaction_details td2
-	      ON td2.transaction_id = t2.id 
-		  and COALESCE(t2.record_status,0) = 0 
-		  and COALESCE(td2.record_status,0) = 0       	  
-		group by t2.market_id, td2.runner_id
-	) as market_id_runners on market_id_runners.market_id = t.market_id 
+      ON td.transaction_id = t.id
+	  and COALESCE(t.record_status,0) = 0
+	  and COALESCE(td.record_status,0) = 0
     WHERE t.status = 'matched'
       AND t.market_type <> 4
       AND t.user_id = varuser_id
-	  and (t.market_id = varmarket_id or COALESCE(varmarket_id,0) = 0) 
-	group by t.market_id, market_id_runners.runner_id
+	  and (t.market_id = varmarket_id or COALESCE(varmarket_id,0) = 0)
+	group by t.market_id, td.runner_id
 	;
-	
+
 END;
 $function$;
 
