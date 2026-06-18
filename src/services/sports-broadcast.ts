@@ -16,6 +16,8 @@ export type BroadcastChannel =
   | "sports-list"
   | "top-competitions"
   | "recommended-events"
+  // Owner-pinned events that surface in the site's top drop-header nav.
+  | "pinned-events"
   // User-balance change. Carries `userId` in the payload so subscribers can
   // ignore changes that don't belong to them (channel is global, fan-out is
   // tiny — every client just filters in onMessage).

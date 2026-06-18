@@ -1,8 +1,9 @@
 import { getCompetitionsBySportId } from "@services/dashboard/games-service";
 import { getAvailableSportsList } from "@services/sports-service";
 import { db } from "@db/index";
-import { competitions, events, sports } from "@db/schema";
-import { and, asc, eq } from "drizzle-orm";
+import { competitions, events, eventWhitelabelOverrides, sports } from "@db/schema";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { whitelabel_middleware } from "@middleware/whitelabel";
 import Elysia from "elysia";
 
 
@@ -87,6 +88,67 @@ export const gamesRoutes = new Elysia({ prefix: "/api/dashboard" })
       return { success: true, data: rows, count: rows.length };
     } catch (error) {
       console.error("Error fetching recommended events:", error);
+      return { success: false, data: [], count: 0 };
+    }
+  })
+
+  // ── Drop-header feed: owner-pinned events ────────────────────────────────
+  // Whitelabel-aware: an event the requesting whitelabel disabled (an event
+  // override with is_active = false) is hidden even though the owner pinned it
+  // globally. The `x-whitelabel-domain` header is resolved per-request.
+  .get("/sidebar/pinned-events", async ({ request }) => {
+    try {
+      const { whitelabel } = await whitelabel_middleware(request);
+      const whitelabelId: string | null = whitelabel?.id ?? null;
+
+      const rows = await db
+        .select({
+          eventId: events.eventId,
+          name: events.name,
+          pinLabel: events.pinLabel,
+          competitionId: events.competitionId,
+          competitionName: competitions.name,
+          sportId: events.sportId,
+          sportName: sports.name,
+          openDate: events.openDate,
+          // null when no per-whitelabel override row exists (defaults to shown)
+          whitelabelActive: whitelabelId
+            ? eventWhitelabelOverrides.isActive
+            : sql<boolean | null>`null`,
+        })
+        .from(events)
+        .leftJoin(competitions, eq(competitions.competition_id, events.competitionId))
+        .leftJoin(sports, eq(sports.sport_id, events.sportId))
+        .leftJoin(
+          eventWhitelabelOverrides,
+          whitelabelId
+            ? and(
+                eq(eventWhitelabelOverrides.eventId, events.eventId),
+                eq(eventWhitelabelOverrides.whitelabelId, whitelabelId),
+              )
+            : sql`false`,
+        )
+        .where(
+          and(
+            eq(events.isPinned, true),
+            eq(events.isActive, true),
+            eq(sports.is_active, true),
+          ),
+        )
+        .orderBy(asc(events.openDate));
+
+      // Drop events this whitelabel explicitly disabled. A null override means
+      // "no override" → still shown.
+      const visible = rows
+        .filter((r) => r.whitelabelActive !== false)
+        .map(({ whitelabelActive, ...r }) => ({
+          ...r,
+          label: r.pinLabel || r.name,
+        }));
+
+      return { success: true, data: visible, count: visible.length };
+    } catch (error) {
+      console.error("Error fetching pinned events:", error);
       return { success: false, data: [], count: 0 };
     }
   });

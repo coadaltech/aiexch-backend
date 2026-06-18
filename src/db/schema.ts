@@ -944,6 +944,12 @@ export const events = pgTable("events", {
   isActive: boolean("is_active").default(true).notNull(),
   isVisible: boolean("is_visible").default(true).notNull(),
   isRecommended: boolean("is_recommended").default(false).notNull(),
+  // Owner-pinned events surface in the site's top "drop header" nav under a
+  // custom label the owner types when pinning. `pinLabel` is that label and is
+  // null when the event isn't pinned. Pinning respects per-whitelabel disables
+  // (a whitelabel that turned the event off won't see the pinned entry).
+  isPinned: boolean("is_pinned").default(false).notNull(),
+  pinLabel: varchar("pin_label", { length: 120 }),
   suspended: boolean("suspended").default(false).notNull(),
   betDelay: integer("bet_delay").default(0).notNull(),
   maxMarketProfit: decimal("max_market_profit", { precision: 15, scale: 2 }),

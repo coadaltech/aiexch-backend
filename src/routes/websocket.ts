@@ -12,6 +12,7 @@ const KNOWN_CHANNELS: readonly BroadcastChannel[] = [
   "sports-list",
   "top-competitions",
   "recommended-events",
+  "pinned-events",
   "ledger",
   "session",
 ];

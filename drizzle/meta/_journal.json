@@ -715,6 +715,13 @@
       "when": 1780100000000,
       "tag": "0101_rename_casino_bets_to_casino_transactions",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1781790703409,
+      "tag": "0102_fantastic_cannonball",
+      "breakpoints": true
     }
   ]
 }

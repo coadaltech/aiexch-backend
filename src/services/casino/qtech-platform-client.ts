@@ -126,9 +126,14 @@ interface QtGame {
   freeRoundSupport?: boolean;
   images?: QtImage[];
 }
+// Pagination is cursor-based (§8.1): the response carries a `links` array whose
+// `next` entry holds the relative URL (with a `cursor` query param) for the
+// following page. The `links` element is absent once the last page is reached.
+type QtLink = { href: string; rel: string; method?: string; name?: string };
 interface QtGameListResponse {
   totalCount: number | string;
   items: QtGame[];
+  links?: QtLink[];
 }
 
 /** Clean shape returned to the frontend lobby. */
@@ -148,6 +153,8 @@ function pickImage(images: QtImage[] | undefined, type: string): string | null {
 }
 
 export interface ListGamesOptions {
+  /** Per-page size for the QT request. We loop pages until the full catalogue
+   *  is collected, so this is NOT a cap on the total — just the batch size. */
   size?: number;
   providers?: string;
   currencies?: string;
@@ -155,21 +162,27 @@ export interface ListGamesOptions {
   acceptLanguage?: string;
 }
 
-export async function listGames(opts: ListGamesOptions = {}): Promise<{
-  totalCount: number;
-  games: QtechLobbyGame[];
-}> {
-  const data = await authed<QtGameListResponse>("get", "/v2/games", {
-    params: {
-      size: opts.size ?? 500,
-      ...(opts.providers ? { providers: opts.providers } : {}),
-      ...(opts.currencies ? { currencies: opts.currencies } : {}),
-      ...(opts.gameTypes ? { gameTypes: opts.gameTypes } : {}),
-    },
-    headers: { "Accept-Language": opts.acceptLanguage || "en-US" },
-  });
+// QT's /v2/games is cursor-paginated (§8.1): we request a page, then follow the
+// `next` link's cursor until no `next` link remains. 1000 is QT's documented max
+// page size, so this is the fewest round-trips. MAX_PAGES is just a runaway
+// guard (1000 × 1000 = 1M games, far above any real catalogue).
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 1000;
 
-  const games: QtechLobbyGame[] = (data.items || []).map((g) => ({
+// The `next` link href is a relative URL like "/v2/games?cursor=<opaque>".
+// Pull the decoded cursor back out so we can re-send it as a query param.
+function nextCursor(links: QtLink[] | undefined): string | null {
+  const next = links?.find((l) => l.rel === "next");
+  if (!next?.href) return null;
+  try {
+    return new URL(next.href, "https://qt").searchParams.get("cursor");
+  } catch {
+    return null;
+  }
+}
+
+function mapGame(g: QtGame): QtechLobbyGame {
+  return {
     id: g.id,
     name: g.name,
     provider: g.provider?.name || g.provider?.id || "",
@@ -182,9 +195,47 @@ export async function listGames(opts: ListGamesOptions = {}): Promise<{
       pickImage(g.images, "banner"),
     bannerUrl: pickImage(g.images, "banner"),
     demoSupport: Boolean(g.demoSupport),
-  }));
+  };
+}
 
-  return { totalCount: Number(data.totalCount) || games.length, games };
+export async function listGames(opts: ListGamesOptions = {}): Promise<{
+  totalCount: number;
+  games: QtechLobbyGame[];
+}> {
+  const pageSize = opts.size ?? PAGE_SIZE;
+  const baseParams = {
+    size: pageSize,
+    // Most-popular first (§8.1: popularity sort must pair with orderBy=DESC).
+    // The cursor pagination preserves this order across pages.
+    sortBy: "popularity",
+    orderBy: "DESC",
+    ...(opts.providers ? { providers: opts.providers } : {}),
+    ...(opts.currencies ? { currencies: opts.currencies } : {}),
+    ...(opts.gameTypes ? { gameTypes: opts.gameTypes } : {}),
+  };
+  const headers = { "Accept-Language": opts.acceptLanguage || "en-US" };
+
+  // Dedupe by id as a belt-and-braces guard against any overlap between pages.
+  const byId = new Map<string, QtechLobbyGame>();
+  let totalCount = 0;
+  let cursor: string | null = null;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const data = await authed<QtGameListResponse>("get", "/v2/games", {
+      params: { ...baseParams, ...(cursor ? { cursor } : {}) },
+      headers,
+    });
+
+    for (const g of data.items || []) byId.set(g.id, mapGame(g));
+    totalCount = Number(data.totalCount) || totalCount;
+
+    // Advance to the next page; absence of a `next` link means we're done.
+    cursor = nextCursor(data.links);
+    if (!cursor) break;
+  }
+
+  const games = Array.from(byId.values());
+  return { totalCount: totalCount || games.length, games };
 }
 
 // ── Game Launcher (§5.1) ───────────────────────────────────────────────────
