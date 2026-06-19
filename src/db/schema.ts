@@ -502,6 +502,8 @@ export const transactionDetails = pgTable("transaction_details", {
   run: integer("run").default(0),
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
+  // Reason captured when a transaction is soft-deleted from Transaction Management.
+  remark: varchar("remark", { length: 500 }),
   // ── Audit ──
   addedBy: uuid("added_by").notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),
@@ -780,6 +782,9 @@ export const sports = pgTable("sports", {
   // When false, the sport is shown in the sidebar/dropheader but its page
   // displays a "Coming Soon" banner instead of live content.
   is_live: boolean("is_live").default(true).notNull(),
+  // When true, the sport renders with the highlighted "pinned" shimmer
+  // treatment in the drop-header (same look as owner-pinned events).
+  is_highlight: boolean("is_highlight").default(false).notNull(),
   sort_order: integer("sort_order").default(0),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
@@ -1028,6 +1033,8 @@ export const marketSettings = pgTable("market_settings", {
   maxBet: decimal("max_bet", { precision: 15, scale: 2 }),
   maxProfit: decimal("max_profit", { precision: 15, scale: 2 }),
   sortPriority: integer("sort_priority").default(0),
+  // Owner/staff-authored notice shown on the public match page for this market.
+  notice: varchar("notice", { length: 500 }),
   metadata: jsonb("metadata").default({}),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
@@ -1152,6 +1159,8 @@ export const transactionDetailsDeclare = pgTable("transaction_details_declare", 
   run: integer("run").default(0),
   stake: decimal("stake", { precision: 15, scale: 2 }).notNull(),
   potentialReturn: decimal("potential_return", { precision: 15, scale: 2 }).notNull(),
+  // Reason captured when a transaction is soft-deleted from Transaction Management.
+  remark: varchar("remark", { length: 500 }),
   // ── Audit ──
   addedBy: uuid("added_by").notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

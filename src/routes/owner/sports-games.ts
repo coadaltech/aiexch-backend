@@ -255,6 +255,63 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     },
   )
 
+  // ── Toggle sport highlight (owner only) ───────────────────────────────
+  // Independent from is_active/is_live: when is_highlight=true the sport
+  // tab renders with the highlighted "pinned" shimmer treatment in the
+  // drop-header (same look as owner-pinned events).
+  .post(
+    "/toggle-highlight/:sportId",
+    async ({ params, body, set }) => {
+      try {
+        const sportId = Number(params.sportId);
+        if (!Number.isFinite(sportId)) {
+          set.status = 400;
+          return { success: false, error: "Invalid sportId" };
+        }
+
+        const { isHighlight } = body as { isHighlight: boolean };
+
+        const [updated] = await db
+          .update(sports)
+          .set({
+            is_highlight: isHighlight,
+            updateBy: SYSTEM_USER_ID,
+            updateDate: new Date(),
+          })
+          .where(eq(sports.sport_id, sportId))
+          .returning({
+            sport_id: sports.sport_id,
+            is_highlight: sports.is_highlight,
+          });
+
+        if (!updated) {
+          set.status = 404;
+          return { success: false, error: "Sport not found" };
+        }
+
+        await invalidateSportsListCache();
+        broadcastChange("sports-list");
+
+        set.status = 200;
+        return {
+          success: true,
+          data: {
+            sportId: updated.sport_id,
+            isHighlight: updated.is_highlight,
+          },
+        };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to update sport highlight state" };
+      }
+    },
+    {
+      beforeHandle: canToggleSport,
+      params: t.Object({ sportId: t.String() }),
+      body: t.Object({ isHighlight: t.Boolean() }),
+    },
+  )
+
   // ── Toggle a competition's "top competition" flag (owner only) ────────
   .post(
     "/toggle-top-competition/:competitionId",

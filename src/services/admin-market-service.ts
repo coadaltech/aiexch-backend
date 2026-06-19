@@ -223,6 +223,69 @@ export const AdminMarketService = {
     return { success: true, marketId };
   },
 
+  /**
+   * Set (or clear) the user-facing notice/remark on a market. The notice is
+   * persisted on market_settings, mirrored into the `admin:market:<id>` Redis
+   * hash (so the live pipeline picks it up each tick) and instantly patched
+   * into the active match broadcast so subscribed user pages show it right
+   * away. Pass an empty/whitespace notice to clear it.
+   */
+  async updateMarketNotice(
+    marketId: string,
+    notice: string,
+    eventId?: string
+  ) {
+    const clean = (notice ?? "").trim().slice(0, 500);
+
+    const existing = await db
+      .select()
+      .from(marketSettings)
+      .where(eq(marketSettings.marketId, marketId))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await db
+        .update(marketSettings)
+        .set({ notice: clean || null })
+        .where(eq(marketSettings.marketId, marketId));
+    } else {
+      // No settings row yet (API-fed market). Create a minimal row so the
+      // notice survives — eventId is required to scope it.
+      const resolvedEventId = Number(eventId || 0);
+      await db.insert(marketSettings).values({
+        marketId,
+        eventId: resolvedEventId,
+        marketName: "",
+        marketType: "MATCH_ODDS",
+        notice: clean || null,
+      });
+    }
+
+    const resolvedEventId =
+      eventId ||
+      (existing[0]?.eventId != null ? String(existing[0].eventId) : null);
+
+    // Mirror into Redis so the pipeline merge surfaces it on every tick.
+    if (redis.isOpen) {
+      const key = `admin:market:${marketId}`;
+      if (clean) {
+        await redis.hSet(key, "notice", clean);
+      } else {
+        await redis.hDel(key, "notice");
+      }
+      await redis.expire(key, OVERRIDE_TTL);
+    }
+
+    // Instant push to live subscribers (no-op if event isn't live).
+    if (resolvedEventId) {
+      LiveDataService.patchMarketSettings(resolvedEventId, marketId, {
+        notice: clean,
+      });
+    }
+
+    return { success: true, marketId, notice: clean };
+  },
+
   // ═══════════════════════════════════════════════════════════
   //  CUSTOM MARKET CREATION
   // ═══════════════════════════════════════════════════════════
@@ -904,6 +967,7 @@ export const AdminMarketService = {
       if (mkt.maxProfit !== null) hash.maxProfit = String(mkt.maxProfit);
       if (mkt.sortPriority !== null)
         hash.sortPriority = String(mkt.sortPriority);
+      if (mkt.notice) hash.notice = mkt.notice;
 
       if (mkt.isCustom) {
         hash.marketName = mkt.marketName;

@@ -21,6 +21,7 @@ import { matkaOwnerRoutes } from "./matka";
 import { jamboOwnerRoutes } from "./jambo";
 import { bombayBazarOwnerRoutes } from "./bombay-bazar";
 import { liveMarketsRoutes } from "./live-markets";
+import { transactionManagementRoutes } from "./transaction-management";
 import { ownerAccountStatementRoutes } from "./account-statement";
 import { sportsResultRoutes } from "./sports-result";
 import { staffRoutes } from "./staff";
@@ -63,6 +64,7 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(jamboOwnerRoutes)
   .use(bombayBazarOwnerRoutes)
   .use(liveMarketsRoutes)
+  .use(transactionManagementRoutes)
   .use(ownerAccountStatementRoutes)
   .use(sportsResultRoutes)
   .use(staffRoutes)

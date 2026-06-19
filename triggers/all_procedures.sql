@@ -1047,11 +1047,11 @@ BEGIN
 	;
 	
 	INSERT INTO transaction_details_declare(
-	id, transaction_id, runner_id, runner_name, is_user_selection, bet_type, price, run, stake, potential_return, added_by, added_date, update_by, update_date, record_status)
-	select 
-	id, transaction_id, runner_id, runner_name, is_user_selection, bet_type, price, run, stake, potential_return, added_by, added_date, update_by, update_date, record_status
+	id, transaction_id, runner_id, runner_name, is_user_selection, bet_type, base_price, price, run, stake, potential_return, added_by, added_date, update_by, update_date, record_status)
+	select
+	id, transaction_id, runner_id, runner_name, is_user_selection, bet_type, base_price, price, run, stake, potential_return, added_by, added_date, update_by, update_date, record_status
 	from transaction_details
-	where transaction_id in (select id from transactions where market_id = varmarket_id) 
+	where transaction_id in (select id from transactions where market_id = varmarket_id)
 	;
 
 	INSERT INTO transaction_commissions_declare(

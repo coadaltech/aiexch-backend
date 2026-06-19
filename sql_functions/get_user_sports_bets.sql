@@ -73,10 +73,14 @@ AS $$
           'addedDate',        td.added_date,
           'updateBy',         td.update_by,
           'updateDate',       td.update_date,
-          'recordStatus',     td.record_status
+          'recordStatus',     td.record_status,
+          'remark',           td.remark
         )
         ORDER BY td.added_date
-      ) AS rows
+      ) AS rows,
+      -- Reason captured when the bet was soft-deleted (Transaction Management).
+      -- Same value is stamped on every detail of a deleted txn, so MAX() picks it.
+      MAX(td.remark) AS user_remark
     FROM transaction_details td
     WHERE td.transaction_id IN (SELECT id FROM paged)
     GROUP BY td.transaction_id
@@ -119,6 +123,11 @@ AS $$
         'updateBy',          p.update_by,
         'updateDate',        p.update_date,
         'recordStatus',      p.record_status,
+        -- ── Soft-delete (Transaction Management) ──
+        -- isDeleted = record_status flipped to Deleted (1); deleteRemark holds
+        -- the owner's reason so the user can see why the bet was reverted.
+        'isDeleted',         (COALESCE(p.record_status, 0) = 1),
+        'deleteRemark',      bd.user_remark,
         -- ── Enrichment fields ──
         'details',           COALESCE(bd.rows, '[]'::jsonb),
         'sportName',         s.name,

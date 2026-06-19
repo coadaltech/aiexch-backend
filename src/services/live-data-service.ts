@@ -18,6 +18,13 @@
 
 import { MarketPipelineService } from "./market-pipeline-service";
 import { SportsService } from "./sports";
+import { db } from "@db/index";
+import { marketSettings } from "@db/schema";
+import { isNotNull } from "drizzle-orm";
+import { redis } from "@db/redis";
+import { RedisGCService } from "./redis-gc-service";
+
+const NOTICE_TTL = RedisGCService.OVERRIDE_TTL_SECONDS;
 
 type SendFn = (data: string) => void;
 
@@ -31,6 +38,9 @@ interface MarketStructure {
   openMarkets: any[];
   openMarketIds: string[];
   marketOverridesMap: Map<string, Record<string, string>>;
+  // marketId → owner-authored notice, sourced from the DB (market_settings)
+  // every structure refresh so it survives Redis override-hash eviction.
+  noticeMap: Map<string, string>;
   customMarkets: any[];
 }
 
@@ -203,7 +213,7 @@ export const LiveDataService = {
       ]);
 
       if (eventOverrides.isActive === false) {
-        return { eventOverrides, openMarkets: [], openMarketIds: [], marketOverridesMap: new Map(), customMarkets: [] };
+        return { eventOverrides, openMarkets: [], openMarketIds: [], marketOverridesMap: new Map(), noticeMap: new Map(), customMarkets: [] };
       }
 
       const openMarkets = (allMarkets || []).filter(
@@ -213,11 +223,65 @@ export const LiveDataService = {
 
       const marketOverridesMap = await MarketPipelineService.getMarketOverridesBatch(openMarketIds);
 
+      // Owner-authored market notices live in market_settings (source of truth).
+      // Load them here from the DB so they persist even after the volatile
+      // admin:market:<id> Redis override hash is GC'd / evicted.
+      const noticeMap = new Map<string, string>();
+      try {
+        // Match notices by marketId membership (NOT solely by eventId): a notice
+        // row can carry a wrong/0 eventId if it was first saved before the panel
+        // knew the event, so keying on eventId alone would lose it. We pull every
+        // row that has a notice (there are very few) and keep those whose market
+        // belongs to this event's feed OR whose eventId matches.
+        const eventMarketIds = new Set<string>([
+          ...openMarketIds.map((id: any) => String(id)),
+          ...(customMarkets || []).map((c: any) => String(c.marketId)),
+        ]);
+        const noticeRows = await db
+          .select({
+            marketId: marketSettings.marketId,
+            eventId: marketSettings.eventId,
+            notice: marketSettings.notice,
+          })
+          .from(marketSettings)
+          .where(isNotNull(marketSettings.notice));
+        for (const r of noticeRows) {
+          if (!r.notice || !r.notice.trim()) continue;
+          const mId = String(r.marketId);
+          if (eventMarketIds.has(mId) || String(r.eventId) === String(eventId)) {
+            noticeMap.set(mId, r.notice);
+          }
+        }
+
+        // SELF-HEAL Redis from the DB: the admin:market:<id> override hash is
+        // volatile (TTL + GC + flush on restart), but market_settings.notice is
+        // the source of truth. If the DB has a notice that's missing from the
+        // hash, write it back so every Redis-based read path (standard merge +
+        // custom markets) recovers it and the notice never disappears.
+        if (redis?.isOpen && noticeMap.size > 0) {
+          for (const [mId, notice] of noticeMap) {
+            try {
+              const key = `admin:market:${mId}`;
+              const current = await redis.hGet(key, "notice");
+              if (current !== notice) {
+                await redis.hSet(key, "notice", notice);
+                await redis.expire(key, NOTICE_TTL);
+              }
+            } catch {
+              /* per-market heal is best-effort */
+            }
+          }
+        }
+      } catch {
+        /* non-fatal: fall back to Redis-sourced notice */
+      }
+
       const structure: MarketStructure = {
         eventOverrides,
         openMarkets,
         openMarketIds,
         marketOverridesMap,
+        noticeMap,
         customMarkets,
       };
 
@@ -320,6 +384,9 @@ export const LiveDataService = {
         provider: market.provider ?? "BETFAIR",
         marketCondition: finalCondition,
         sportingEvent: marketOdds?.sportingEvent ?? market.sportingEvent,
+        // Redis override wins (reflects an instant edit between refreshes);
+        // otherwise fall back to the DB-sourced notice so it never disappears.
+        notice: overrides?.notice || structure.noticeMap.get(market.marketId) || null,
         adminDisabled,
         adminHidden,
         runners: market.runners.map((runner: any) => {
@@ -375,16 +442,28 @@ export const LiveDataService = {
       minBet?: number;
       maxBet?: number;
       maxProfit?: number;
+      notice?: string;
     }
   ) {
     const state = activeEvents.get(eventId);
-    if (!state || !state.lastMessage) return;
+    if (!state) return;
+
+    // Keep the DB-sourced notice cache in sync immediately so a cleared/edited
+    // notice doesn't briefly revert on the next tick (before the 60s refresh).
+    if (patch.notice !== undefined && state.structure) {
+      const trimmed = (patch.notice || "").trim();
+      if (trimmed) state.structure.noticeMap.set(marketId, trimmed);
+      else state.structure.noticeMap.delete(marketId);
+    }
+
+    if (!state.lastMessage) return;
     try {
       const msg = JSON.parse(state.lastMessage);
       const list: any[] = Array.isArray(msg.matchOdds) ? msg.matchOdds : [];
       const market = list.find((m: any) => m.marketId === marketId);
       if (!market) return;
 
+      if (patch.notice !== undefined) market.notice = patch.notice || null;
       if (patch.isActive !== undefined) market.adminDisabled = !patch.isActive;
       if (patch.isVisible !== undefined) market.adminHidden = !patch.isVisible;
       // Only force SUSPENDED on a true→suspend; un-suspending requires the

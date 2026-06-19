@@ -127,6 +127,7 @@ export const MarketPipelineService = {
             provider: market.provider ?? "BETFAIR",
             marketCondition: finalCondition,
             sportingEvent: marketOdds?.sportingEvent ?? market.sportingEvent,
+            notice: overrides?.notice || null,
             adminDisabled,
             adminHidden,
             runners: market.runners.map((runner: any) => {
@@ -303,6 +304,7 @@ export const MarketPipelineService = {
           status: overrides.suspended === "true" ? "SUSPENDED" : "OPEN",
           inPlay: true,
           bettingType,
+          notice: overrides.notice || null,
           isCustom: true,
           adminDisabled: overrides.isActive === "false",
           adminHidden: overrides.isVisible === "false",

@@ -4,6 +4,7 @@ import { db } from "@db/index";
 import { marketOddsHistory, marketSettings, events } from "@db/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { UserRole } from "../../types/enums";
+import { requirePermission } from "../../middleware/permissions";
 
 // Price entry schema: {price, size, line?}
 // `line` is only present for LINE markets — it's the over/under value.
@@ -177,6 +178,34 @@ export const marketManagementRoutes = new Elysia({
         maxBet: t.Optional(t.Number()),
         maxProfit: t.Optional(t.Number()),
         sortPriority: t.Optional(t.Number()),
+      }),
+    }
+  )
+
+  // PUT /owner/market-management/markets/:marketId/notice
+  // Permission-gated: add/edit the user-facing notice/remark for a market.
+  .put(
+    "/markets/:marketId/notice",
+    async ({ params, body, set }) => {
+      try {
+        const result = await AdminMarketService.updateMarketNotice(
+          params.marketId,
+          body.notice ?? "",
+          body.eventId
+        );
+        return { success: true, data: result };
+      } catch (error) {
+        console.error("[market-management] PUT /markets/:marketId/notice error:", error);
+        set.status = 500;
+        return { success: false, error: "Failed to update market notice" };
+      }
+    },
+    {
+      beforeHandle: requirePermission("market_notice.manage"),
+      params: t.Object({ marketId: t.String() }),
+      body: t.Object({
+        notice: t.String(),
+        eventId: t.Optional(t.String()),
       }),
     }
   )

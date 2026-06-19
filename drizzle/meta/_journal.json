@@ -722,6 +722,20 @@
       "when": 1781790703409,
       "tag": "0102_fantastic_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1781860532175,
+      "tag": "0103_legal_ma_gnuci",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1781867914112,
+      "tag": "0104_same_serpent_society",
+      "breakpoints": true
     }
   ]
 }

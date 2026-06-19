@@ -22,6 +22,7 @@ export type PermissionGroup =
   | "Sports"
   | "Sports Result"
   | "Live Markets"
+  | "Transaction Management"
   | "Live Prediction"
   | "Custom Markets"
   | "Matka"
@@ -85,6 +86,10 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "live_markets.view_bets", group: "Live Markets", label: "View Bets", description: "View bets placed on a market" },
   { key: "live_markets.settle", group: "Live Markets", label: "Settle Market", description: "Settle markets manually" },
 
+  // ── Transaction Management ────────────────────────────────────────────────
+  { key: "transaction_management.view", group: "Transaction Management", label: "View Transactions", description: "Search bets/transactions by event, market and time range" },
+  { key: "transaction_management.delete", group: "Transaction Management", label: "Delete Transactions", description: "Mark transactions as deleted (soft-delete) with a reason to revert a market" },
+
   // ── Live Prediction ───────────────────────────────────────────────────────
   { key: "live_prediction.view", group: "Live Prediction", label: "View Predictions", description: "View live prediction markets" },
   { key: "live_prediction.declare", group: "Live Prediction", label: "Declare Prediction", description: "Declare prediction outcomes" },
@@ -95,6 +100,7 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { key: "custom_markets.edit", group: "Custom Markets", label: "Edit Market", description: "Edit a custom market" },
   { key: "custom_markets.delete", group: "Custom Markets", label: "Delete Market", description: "Delete a custom market" },
   { key: "custom_markets.manage_odds", group: "Custom Markets", label: "Manage Odds", description: "Set/adjust market odds" },
+  { key: "market_notice.manage", group: "Custom Markets", label: "Manage Market Notice", description: "Add or edit the notice/remark shown to users on a market" },
 
   // ── Matka ─────────────────────────────────────────────────────────────────
   { key: "matka.view", group: "Matka", label: "View Matka", description: "View matka shifts and timings" },
@@ -231,6 +237,7 @@ export const PERMISSION_GROUPS_ORDERED: PermissionGroup[] = [
   "Sports",
   "Sports Result",
   "Live Markets",
+  "Transaction Management",
   "Live Prediction",
   "Custom Markets",
   "Matka",

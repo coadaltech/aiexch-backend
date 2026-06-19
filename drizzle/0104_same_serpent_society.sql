@@ -1,0 +1,1 @@
+ALTER TABLE "sports" ADD COLUMN "is_highlight" boolean DEFAULT false NOT NULL;
