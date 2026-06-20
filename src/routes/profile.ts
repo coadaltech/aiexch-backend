@@ -6,12 +6,14 @@ import {
   vouchers,
   voucherDetails,
   userReadNotifications,
+  userNotifications as userNotificationsTable,
   users,
   ledgerLimit,
   transactionsDeclare,
   transactionDetailsDeclare,
+  userLoginLogs,
 } from "../db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray, count } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
 import { getEffectivePermissions } from "../services/permissions";
 import { increment } from "../utils/numbers";
@@ -366,6 +368,44 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     }
   })
 
+  // Get the logged-in user's login history (login_logs recorded on each login).
+  // Scoped to the current user so one user can't read another's login logs.
+  .get("/login-logs", async ({ userId, query, set, db }) => {
+    try {
+      const limit = Math.min(parseInt((query?.limit as string) || "50"), 200);
+
+      const rows = await db
+        .select({
+          id: userLoginLogs.id,
+          ipAddress: userLoginLogs.ipAddress,
+          browser: userLoginLogs.browser,
+          browserVersion: userLoginLogs.browserVersion,
+          os: userLoginLogs.os,
+          osVersion: userLoginLogs.osVersion,
+          deviceType: userLoginLogs.deviceType,
+          deviceBrand: userLoginLogs.deviceBrand,
+          deviceModel: userLoginLogs.deviceModel,
+          country: userLoginLogs.country,
+          city: userLoginLogs.city,
+          status: userLoginLogs.status,
+          failureReason: userLoginLogs.failureReason,
+          loginAt: userLoginLogs.loginAt,
+          logoutAt: userLoginLogs.logoutAt,
+          sessionDurationSeconds: userLoginLogs.sessionDurationSeconds,
+        })
+        .from(userLoginLogs)
+        .where(eq(userLoginLogs.userId, userId))
+        .orderBy(desc(userLoginLogs.loginAt))
+        .limit(limit);
+
+      set.status = 200;
+      return { success: true, data: rows };
+    } catch (error) {
+      set.status = 200;
+      return { success: true, data: [] };
+    }
+  })
+
   // Get user casino bet history (Ace / QTech). Mirrors /bet-history but for the
   // casino_transactions table so the Bet History page can show a casino section.
   .get("/casino-bet-history", async ({ userId, query, set, db }) => {
@@ -452,6 +492,67 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
       body: t.Object({
         userId: t.String(),
         notificationId: t.String(),
+      }),
+    }
+  )
+
+  // ── Per-user targeted notifications (header bell) ──────────────────────────
+  // GET /profile/my-notifications — the logged-in user's personal alerts plus
+  // the unread count for the bell badge.
+  .get("/my-notifications", async ({ userId, query, set, db }: any) => {
+    const limit = Math.min(parseInt((query?.limit as string) || "50"), 100);
+
+    const rows = await db
+      .select()
+      .from(userNotificationsTable)
+      .where(
+        and(
+          eq(userNotificationsTable.userId, userId),
+          eq(userNotificationsTable.recordStatus, 0)
+        )
+      )
+      .orderBy(desc(userNotificationsTable.addedDate))
+      .limit(limit);
+
+    const [unread] = await db
+      .select({ c: count() })
+      .from(userNotificationsTable)
+      .where(
+        and(
+          eq(userNotificationsTable.userId, userId),
+          eq(userNotificationsTable.recordStatus, 0),
+          eq(userNotificationsTable.isRead, false)
+        )
+      );
+
+    set.status = 200;
+    return { success: true, data: rows, unreadCount: Number(unread?.c ?? 0) };
+  })
+
+  // POST /profile/my-notifications/read — mark given ids read, or all when no
+  // ids are supplied. Scoped to the logged-in user so one user can't touch
+  // another's notifications.
+  .post(
+    "/my-notifications/read",
+    async ({ userId, body, set, db }: any) => {
+      const ids: string[] = Array.isArray(body?.ids) ? body.ids : [];
+      const conds = [
+        eq(userNotificationsTable.userId, userId),
+        eq(userNotificationsTable.isRead, false),
+      ];
+      if (ids.length > 0) conds.push(inArray(userNotificationsTable.id, ids));
+
+      await db
+        .update(userNotificationsTable)
+        .set({ isRead: true, readAt: new Date(), updateBy: userId })
+        .where(and(...conds));
+
+      set.status = 200;
+      return { success: true };
+    },
+    {
+      body: t.Object({
+        ids: t.Optional(t.Array(t.String())),
       }),
     }
   )
@@ -904,7 +1005,10 @@ export const profileRoutes = new Elysia({ prefix: "/profile" })
     },
     {
       body: t.Object({
-        currentPassword: t.String({ minLength: 8 }),
+        // Only the NEW password is length-constrained; the current one is
+        // validated against the stored hash, so don't reject short legacy/
+        // admin-set passwords at the schema layer (that 422'd silently).
+        currentPassword: t.String({ minLength: 1 }),
         newPassword: t.String({ minLength: 8 }),
       }),
     }

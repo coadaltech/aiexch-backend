@@ -340,6 +340,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         runners,
         provider,
         priceIndex,
+        isCashout,
       } = body as {
         matchId: string | number;
         marketId: string | number;
@@ -357,6 +358,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
         runners: { id: string | number; name: string; price: number }[];
         provider?: string;
         priceIndex?: number;
+        isCashout?: boolean;
       };
 
       // Validate input
@@ -609,6 +611,7 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
             stake: stake.toString(),
             odds: effectiveOdds.toString(),
             status: "matched",
+            isCashout: isCashout === true,
             ipAddress,
             matchedAt: today,
             addedBy: userId,

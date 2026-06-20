@@ -13,8 +13,10 @@ const KNOWN_CHANNELS: readonly BroadcastChannel[] = [
   "top-competitions",
   "recommended-events",
   "pinned-events",
+  "pinned-competitions",
   "ledger",
   "session",
+  "user-notifications",
 ];
 const isKnownChannel = (v: any): v is BroadcastChannel =>
   typeof v === "string" && (KNOWN_CHANNELS as readonly string[]).includes(v);

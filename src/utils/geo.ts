@@ -2,6 +2,7 @@ import geoip from "geoip-lite";
 
 export interface GeoInfo {
   country: string | null;
+  city: string | null;
   timezone: string | null;
 }
 
@@ -21,19 +22,20 @@ const stripIPv6Prefix = (ip: string) =>
   ip.startsWith("::ffff:") ? ip.slice(7) : ip;
 
 export const lookupGeo = (ip: string | null | undefined): GeoInfo => {
-  if (!ip) return { country: null, timezone: null };
+  if (!ip) return { country: null, city: null, timezone: null };
   const cleanIp = stripIPv6Prefix(ip.trim());
   if (!cleanIp || isPrivateIp(cleanIp)) {
-    return { country: null, timezone: null };
+    return { country: null, city: null, timezone: null };
   }
   try {
     const result = geoip.lookup(cleanIp);
-    if (!result) return { country: null, timezone: null };
+    if (!result) return { country: null, city: null, timezone: null };
     return {
       country: result.country || null,
+      city: result.city || null,
       timezone: result.timezone || null,
     };
   } catch {
-    return { country: null, timezone: null };
+    return { country: null, city: null, timezone: null };
   }
 };

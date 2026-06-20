@@ -506,6 +506,96 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
     }
   })
 
+  // ── Pin / unpin a competition for the site's drop-header nav (owner only) ──
+  // Mirrors /pin-event: pinning takes a custom `pinLabel` (the text shown in the
+  // header). Whitelabel visibility is enforced at read time via competition
+  // overrides, so nothing extra is needed here.
+  .post(
+    "/pin-competition/:competitionId",
+    async ({ params, body, set, userRole }: any) => {
+      try {
+        if (Number(userRole) !== UserRole.Owner) {
+          set.status = 403;
+          return { success: false, error: "Only the owner can pin competitions" };
+        }
+
+        const competitionId = Number(params.competitionId);
+        if (!Number.isFinite(competitionId)) {
+          set.status = 400;
+          return { success: false, error: "Invalid competitionId" };
+        }
+
+        const { isPinned, pinLabel } = body as {
+          isPinned: boolean;
+          pinLabel?: string;
+        };
+
+        const label = (pinLabel ?? "").trim();
+        if (isPinned && label.length === 0) {
+          set.status = 400;
+          return { success: false, error: "A pin name is required" };
+        }
+
+        const [updated] = await db
+          .update(competitions)
+          .set({
+            is_pinned: isPinned,
+            pin_label: isPinned ? label.slice(0, 120) : null,
+            updateBy: SYSTEM_USER_ID,
+            updateDate: new Date(),
+          })
+          .where(eq(competitions.competition_id, competitionId))
+          .returning({
+            competitionId: competitions.competition_id,
+            isPinned: competitions.is_pinned,
+            pinLabel: competitions.pin_label,
+          });
+
+        if (!updated) {
+          set.status = 404;
+          return { success: false, error: "Competition not found" };
+        }
+
+        broadcastChange("pinned-competitions");
+
+        set.status = 200;
+        return { success: true, data: updated };
+      } catch (error) {
+        set.status = 500;
+        return { success: false, error: "Failed to update pin" };
+      }
+    },
+    {
+      params: t.Object({ competitionId: t.String() }),
+      body: t.Object({
+        isPinned: t.Boolean(),
+        pinLabel: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // ── List currently pinned competitions (owner panel state) ─────────────
+  // Returns every pinned competition regardless of whitelabel so the
+  // competitions page can reflect pin state and the existing label.
+  .get("/pinned-competitions", async ({ set }) => {
+    try {
+      const rows = await db
+        .select({
+          competitionId: competitions.competition_id,
+          name: competitions.name,
+          pinLabel: competitions.pin_label,
+        })
+        .from(competitions)
+        .where(eq(competitions.is_pinned, true));
+
+      set.status = 200;
+      return { success: true, data: rows, count: rows.length };
+    } catch (error) {
+      set.status = 500;
+      return { success: false, error: "Failed to fetch pinned competitions" };
+    }
+  })
+
   // ── Sync all competitions from external API ────────────────────────────
   .post("/sync-competitions", async ({ set }) => {
     try {

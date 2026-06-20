@@ -12,6 +12,7 @@ import {
 import { RecordStatus } from "../../types/enums";
 import { requirePermission } from "../../middleware/permissions";
 import { AdminMarketService } from "@services/admin-market-service";
+import { createUserNotifications } from "@services/user-notification-service";
 
 /**
  * Transaction Management (owner panel).
@@ -351,6 +352,29 @@ export const transactionManagementRoutes = new Elysia({
               e
             );
           }
+        }
+
+        // Notify every affected user that their bet(s) were deleted, with the
+        // reason. Persisted + pushed over WS so they see it on the header bell
+        // even if they're not on the match page right now.
+        try {
+          const perUser = new Map<string, { count: number; matchId: string }>();
+          for (const r of scoped) {
+            if (!validIdSet.has(r.id)) continue;
+            const e = perUser.get(r.userId) ?? { count: 0, matchId: String(r.matchId) };
+            e.count += 1;
+            perUser.set(r.userId, e);
+          }
+          const items = [...perUser.entries()].map(([uid, info]) => ({
+            userId: uid,
+            type: "bet_deleted",
+            title: "Bet deleted",
+            message: `${info.count} of your bet(s) were deleted by the operator. Reason: ${remark}`,
+            data: { count: info.count, matchId: info.matchId, remark, source },
+          }));
+          await createUserNotifications(items);
+        } catch (e) {
+          console.error("[transaction-management] user notification failed:", e);
         }
 
         return {

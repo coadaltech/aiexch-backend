@@ -736,6 +736,20 @@
       "when": 1781867914112,
       "tag": "0104_same_serpent_society",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1781942974044,
+      "tag": "0105_fresh_proemial_gods",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1781945343553,
+      "tag": "0106_illegal_frank_castle",
+      "breakpoints": true
     }
   ]
 }

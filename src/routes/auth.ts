@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { users, profiles, otps, whitelabels, userLoginLogs } from "@db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
 import { decodeToken, generateTokens } from "@services/token";
 import { getEffectivePermissions } from "@services/permissions";
@@ -159,6 +159,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             userId: user.id,
             ipAddress: clientIP,
             ...ua,
+            country: geo.country,
+            city: geo.city,
             status: "failed",
             failureReason: "Invalid credentials",
           });
@@ -172,6 +174,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
             userId: user.id,
             ipAddress: clientIP,
             ...ua,
+            country: geo.country,
+            city: geo.city,
             status: "failed",
             failureReason: "Account suspended",
           });
@@ -223,10 +227,29 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
           });
         }
 
+        // Close any still-open prior sessions for this user (e.g. a previous
+        // device that's about to be force-logged-out below) so their login-log
+        // rows get a logout time + duration instead of dangling open forever.
+        await db
+          .update(userLoginLogs)
+          .set({
+            logoutAt: sql`now()`,
+            sessionDurationSeconds: sql`EXTRACT(EPOCH FROM (now() - ${userLoginLogs.loginAt}))::int`,
+          })
+          .where(
+            and(
+              eq(userLoginLogs.userId, user.id),
+              eq(userLoginLogs.status, "success"),
+              isNull(userLoginLogs.logoutAt),
+            ),
+          );
+
         await db.insert(userLoginLogs).values({
           userId: user.id,
           ipAddress: clientIP,
           ...ua,
+          country: geo.country,
+          city: geo.city,
           status: "success",
         });
 
@@ -468,9 +491,30 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       return { success: false, message: "Invalid refresh token" };
     }
   })
-  .post("/logout", async ({ cookie, set }) => {
-    // cookie.accessToken.remove();
-    // cookie.refreshToken.remove();
+  .post("/logout", async ({ cookie, set, db }) => {
+    // Stamp logout time + session duration on the user's open login-log row(s)
+    // before clearing cookies, so the Last Logins history shows full sessions.
+    try {
+      const token = cookie.accessToken?.value || cookie.refreshToken?.value;
+      const decoded = token ? decodeToken(token as string) : null;
+      if (decoded?.id) {
+        await db
+          .update(userLoginLogs)
+          .set({
+            logoutAt: sql`now()`,
+            sessionDurationSeconds: sql`EXTRACT(EPOCH FROM (now() - ${userLoginLogs.loginAt}))::int`,
+          })
+          .where(
+            and(
+              eq(userLoginLogs.userId, decoded.id),
+              eq(userLoginLogs.status, "success"),
+              isNull(userLoginLogs.logoutAt),
+            ),
+          );
+      }
+    } catch {
+      // Best-effort — never block logout on logging.
+    }
 
     cookie.refreshToken.set({
       value: "",

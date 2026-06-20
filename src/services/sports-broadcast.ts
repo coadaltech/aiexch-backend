@@ -18,6 +18,8 @@ export type BroadcastChannel =
   | "recommended-events"
   // Owner-pinned events that surface in the site's top drop-header nav.
   | "pinned-events"
+  // Owner-pinned competitions that surface in the site's top drop-header nav.
+  | "pinned-competitions"
   // User-balance change. Carries `userId` in the payload so subscribers can
   // ignore changes that don't belong to them (channel is global, fan-out is
   // tiny — every client just filters in onMessage).
@@ -26,7 +28,11 @@ export type BroadcastChannel =
   // broadcast a `force-logout` on this channel; every connected device filters
   // by `userId` + `sessionToken` and logs itself out immediately if the login
   // belongs to it but carries a different (newer) session token.
-  | "session";
+  | "session"
+  // Per-user targeted alerts (e.g. "your bet was deleted"). The payload carries
+  // `userId`; every connected client filters client-side and only reacts to its
+  // own — same global-broadcast + client-filter pattern as `session`/`ledger`.
+  | "user-notifications";
 
 const channels = new Map<BroadcastChannel, Map<string, Send>>();
 
@@ -98,6 +104,32 @@ export const broadcastForceLogout = (userId: string, sessionToken: string) => {
     timestamp: Date.now(),
   });
   console.log(`[broadcast] force-logout -> user ${userId} (${subs.size} listener(s))`);
+  for (const [clientId, send] of subs) {
+    try {
+      send(message);
+    } catch {
+      subs.delete(clientId);
+    }
+  }
+};
+
+// ─── Per-user targeted notifications ───────────────────────────────────────
+// Push a freshly-created notification to every device currently connected for
+// `userId`. The channel is global; clients filter by `userId` (and the header
+// bell also re-fetches from the DB so offline devices catch up on next load).
+export const broadcastUserNotification = (
+  userId: string,
+  notification: Record<string, unknown>,
+) => {
+  const subs = channels.get("user-notifications");
+  if (!subs || subs.size === 0) return;
+
+  const message = JSON.stringify({
+    type: "user-notifications-changed",
+    userId,
+    notification,
+    timestamp: Date.now(),
+  });
   for (const [clientId, send] of subs) {
     try {
       send(message);
