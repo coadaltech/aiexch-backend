@@ -117,26 +117,6 @@ async function initializeServices() {
   await ensureSystemUser();
   console.log("[Init] System user ensured");
 
-  // Step 0a: Ensure the casino_pinned_categories table exists. Idempotent —
-  // mirrors drizzle/0107_add_casino_pinned_categories.sql so the owner's
-  // pinned-category feature works even where that migration hasn't been applied.
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS public.casino_pinned_categories (
-        category_key  varchar(64) PRIMARY KEY,
-        is_pinned     boolean NOT NULL DEFAULT true,
-        added_by      uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
-        added_date    timestamp NOT NULL DEFAULT now(),
-        update_by     uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
-        update_date   timestamp NOT NULL DEFAULT now(),
-        record_status integer NOT NULL DEFAULT 1
-      )
-    `);
-    console.log("[Init] casino_pinned_categories table ensured");
-  } catch (e) {
-    console.error("[Init] casino_pinned_categories ensure failed (non-fatal):", e);
-  }
-
   // Step 0b: Sync the staff RBAC catalog + system role templates with what's
   // declared in code (permissions/catalog.ts and permissions/role-templates.ts).
   // Idempotent and safe to run every boot. Without this, prod keeps stale
