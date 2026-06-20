@@ -31,7 +31,7 @@ import { broadcastLedgerSnapshot } from "../services/casino/broadcast-ledger";
 //     the current balance so QT stops retrying, but do not modify any state.
 //     Result + payout handling lands in the next phase.
 
-const DEFAULT_CURRENCY = process.env.QT_LAUNCH_CURRENCY || "USD";
+const DEFAULT_CURRENCY = process.env.QT_LAUNCH_CURRENCY || "INR";
 
 function checkPassKey(
   headers: Record<string, string | string[] | undefined>,

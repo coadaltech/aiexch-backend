@@ -21,7 +21,7 @@ import { matkaRoutes } from "./routes/matka";
 import { jamboRoutes } from "./routes/jambo";
 import { bombayBazarRoutes } from "./routes/bombay-bazar";
 import { qtechRoutes } from "./routes/qtech";
-import { qtechGamesRoutes } from "./routes/qtech-games";
+import { qtechGamesRoutes, warmGamesCache } from "./routes/qtech-games";
 import { casinoWalletStubRoutes } from "./routes/casino-wallet-stub";
 import { casinoDevProxyRoutes } from "./routes/casino-dev-proxy";
 import { casinoAceRoutes } from "./routes/casino-ace";
@@ -34,7 +34,7 @@ import { gamesRoutes } from "@routes/dashboard/games-routes";
 import { competitions, whitelabels } from "@db/schema";
 import { db } from "./db";
 import { dynamicOrigins, addAllowedOrigin } from "./utils/cors-origins";
-import { lte } from "drizzle-orm";
+import { lte, sql } from "drizzle-orm";
 
 // On startup, load all existing whitelabel domains from DB so they survive restarts.
 async function loadWhitelabelOrigins() {
@@ -117,6 +117,26 @@ async function initializeServices() {
   await ensureSystemUser();
   console.log("[Init] System user ensured");
 
+  // Step 0a: Ensure the casino_pinned_categories table exists. Idempotent —
+  // mirrors drizzle/0107_add_casino_pinned_categories.sql so the owner's
+  // pinned-category feature works even where that migration hasn't been applied.
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS public.casino_pinned_categories (
+        category_key  varchar(64) PRIMARY KEY,
+        is_pinned     boolean NOT NULL DEFAULT true,
+        added_by      uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+        added_date    timestamp NOT NULL DEFAULT now(),
+        update_by     uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+        update_date   timestamp NOT NULL DEFAULT now(),
+        record_status integer NOT NULL DEFAULT 1
+      )
+    `);
+    console.log("[Init] casino_pinned_categories table ensured");
+  } catch (e) {
+    console.error("[Init] casino_pinned_categories ensure failed (non-fatal):", e);
+  }
+
   // Step 0b: Sync the staff RBAC catalog + system role templates with what's
   // declared in code (permissions/catalog.ts and permissions/role-templates.ts).
   // Idempotent and safe to run every boot. Without this, prod keeps stale
@@ -133,6 +153,14 @@ async function initializeServices() {
   // Step 1: Connect Redis (non-blocking — app works without it via in-memory cache)
   await connectRedis();
   console.log("[Init] Redis connection attempted");
+
+  // Step 1b: Pre-warm the QTech casino lobby's first page into Redis so the
+  // first visitor after a deploy gets games instantly. Fire-and-forget — never
+  // block startup on QT (it can be slow / IP-gated), and a failure is harmless
+  // (the first real request warms the cache instead).
+  void warmGamesCache()
+    .then(() => console.log("[Init] QTech casino first page warmed"))
+    .catch((e) => console.error("[Init] QTech warm failed (non-fatal):", e?.message ?? e));
 
   // Step 2: Load whitelabel domains (needs DB)
   await loadWhitelabelOrigins();

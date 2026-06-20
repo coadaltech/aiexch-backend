@@ -10,6 +10,7 @@ import { popupsRoutes } from "./popups";
 import { qrCodesRoutes } from "./qrcodes";
 import { settingsRoutes } from "./settings";
 import { sportsGamesRoutes } from "./sports-games";
+import { casinoCategoriesRoutes } from "./casino-categories";
 import { homeSectionsRoutes } from "./home-sections";
 import { kycRoutes } from "./kyc";
 import { vouchersRoutes } from "./vouchers";
@@ -53,6 +54,7 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   .use(qrCodesRoutes)
   .use(settingsRoutes)
   .use(sportsGamesRoutes)
+  .use(casinoCategoriesRoutes)
   .use(homeSectionsRoutes)
   .use(kycRoutes)
   .use(vouchersRoutes)

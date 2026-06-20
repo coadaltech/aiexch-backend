@@ -20,6 +20,8 @@ export type BroadcastChannel =
   | "pinned-events"
   // Owner-pinned competitions that surface in the site's top drop-header nav.
   | "pinned-competitions"
+  // Owner-pinned casino lobby categories that surface in the top drop-header.
+  | "casino-categories"
   // User-balance change. Carries `userId` in the payload so subscribers can
   // ignore changes that don't belong to them (channel is global, fan-out is
   // tiny — every client just filters in onMessage).

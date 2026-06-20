@@ -182,6 +182,55 @@ export const marketManagementRoutes = new Elysia({
     }
   )
 
+  // PUT /owner/market-management/events/:eventId/bulk-settings
+  // Apply min/max bet and bet delay to many markets of an event at once.
+  // The client sends the exact target markets (already filtered by type) so
+  // the update matches what the owner sees on screen.
+  .put(
+    "/events/:eventId/bulk-settings",
+    async ({ params, body, set }) => {
+      try {
+        const result = await AdminMarketService.bulkUpsertMarketSettings(
+          params.eventId,
+          body.markets,
+          {
+            ...(body.betDelay !== undefined && { betDelay: body.betDelay }),
+            ...(body.minBet !== undefined && { minBet: body.minBet }),
+            ...(body.maxBet !== undefined && { maxBet: body.maxBet }),
+          }
+        );
+        return { success: true, data: result };
+      } catch (error) {
+        console.error(
+          "[market-management] PUT /events/:eventId/bulk-settings error:",
+          error
+        );
+        set.status = 500;
+        return {
+          success: false,
+          error: "Failed to apply bulk market settings",
+          detail: (error as Error)?.message,
+        };
+      }
+    },
+    {
+      params: t.Object({ eventId: t.String() }),
+      body: t.Object({
+        markets: t.Array(
+          t.Object({
+            marketId: t.String(),
+            marketName: t.Optional(t.String()),
+            marketType: t.Optional(t.String()),
+            bettingType: t.Optional(t.String()),
+          })
+        ),
+        betDelay: t.Optional(t.Number()),
+        minBet: t.Optional(t.Number()),
+        maxBet: t.Optional(t.Number()),
+      }),
+    }
+  )
+
   // PUT /owner/market-management/markets/:marketId/notice
   // Permission-gated: add/edit the user-facing notice/remark for a market.
   .put(

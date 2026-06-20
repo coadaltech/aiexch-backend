@@ -14,6 +14,7 @@ const KNOWN_CHANNELS: readonly BroadcastChannel[] = [
   "recommended-events",
   "pinned-events",
   "pinned-competitions",
+  "casino-categories",
   "ledger",
   "session",
   "user-notifications",

@@ -1,7 +1,7 @@
 import { getCompetitionsBySportId } from "@services/dashboard/games-service";
 import { getAvailableSportsList } from "@services/sports-service";
 import { db } from "@db/index";
-import { competitions, competitionWhitelabelOverrides, events, eventWhitelabelOverrides, sports } from "@db/schema";
+import { casinoPinnedCategories, competitions, competitionWhitelabelOverrides, events, eventWhitelabelOverrides, sports } from "@db/schema";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { whitelabel_middleware } from "@middleware/whitelabel";
 import Elysia from "elysia";
@@ -206,6 +206,24 @@ export const gamesRoutes = new Elysia({ prefix: "/api/dashboard" })
       return { success: true, data: visible, count: visible.length };
     } catch (error) {
       console.error("Error fetching pinned competitions:", error);
+      return { success: false, data: [], count: 0 };
+    }
+  })
+
+  // ── Drop-header feed: owner-pinned casino categories ─────────────────────
+  // Global (no per-whitelabel scoping): returns the category keys the owner
+  // pinned. The frontend maps them to its code-defined catalogue
+  // (lib/casino-categories.ts) and renders them in the top drop-header.
+  .get("/sidebar/pinned-casino-categories", async () => {
+    try {
+      const rows = await db
+        .select({ key: casinoPinnedCategories.categoryKey })
+        .from(casinoPinnedCategories)
+        .where(eq(casinoPinnedCategories.isPinned, true));
+      const data = rows.map((r) => r.key);
+      return { success: true, data, count: data.length };
+    } catch (error) {
+      console.error("Error fetching pinned casino categories:", error);
       return { success: false, data: [], count: 0 };
     }
   });

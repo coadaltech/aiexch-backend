@@ -20,13 +20,22 @@ import { MarketPipelineService } from "./market-pipeline-service";
 import { SportsService } from "./sports";
 import { db } from "@db/index";
 import { marketSettings } from "@db/schema";
-import { isNotNull } from "drizzle-orm";
+import { isNotNull, inArray } from "drizzle-orm";
 import { redis } from "@db/redis";
 import { RedisGCService } from "./redis-gc-service";
 
 const NOTICE_TTL = RedisGCService.OVERRIDE_TTL_SECONDS;
 
 type SendFn = (data: string) => void;
+
+// DB-sourced bet-condition override for a single market. Each field is null
+// when the owner has not set an override (fall back to the API value).
+interface MarketSettingsOverride {
+  betDelay: number | null;
+  minBet: number | null;
+  maxBet: number | null;
+  maxProfit: number | null;
+}
 
 interface MarketStructure {
   eventOverrides: {
@@ -41,6 +50,11 @@ interface MarketStructure {
   // marketId → owner-authored notice, sourced from the DB (market_settings)
   // every structure refresh so it survives Redis override-hash eviction.
   noticeMap: Map<string, string>;
+  // marketId → owner-set bet condition overrides (bet delay, min/max bet,
+  // max profit), sourced from the DB the same way as noticeMap so they also
+  // survive Redis override-hash eviction (GC / TTL / flush) instead of
+  // silently reverting to the API-supplied defaults.
+  settingsMap: Map<string, MarketSettingsOverride>;
   customMarkets: any[];
 }
 
@@ -213,7 +227,7 @@ export const LiveDataService = {
       ]);
 
       if (eventOverrides.isActive === false) {
-        return { eventOverrides, openMarkets: [], openMarketIds: [], marketOverridesMap: new Map(), noticeMap: new Map(), customMarkets: [] };
+        return { eventOverrides, openMarkets: [], openMarketIds: [], marketOverridesMap: new Map(), noticeMap: new Map(), settingsMap: new Map(), customMarkets: [] };
       }
 
       const openMarkets = (allMarkets || []).filter(
@@ -227,6 +241,7 @@ export const LiveDataService = {
       // Load them here from the DB so they persist even after the volatile
       // admin:market:<id> Redis override hash is GC'd / evicted.
       const noticeMap = new Map<string, string>();
+      const settingsMap = new Map<string, MarketSettingsOverride>();
       try {
         // Match notices by marketId membership (NOT solely by eventId): a notice
         // row can carry a wrong/0 eventId if it was first saved before the panel
@@ -272,8 +287,86 @@ export const LiveDataService = {
             }
           }
         }
+
+        // Bet-condition overrides (bet delay, min/max bet, max profit) follow
+        // the exact same persistence story as notices: the owner panel writes
+        // them to market_settings (source of truth) AND mirrors them into the
+        // volatile admin:market:<id> hash. When that hash is GC'd / TTL-evicted
+        // / flushed, the values would otherwise revert to the API defaults.
+        // Re-source them from the DB here (keyed by marketId so a wrong/0
+        // eventId on the row doesn't lose them) and self-heal Redis so every
+        // read path recovers them.
+        if (eventMarketIds.size > 0) {
+          const settingsRows = await db
+            .select({
+              marketId: marketSettings.marketId,
+              betDelay: marketSettings.betDelay,
+              minBet: marketSettings.minBet,
+              maxBet: marketSettings.maxBet,
+              maxProfit: marketSettings.maxProfit,
+            })
+            .from(marketSettings)
+            .where(inArray(marketSettings.marketId, [...eventMarketIds]));
+
+          for (const r of settingsRows) {
+            const mId = String(r.marketId);
+            const override: MarketSettingsOverride = {
+              betDelay: r.betDelay ?? null,
+              minBet: r.minBet != null ? Number(r.minBet) : null,
+              maxBet: r.maxBet != null ? Number(r.maxBet) : null,
+              maxProfit: r.maxProfit != null ? Number(r.maxProfit) : null,
+            };
+            // Skip rows with no condition override at all.
+            if (
+              override.betDelay == null &&
+              override.minBet == null &&
+              override.maxBet == null &&
+              override.maxProfit == null
+            ) {
+              continue;
+            }
+            settingsMap.set(mId, override);
+
+            // SELF-HEAL: write any DB-set field that's missing/stale in the
+            // admin:market:<id> hash so the standard merge + custom-market +
+            // pipeline (bet-validation) read paths all recover it.
+            if (redis?.isOpen) {
+              try {
+                const key = `admin:market:${mId}`;
+                const current = await redis.hGetAll(key);
+                const patch: Record<string, string> = {};
+                if (
+                  override.betDelay != null &&
+                  current.betDelay !== String(override.betDelay)
+                )
+                  patch.betDelay = String(override.betDelay);
+                if (
+                  override.minBet != null &&
+                  current.minBet !== String(override.minBet)
+                )
+                  patch.minBet = String(override.minBet);
+                if (
+                  override.maxBet != null &&
+                  current.maxBet !== String(override.maxBet)
+                )
+                  patch.maxBet = String(override.maxBet);
+                if (
+                  override.maxProfit != null &&
+                  current.maxProfit !== String(override.maxProfit)
+                )
+                  patch.maxProfit = String(override.maxProfit);
+                if (Object.keys(patch).length > 0) {
+                  await redis.hSet(key, patch);
+                  await redis.expire(key, NOTICE_TTL);
+                }
+              } catch {
+                /* per-market heal is best-effort */
+              }
+            }
+          }
+        }
       } catch {
-        /* non-fatal: fall back to Redis-sourced notice */
+        /* non-fatal: fall back to Redis-sourced notice / settings */
       }
 
       const structure: MarketStructure = {
@@ -282,6 +375,7 @@ export const LiveDataService = {
         openMarketIds,
         marketOverridesMap,
         noticeMap,
+        settingsMap,
         customMarkets,
       };
 
@@ -358,14 +452,25 @@ export const LiveDataService = {
       const adminHidden = overrides?.isVisible === "false";
 
       const apiCondition = market.marketCondition || {};
+      // DB-sourced fallback so an evicted Redis hash doesn't revert the owner's
+      // min/max/delay to the API defaults (mirrors the noticeMap fallback).
+      const dbSettings = structure.settingsMap.get(market.marketId);
       const finalCondition = {
         ...apiCondition,
         betDelay: overrides?.betDelay != null
           ? parseInt(overrides.betDelay)
-          : eventOverrides.betDelay ?? apiCondition.betDelay ?? 0,
-        minBet: overrides?.minBet != null ? parseFloat(overrides.minBet) : apiCondition.minBet,
-        maxBet: overrides?.maxBet != null ? parseFloat(overrides.maxBet) : apiCondition.maxBet,
-        maxProfit: overrides?.maxProfit != null ? parseFloat(overrides.maxProfit) : apiCondition.maxProfit,
+          : dbSettings?.betDelay != null
+            ? dbSettings.betDelay
+            : eventOverrides.betDelay ?? apiCondition.betDelay ?? 0,
+        minBet: overrides?.minBet != null
+          ? parseFloat(overrides.minBet)
+          : dbSettings?.minBet ?? apiCondition.minBet,
+        maxBet: overrides?.maxBet != null
+          ? parseFloat(overrides.maxBet)
+          : dbSettings?.maxBet ?? apiCondition.maxBet,
+        maxProfit: overrides?.maxProfit != null
+          ? parseFloat(overrides.maxProfit)
+          : dbSettings?.maxProfit ?? apiCondition.maxProfit,
         betLock: overrides?.betLock === "true" ? true : apiCondition.betLock,
       };
 
@@ -454,6 +559,29 @@ export const LiveDataService = {
       const trimmed = (patch.notice || "").trim();
       if (trimmed) state.structure.noticeMap.set(marketId, trimmed);
       else state.structure.noticeMap.delete(marketId);
+    }
+
+    // Same for the DB-sourced bet-condition cache: fold an instant min/max/delay
+    // edit into settingsMap so it survives the per-tick marketOverridesMap
+    // refresh even if the Redis hash is evicted before the next 60s heal.
+    if (
+      state.structure &&
+      (patch.betDelay !== undefined ||
+        patch.minBet !== undefined ||
+        patch.maxBet !== undefined ||
+        patch.maxProfit !== undefined)
+    ) {
+      const existing = state.structure.settingsMap.get(marketId) ?? {
+        betDelay: null,
+        minBet: null,
+        maxBet: null,
+        maxProfit: null,
+      };
+      if (patch.betDelay !== undefined) existing.betDelay = patch.betDelay;
+      if (patch.minBet !== undefined) existing.minBet = patch.minBet;
+      if (patch.maxBet !== undefined) existing.maxBet = patch.maxBet;
+      if (patch.maxProfit !== undefined) existing.maxProfit = patch.maxProfit;
+      state.structure.settingsMap.set(marketId, existing);
     }
 
     if (!state.lastMessage) return;

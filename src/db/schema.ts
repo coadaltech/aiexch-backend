@@ -778,6 +778,23 @@ export const homeSectionGames = pgTable("home_section_games", {
   recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
 });
 
+// ── Casino Pinned Categories ─────────────────────────────────────────────────
+// Owner-curated list of casino lobby categories (ROULETTE, LIVECASINO, …) that
+// should surface in the site's top drop-header. The category catalogue itself is
+// code-defined on the frontend (lib/casino-categories.ts); here we only persist
+// which keys are pinned. Global (one row per pinned key, no whitelabel scoping).
+export const casinoPinnedCategories = pgTable("casino_pinned_categories", {
+  // The category key from the frontend catalogue, e.g. "ROULETTE", "LIVECASINO".
+  categoryKey: varchar("category_key", { length: 64 }).primaryKey(),
+  isPinned: boolean("is_pinned").notNull().default(true),
+  // ── Audit ──
+  addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
+  addedDate: timestamp("added_date").defaultNow().notNull(),
+  updateBy: uuid("update_by").default(SYSTEM_USER_ID).notNull(),
+  updateDate: timestamp("update_date").defaultNow().$onUpdate(() => new Date()).notNull(),
+  recordStatus: integer("record_status").default(RecordStatus.Active).notNull(),
+});
+
 // ── Withdrawal Methods ───────────────────────────────────────────────────────
 export const withdrawalMethods = pgTable("withdrawal_methods", {
   id: uuid("id").primaryKey().defaultRandom(),

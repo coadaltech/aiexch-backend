@@ -198,39 +198,79 @@ function mapGame(g: QtGame): QtechLobbyGame {
   };
 }
 
-export async function listGames(opts: ListGamesOptions = {}): Promise<{
-  totalCount: number;
-  games: QtechLobbyGame[];
-}> {
-  const pageSize = opts.size ?? PAGE_SIZE;
-  const baseParams = {
+// Shared query params for /v2/games. Most-popular first (§8.1: popularity sort
+// must pair with orderBy=DESC); the cursor pagination preserves this order
+// across pages.
+function buildListParams(opts: ListGamesOptions, pageSize: number) {
+  return {
     size: pageSize,
-    // Most-popular first (§8.1: popularity sort must pair with orderBy=DESC).
-    // The cursor pagination preserves this order across pages.
     sortBy: "popularity",
     orderBy: "DESC",
     ...(opts.providers ? { providers: opts.providers } : {}),
     ...(opts.currencies ? { currencies: opts.currencies } : {}),
     ...(opts.gameTypes ? { gameTypes: opts.gameTypes } : {}),
   };
-  const headers = { "Accept-Language": opts.acceptLanguage || "en-US" };
+}
 
+export interface GamesPage {
+  totalCount: number;
+  games: QtechLobbyGame[];
+  /** Opaque cursor for the following page, or null on the last page. */
+  nextCursor: string | null;
+}
+
+/**
+ * Fetch a SINGLE page of the catalogue (§8.1) plus the cursor for the next page.
+ *
+ * This is one round-trip to QT, so it returns fast and never risks the long
+ * multi-page walk in listGames(). The lobby uses it for infinite scroll: it
+ * loads the first page on open, then pulls further pages as the user scrolls or
+ * switches category — so the initial paint is quick and there is no timeout.
+ */
+export async function listGamesPage(
+  opts: ListGamesOptions & { cursor?: string | null } = {},
+): Promise<GamesPage> {
+  const pageSize = opts.size ?? PAGE_SIZE;
+  const data = await authed<QtGameListResponse>("get", "/v2/games", {
+    params: {
+      ...buildListParams(opts, pageSize),
+      ...(opts.cursor ? { cursor: opts.cursor } : {}),
+    },
+    headers: { "Accept-Language": opts.acceptLanguage || "en-US" },
+  });
+
+  // Dedupe by id as a belt-and-braces guard against any overlap within a page.
+  const byId = new Map<string, QtechLobbyGame>();
+  for (const g of data.items || []) byId.set(g.id, mapGame(g));
+
+  return {
+    totalCount: Number(data.totalCount) || byId.size,
+    games: Array.from(byId.values()),
+    nextCursor: nextCursor(data.links),
+  };
+}
+
+/**
+ * Collect the ENTIRE catalogue by walking every cursor page. This is the heavy
+ * call (one HTTP round-trip per page, ~13k games today) — use it for offline
+ * sync jobs, NOT request paths. The lobby uses listGamesPage() instead.
+ */
+export async function listGames(opts: ListGamesOptions = {}): Promise<{
+  totalCount: number;
+  games: QtechLobbyGame[];
+}> {
   // Dedupe by id as a belt-and-braces guard against any overlap between pages.
   const byId = new Map<string, QtechLobbyGame>();
   let totalCount = 0;
   let cursor: string | null = null;
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const data = await authed<QtGameListResponse>("get", "/v2/games", {
-      params: { ...baseParams, ...(cursor ? { cursor } : {}) },
-      headers,
-    });
+    const res = await listGamesPage({ ...opts, cursor });
+    for (const g of res.games) byId.set(g.id, g);
+    totalCount = res.totalCount || totalCount;
 
-    for (const g of data.items || []) byId.set(g.id, mapGame(g));
-    totalCount = Number(data.totalCount) || totalCount;
-
-    // Advance to the next page; absence of a `next` link means we're done.
-    cursor = nextCursor(data.links);
+    // Advance to the next page; absence of a `next` cursor means we're done.
+    cursor = res.nextCursor;
     if (!cursor) break;
   }
 

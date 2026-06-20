@@ -224,6 +224,64 @@ export const AdminMarketService = {
   },
 
   /**
+   * Apply the same bet-condition overrides (min bet, max bet, bet delay) to
+   * every market the caller targets in one shot — used by the owner panel's
+   * "apply to all markets of this type" control. The caller passes the exact
+   * markets it wants updated (already filtered by market/betting type on the
+   * client, so custom markets and the precise on-screen set are honoured).
+   * Each market is routed through upsertMarketSettings so it gets the same DB
+   * write + Redis mirror + instant live patch as a single-market edit.
+   */
+  async bulkUpsertMarketSettings(
+    eventId: string,
+    markets: Array<{
+      marketId: string;
+      marketName?: string;
+      marketType?: string;
+      bettingType?: string;
+    }>,
+    values: { betDelay?: number; minBet?: number; maxBet?: number }
+  ) {
+    const hasValue =
+      values.betDelay !== undefined ||
+      values.minBet !== undefined ||
+      values.maxBet !== undefined;
+    if (!hasValue || markets.length === 0) {
+      return { success: true, count: 0, marketIds: [] as string[] };
+    }
+
+    const updated: string[] = [];
+    const failed: string[] = [];
+    for (const m of markets) {
+      try {
+        await AdminMarketService.upsertMarketSettings(m.marketId, {
+          eventId,
+          ...(m.marketName !== undefined && { marketName: m.marketName }),
+          ...(m.marketType !== undefined && { marketType: m.marketType }),
+          ...(m.bettingType !== undefined && { bettingType: m.bettingType }),
+          ...(values.betDelay !== undefined && { betDelay: values.betDelay }),
+          ...(values.minBet !== undefined && { minBet: values.minBet }),
+          ...(values.maxBet !== undefined && { maxBet: values.maxBet }),
+        });
+        updated.push(m.marketId);
+      } catch (err) {
+        console.error(
+          `[AdminMarket] bulk update failed for market ${m.marketId}:`,
+          (err as Error)?.message
+        );
+        failed.push(m.marketId);
+      }
+    }
+
+    return {
+      success: true,
+      count: updated.length,
+      marketIds: updated,
+      failed,
+    };
+  },
+
+  /**
    * Set (or clear) the user-facing notice/remark on a market. The notice is
    * persisted on market_settings, mirrored into the `admin:market:<id>` Redis
    * hash (so the live pipeline picks it up each tick) and instantly patched

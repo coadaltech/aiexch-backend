@@ -750,6 +750,13 @@
       "when": 1781945343553,
       "tag": "0106_illegal_frank_castle",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1781961938641,
+      "tag": "0107_huge_ken_ellis",
+      "breakpoints": true
     }
   ]
 }

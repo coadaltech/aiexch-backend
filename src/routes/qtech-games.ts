@@ -4,8 +4,9 @@ import { db } from "@db/index";
 import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
+import { CacheService } from "../services/cache";
 import {
-  listGames,
+  listGamesPage,
   getLaunchUrl,
   clientInfo,
   type QtechLobbyGame,
@@ -22,9 +23,64 @@ import {
  *   GET  /qtech-casino/health   diag    : client/config status
  */
 
-// Small in-memory cache so the lobby doesn't re-hit QT on every page load.
-const CACHE_TTL_MS = 5 * 60 * 1000;
-let cache: { at: number; data: { totalCount: number; games: QtechLobbyGame[] } } | null = null;
+// Each catalogue page is cached in Redis (via CacheService's L1-memory →
+// L2-Redis tiers) so the lobby loads instantly on refresh / re-entry instead of
+// re-hitting QT. Cache is keyed by the page's params (size + cursor + filters)
+// so every infinite-scroll page is cached independently.
+//
+// Strategy = stale-while-revalidate:
+//   • SOFT_TTL — after this the cached page is still served INSTANTLY, but we
+//     kick off a background refresh so the next request gets fresh data.
+//   • HARD_TTL — how long the entry physically survives in Redis. Kept long so a
+//     page is essentially always warm (and survives a backend restart), which
+//     is what makes the first 100-150 games appear instantly.
+type PageData = { totalCount: number; games: QtechLobbyGame[]; nextCursor: string | null };
+type CachedPage = { at: number; data: PageData };
+
+const SOFT_TTL_MS = 5 * 60 * 1000; // 5 min → refresh in background after this
+const HARD_TTL_S = 60 * 60; // keep in Redis up to 1h so it's always warm
+
+function cacheKeyFor(opts: Record<string, unknown>) {
+  return `qtech:games:${JSON.stringify(opts)}`;
+}
+
+// De-dupe concurrent upstream fetches for the same page (cache stampede guard):
+// if 50 users hit a cold first page at once, we call QT once and share the result.
+const inflight = new Map<string, Promise<PageData>>();
+
+async function fetchAndCache(cacheKey: string, opts: any): Promise<PageData> {
+  const existing = inflight.get(cacheKey);
+  if (existing) return existing;
+  const p = (async () => {
+    const data = await listGamesPage(opts);
+    await CacheService.set(cacheKey, { at: Date.now(), data } as CachedPage, HARD_TTL_S);
+    return data;
+  })().finally(() => inflight.delete(cacheKey));
+  inflight.set(cacheKey, p);
+  return p;
+}
+
+// Default per-page size. Big enough to fill the first screen (and seed the
+// category tabs) in one fast round-trip, small enough to stay well under any
+// request timeout. Further pages load on scroll / category change.
+const DEFAULT_PAGE_SIZE = 200;
+
+/**
+ * Pre-warm the first catalogue page into Redis on startup, so the very first
+ * visitor after a deploy gets the lobby instantly instead of paying for the
+ * cold QT round-trip. Non-fatal: a failure (e.g. QT IP not whitelisted on this
+ * box) just means the first real request warms the cache instead.
+ */
+export async function warmGamesCache(): Promise<void> {
+  const opts = {
+    size: DEFAULT_PAGE_SIZE,
+    cursor: null,
+    providers: undefined,
+    currencies: undefined,
+    gameTypes: undefined,
+  };
+  await fetchAndCache(cacheKeyFor(opts), opts);
+}
 
 // Default game-launch currency. The user's wallet is tracked in this currency
 // for QTech rounds until per-user currency selection lands.
@@ -34,18 +90,37 @@ const PLAYER_ID_MAX = 34;
 
 export const qtechGamesRoutes = new Elysia({ prefix: "/qtech-casino" })
   .get("/games", async ({ query, set }) => {
+    // One catalogue page per request. `cursor` (echoed back from a previous
+    // response's nextCursor) walks the pages; the lobby requests the next page
+    // on scroll / category change, so no single request loads the whole ~13k
+    // catalogue and there is no timeout.
+    const size = query?.size ? Number(query.size) : DEFAULT_PAGE_SIZE;
+    const cursor = query?.cursor || null;
+    const opts = {
+      size,
+      cursor,
+      providers: query?.providers,
+      currencies: query?.currencies,
+      gameTypes: query?.gameTypes,
+    };
+    const cacheKey = cacheKeyFor(opts);
     const nocache = query?.refresh === "1";
-    if (!nocache && cache && Date.now() - cache.at < CACHE_TTL_MS) {
-      return { success: true, cached: true, ...cache.data };
+
+    if (!nocache) {
+      const cached = await CacheService.get<CachedPage>(cacheKey);
+      if (cached?.data) {
+        // Stale-while-revalidate: serve instantly. If the entry is past its soft
+        // TTL, refresh in the background (fire-and-forget) so the next request is
+        // fresh — the current caller never waits on QT.
+        if (Date.now() - cached.at > SOFT_TTL_MS) {
+          void fetchAndCache(cacheKey, opts).catch(() => {});
+        }
+        return { success: true, cached: true, ...cached.data };
+      }
     }
+
     try {
-      const data = await listGames({
-        size: query?.size ? Number(query.size) : 500,
-        providers: query?.providers,
-        currencies: query?.currencies,
-        gameTypes: query?.gameTypes,
-      });
-      cache = { at: Date.now(), data };
+      const data = await fetchAndCache(cacheKey, opts);
       return { success: true, cached: false, ...data };
     } catch (err: any) {
       const upstream = err?.response?.data ?? err?.message ?? String(err);
