@@ -26,7 +26,9 @@ export const whitelabelTypeEnum = pgEnum("whitelabel_type", ["B2B", "B2C"]);
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   username: varchar("username", { length: 50 }).notNull().unique(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
+  // Email is optional. Postgres unique allows multiple NULLs, so accounts
+  // created without an email don't collide; real emails stay unique.
+  email: varchar("email", { length: 255 }).unique(),
   password: varchar("password", { length: 255 }).notNull(),
   role: integer("role").default(UserRole.User).notNull(),
   groupId: integer("group_id"),

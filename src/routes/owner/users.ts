@@ -39,6 +39,10 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
       // Normalize usernames to lowercase at the boundary so duplicate-check
       // and login lookups are case-insensitive ("Alice" === "alice").
       const username: string = String(rawUsername ?? "").trim().toLowerCase();
+      // Email is optional — treat blank/whitespace as "no email" (NULL) so the
+      // unique constraint doesn't trip on multiple email-less accounts.
+      const emailVal: string | null =
+        email && String(email).trim() ? String(email).trim().toLowerCase() : null;
       const addedBy = userId;
       let whitelabelId: string | null =
         bodyWhitelabelId != null
@@ -63,14 +67,16 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         whitelabelId = scope.scopeWhitelabelId;
       }
 
-      // Check if user already exists
-      const existingUser = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, email));
-      if (existingUser.length > 0) {
-        set.status = 409;
-        return { success: false, message: "Email already registered" };
+      // Check if email already exists (only when one was provided)
+      if (emailVal) {
+        const existingUser = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, emailVal));
+        if (existingUser.length > 0) {
+          set.status = 409;
+          return { success: false, message: "Email already registered" };
+        }
       }
 
       // Case-insensitive duplicate check: handles legacy mixed-case rows.
@@ -113,7 +119,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
         .insert(users)
         .values({
           username,
-          email,
+          email: emailVal,
           password: hashedPassword,
           role: finalRole,
           accountStatus: true,
@@ -194,7 +200,7 @@ export const usersRoutes = new Elysia({ prefix: "/users" })
     {
       body: t.Object({
         username: t.String({ minLength: 3, maxLength: 50 }),
-        email: t.String({ format: "email" }),
+        email: t.Optional(t.String()),
         password: t.String({ minLength: 6 }),
         role: t.Optional(t.Union([
           t.Literal("owner"),
