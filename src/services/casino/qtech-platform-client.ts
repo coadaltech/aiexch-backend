@@ -294,6 +294,8 @@ export interface LaunchUrlRequest {
 }
 
 export async function getLaunchUrl(req: LaunchUrlRequest): Promise<{ url: string }> {
+
+  console.log("----------------------------")
   const mode = req.mode || "demo";
   const body: Record<string, unknown> = {
     currency: req.currency || "USD",
@@ -305,12 +307,17 @@ export async function getLaunchUrl(req: LaunchUrlRequest): Promise<{ url: string
   // playerId, country and walletSessionId are not required in demo mode (§5.1).
   if (mode === "real") {
     body.playerId = req.playerId;
-    body.country = req.country || "CN";
+    body.country = req.country || "IN";
     body.walletSessionId = req.walletSessionId;
   }
-  return authed<{ url: string }>("post", `/v1/games/${encodeURIComponent(req.gameId)}/launch-url`, {
+  console.log("[testong] →", JSON.stringify({ gameId: req.gameId, body }));
+  // print the response of the launch-url
+  const resp = await authed<{ url: string }>("post", `/v1/games/${encodeURIComponent(req.gameId)}/launch-url`, {
     data: body,
   });
+  console.log("................",resp)
+  console.log("[launch-url response] ←", JSON.stringify({ url: resp.url }));
+  return resp;
 }
 
 export function clientInfo() {

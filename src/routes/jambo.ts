@@ -233,8 +233,8 @@ export const jamboRoutes = new Elysia({ prefix: "/jambo" })
   // ── Protected routes ─────────────────────────────────────────────────────
   // Per-request user context via .resolve() (NOT .state(), which is module-shared
   // and would leak userId across concurrent bet placements).
-  .resolve(async ({ cookie, headers, status }) => {
-    const state_result = await app_middleware({ cookie, headers });
+  .resolve(async ({ cookie, headers, status, request }) => {
+    const state_result = await app_middleware({ cookie, headers, request });
     if (!state_result.data) {
       return status(state_result.code as 401 | 403 | 404 | 500, state_result);
     }

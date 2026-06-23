@@ -130,11 +130,11 @@ export const qtechGamesRoutes = new Elysia({ prefix: "/qtech-casino" })
   })
 
   // Authed from here on. /games above is public for the lobby grid.
-  .resolve(async ({ cookie, headers, status, path }) => {
+  .resolve(async ({ cookie, headers, status, path, request }) => {
     if (path === "/qtech-casino/games" || path === "/qtech-casino/health") {
       return { userId: "", username: "" };
     }
-    const result = await app_middleware({ cookie, headers });
+    const result = await app_middleware({ cookie, headers, request });
     if (!result.data) {
       return status(result.code as 401 | 403 | 404 | 500, result);
     }
@@ -198,7 +198,7 @@ export const qtechGamesRoutes = new Elysia({ prefix: "/qtech-casino" })
           return { success: false, message: "Launch URL not returned", upstream: resp };
         }
         // eslint-disable-next-line no-console
-        console.log("[qtech:launch] ←", JSON.stringify({ url: resp.url }));
+        console.log("[qtech:launch] qweqwewqe←", JSON.stringify({ url: resp.url }));
         return {
           success: true,
           url: resp.url,

@@ -13,8 +13,8 @@ import { app_middleware } from "../middleware/auth";
 
 export const multimarketsRoutes = new Elysia({ prefix: "/api/user/multimarkets" })
   // Per-request user context via .resolve() (NOT .state(), which is module-shared).
-  .resolve(async ({ cookie, headers, status }) => {
-    const state_result = await app_middleware({ cookie, headers });
+  .resolve(async ({ cookie, headers, status, request }) => {
+    const state_result = await app_middleware({ cookie, headers, request });
     if (!state_result.data) {
       return status(state_result.code as 401 | 403 | 404 | 500, state_result);
     }

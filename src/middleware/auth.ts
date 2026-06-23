@@ -5,11 +5,18 @@ import { db } from "@db/index";
 import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { decodeToken } from "@services/token";
+import { verifyDpopProof } from "@services/dpop";
 
 interface ElysiaMiddlewareType {
   cookie: Record<string, Cookie<string | undefined | unknown>>;
   headers?: Record<string, string | undefined>;
   allowed?: number[];
+  /**
+   * The raw request — required to enforce DPoP (we need the method + path + the
+   * `DPoP` proof header). When a token is key-bound (cnf.jkt) but no request is
+   * supplied, the call fails closed.
+   */
+  request?: Request;
 }
 
 const secretKey = process.env.JWT_SECRET!;
@@ -21,7 +28,12 @@ export const authenticate_jwt = (access_token: string) => {
       success: true,
       code: 200,
       message: "Valid Access Token",
-      data: decoded as { id: string; role: RoleType; sessionToken?: string },
+      data: decoded as {
+        id: string;
+        role: RoleType;
+        sessionToken?: string;
+        cnf?: { jkt?: string };
+      },
     };
   } catch (err) {
     return {
@@ -32,7 +44,7 @@ export const authenticate_jwt = (access_token: string) => {
   }
 };
 
-export const app_middleware = async ({ cookie, headers, allowed }: ElysiaMiddlewareType) => {
+export const app_middleware = async ({ cookie, headers, allowed, request }: ElysiaMiddlewareType) => {
   // Prefer Authorization header (works cross-domain on Safari), fall back to cookie
   const authHeader = headers?.authorization;
   const tokenFromHeader = authHeader?.replace(/^Bearer\s+/i, "").trim();
@@ -66,6 +78,27 @@ export const app_middleware = async ({ cookie, headers, allowed }: ElysiaMiddlew
       code: 403,
       message: "Restricted Endpoint",
     };
+  }
+
+  // ── DPoP (sender-constrained tokens) ──────────────────────────────────────
+  // If the access token is key-bound (carries cnf.jkt), require a valid DPoP
+  // proof for THIS request, signed by the matching key. A stolen token alone is
+  // then useless — the thief can't produce a proof without the private key.
+  // Tokens without cnf (legacy / pre-DPoP clients) skip this, so rollout is
+  // backward compatible.
+  const boundJkt = middleware_response.data.cnf?.jkt;
+  if (boundJkt) {
+    if (!request) {
+      // A bound token reached a route that didn't forward the request — never
+      // accept it unverified.
+      return { success: false, code: 401, message: "DPoP verification unavailable" };
+    }
+    const proof = request.headers.get("dpop") ?? undefined;
+    const path = new URL(request.url).pathname;
+    const dpop = await verifyDpopProof(proof, request.method, path);
+    if (!dpop.ok || dpop.jkt !== boundJkt) {
+      return { success: false, code: 401, message: "Invalid or missing DPoP proof" };
+    }
   }
 
   // ── Session token validation ──────────────────────────────────────────────

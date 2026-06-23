@@ -65,7 +65,7 @@ export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
 
       // Resolve signed-in user (if any). Anonymous callers still get the list,
       // just with betCount = 0 for every row.
-      const auth = await app_middleware({ cookie, headers });
+      const auth = await app_middleware({ cookie, headers, request });
       const userId = auth?.success && auth.data?.id ? auth.data.id : undefined;
 
       const data = await SportsService.getMatchesWithDefaultMarkets(

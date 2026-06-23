@@ -60,7 +60,7 @@ const app = new Elysia()
         return dynamicOrigins.has(origin);
       },
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain", "DPoP"],
       credentials: true,
     }),
   )
@@ -138,9 +138,9 @@ async function initializeServices() {
   // first visitor after a deploy gets games instantly. Fire-and-forget — never
   // block startup on QT (it can be slow / IP-gated), and a failure is harmless
   // (the first real request warms the cache instead).
-  void warmGamesCache()
-    .then(() => console.log("[Init] QTech casino first page warmed"))
-    .catch((e) => console.error("[Init] QTech warm failed (non-fatal):", e?.message ?? e));
+  // void warmGamesCache()
+  //   .then(() => console.log("[Init] QTech casino first page warmed"))
+  //   .catch((e) => console.error("[Init] QTech warm failed (non-fatal):", e?.message ?? e));
 
   // Step 2: Load whitelabel domains (needs DB)
   await loadWhitelabelOrigins();

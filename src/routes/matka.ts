@@ -205,8 +205,8 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
   // Per-request user context via .resolve() (NOT .state(), which is module-shared
   // and leaks userId across concurrent requests). See betting.ts for the full
   // explanation of the original bug.
-  .resolve(async ({ cookie, headers, status }) => {
-    const state_result = await app_middleware({ cookie, headers });
+  .resolve(async ({ cookie, headers, status, request }) => {
+    const state_result = await app_middleware({ cookie, headers, request });
     if (!state_result.data) {
       return status(state_result.code as 401 | 403 | 404 | 500, state_result);
     }
