@@ -10,6 +10,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { RecordStatus, MatkaSportType } from "../../types/enums";
 import { requirePermission } from "../../middleware/permissions";
+import { istInstantMs } from "../../utils/shift-time";
 
 // Highest jambo number. Triple bets span 1..1000; the live-prediction grid and
 // the declared result share this range. Jodi/akhar bets are folded into the
@@ -596,20 +597,19 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
 
         // Server-side enforcement of the main-jantri cutoff (mirrors matka).
         if (shift.mainJantriTime) {
-          const [jH, jM] = shift.mainJantriTime.split(":").map(Number);
-          const jantriAt = new Date(shift.shiftDate);
-          jantriAt.setHours(jH, jM, 0, 0);
-          if (shift.nextDayAllow) {
-            jantriAt.setDate(jantriAt.getDate() + 1);
-          }
-          const msLeft = jantriAt.getTime() - Date.now();
+          const jantriMs = istInstantMs(
+            shift.shiftDate,
+            shift.mainJantriTime,
+            shift.nextDayAllow
+          );
+          const msLeft = jantriMs - Date.now();
           if (msLeft > 0) {
             set.status = 400;
             return {
               success: false,
               error: "Main jantri time not reached",
               msLeft,
-              mainJantriAt: jantriAt.toISOString(),
+              mainJantriAt: new Date(jantriMs).toISOString(),
             };
           }
         }
@@ -661,6 +661,8 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
   .get("/live-prediction/declared-history", async ({ query, set }: any) => {
     try {
       const limit = Math.min(Number(query?.limit ?? 50), 200);
+      // Optional: restrict to the shift selected in the live-prediction header.
+      const shiftId = (query?.shiftId as string | undefined) || undefined;
       const rows = await db
         .select({
           id: declareResult.declareId,
@@ -675,7 +677,8 @@ export const jamboOwnerRoutes = new Elysia({ prefix: "/jambo" })
         .where(
           and(
             eq(declareResult.recordStatus, RecordStatus.Active),
-            eq(matkaShifts.sportType, MatkaSportType.Jambo)
+            eq(matkaShifts.sportType, MatkaSportType.Jambo),
+            ...(shiftId ? [eq(declareResult.shiftId, shiftId)] : [])
           )
         )
         .orderBy(desc(declareResult.addedDate))

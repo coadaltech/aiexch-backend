@@ -14,6 +14,7 @@ import {
 import { eq, and, desc, sql, ne, gte, lte } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
 import { parseUserAgent } from "../utils/parse-ua";
+import { istInstantMs } from "../utils/shift-time";
 import { RecordStatus, UserRole, MatkaSportType } from "../types/enums";
 
 export const matkaRoutes = new Elysia({ prefix: "/matka" })
@@ -58,13 +59,10 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         .orderBy(matkaShifts.shiftOrder);
 
       // Filter carry-over shifts: only include if the end time hasn't passed yet today
-      const now = new Date();
+      const nowMs = Date.now();
       const activeCarryOvers = carryOverShifts.filter((s) => {
         if (!s.endTime) return false;
-        const [h, m] = s.endTime.split(":").map(Number);
-        const endToday = new Date(dateFilter);
-        endToday.setHours(h, m, 0, 0);
-        return now < endToday;
+        return nowMs < istInstantMs(dateFilter, s.endTime);
       });
 
       // Shifts whose result was just declared are parked at 1970-01-01
@@ -272,13 +270,12 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         // second. `end_time` is HH:MM local to the shift_date (extended to
         // the next day when nextDayAllow is true).
         if (shift.endTime) {
-          const [endH, endM] = shift.endTime.split(":").map(Number);
-          const endAt = new Date(shift.shiftDate);
-          endAt.setHours(endH, endM, 0, 0);
-          if (shift.nextDayAllow) {
-            endAt.setDate(endAt.getDate() + 1);
-          }
-          if (new Date().getTime() >= endAt.getTime()) {
+          const endMs = istInstantMs(
+            shift.shiftDate,
+            shift.endTime,
+            shift.nextDayAllow
+          );
+          if (Date.now() >= endMs) {
             set.status = 400;
             return { success: false, error: "Shift betting time has closed" };
           }
@@ -286,14 +283,12 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
 
         // Additional main-jantri cutoff (kept for shifts that use it).
         if (shift.mainJantriTime) {
-          const now = new Date();
-          const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
-          const shiftTime = new Date(shift.shiftDate);
-          shiftTime.setHours(hours, minutes, 0, 0);
-          if (shift.nextDayAllow) {
-            shiftTime.setDate(shiftTime.getDate() + 1);
-          }
-          if (now > shiftTime) {
+          const shiftMs = istInstantMs(
+            shift.shiftDate,
+            shift.mainJantriTime,
+            shift.nextDayAllow
+          );
+          if (Date.now() > shiftMs) {
             set.status = 400;
             return { success: false, error: "Shift betting time has closed" };
           }
@@ -865,14 +860,12 @@ export const matkaRoutes = new Elysia({ prefix: "/matka" })
         }
 
         if (shift.mainJantriTime) {
-          const now = new Date();
-          const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
-          const shiftTime = new Date(shift.shiftDate);
-          shiftTime.setHours(hours, minutes, 0, 0);
-          if (shift.nextDayAllow) {
-            shiftTime.setDate(shiftTime.getDate() + 1);
-          }
-          if (now > shiftTime) {
+          const shiftMs = istInstantMs(
+            shift.shiftDate,
+            shift.mainJantriTime,
+            shift.nextDayAllow
+          );
+          if (Date.now() > shiftMs) {
             set.status = 400;
             return { success: false, error: "Shift betting time has closed" };
           }
