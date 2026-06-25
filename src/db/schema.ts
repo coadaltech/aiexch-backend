@@ -385,6 +385,20 @@ export const settings = pgTable("settings", {
   maintenanceMessage: text("maintenance_message").default(
     "We are currently performing scheduled maintenance. Please check back soon."
   ),
+  // ── Theme Management ──
+  // Layout/structure themes (separate from the `theme` color overlay above).
+  // `activeTheme` is the admin-configured default theme key served to users
+  // who haven't picked one. `enabledThemes` is the JSON array of theme keys
+  // users are allowed to switch between on the site. New themes are added on
+  // the frontend (a /themes folder) and simply listed here — no schema change.
+  activeTheme: varchar("active_theme", { length: 50 }).default("default"),
+  enabledThemes: text("enabled_themes").default(
+    JSON.stringify(["default", "diamond", "betfair"])
+  ),
+  // ── Home notice ticker ──
+  // Scrolling marquee shown on the home page (and casino pages). One notice item
+  // per line; the frontend joins them with separators. Empty → built-in defaults.
+  homeNotice: text("home_notice"),
   // ── Audit ──
   addedBy: uuid("added_by").default(SYSTEM_USER_ID).notNull(),
   addedDate: timestamp("added_date").defaultNow().notNull(),

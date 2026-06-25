@@ -17,6 +17,10 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
             typeof siteSettings.theme === "string"
               ? JSON.parse(siteSettings.theme)
               : siteSettings.theme,
+          enabledThemes:
+            typeof siteSettings.enabledThemes === "string"
+              ? JSON.parse(siteSettings.enabledThemes)
+              : siteSettings.enabledThemes,
         },
       };
     }
@@ -34,6 +38,12 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
         // Convert string booleans from FormData to actual booleans
         if (typeof updateData.maintenanceMode === "string") {
           updateData.maintenanceMode = updateData.maintenanceMode === "true";
+        }
+
+        // enabledThemes arrives as a JSON string (or array); store as a JSON
+        // string in the text column. Accept both shapes defensively.
+        if (Array.isArray(updateData.enabledThemes)) {
+          updateData.enabledThemes = JSON.stringify(updateData.enabledThemes);
         }
 
         // Handle file uploads
@@ -107,6 +117,12 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
         theme: t.Optional(t.String()),
         maintenanceMode: t.Optional(t.Union([t.Boolean(), t.String()])),
         maintenanceMessage: t.Optional(t.String()),
+        // ── Theme Management ──
+        activeTheme: t.Optional(t.String()),
+        // JSON-encoded string array of enabled theme keys, e.g. '["default","diamond"]'
+        enabledThemes: t.Optional(t.Union([t.String(), t.Array(t.String())])),
+        // ── Home notice ticker (one item per line) ──
+        homeNotice: t.Optional(t.String()),
       }),
     }
   );

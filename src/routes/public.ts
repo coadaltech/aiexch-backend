@@ -125,6 +125,16 @@ export const publicRoutes = new Elysia({ prefix: "/public" })
     const domain = headers["x-whitelabel-domain"];
     const data = await myDb.query.settings.findFirst();
 
+    // Parse the enabled-themes list to an array so the frontend theme switcher
+    // receives a ready-to-use list regardless of which branch returns below.
+    if (data && typeof (data as any).enabledThemes === "string") {
+      try {
+        (data as any).enabledThemes = JSON.parse((data as any).enabledThemes);
+      } catch {
+        (data as any).enabledThemes = ["default"];
+      }
+    }
+
     // Check if domain is whitelabeled
     if (domain) {
       const whitelabel = await myDb.query.whitelabels.findFirst({
@@ -140,12 +150,35 @@ export const publicRoutes = new Elysia({ prefix: "/public" })
             ? JSON.parse(whitelabel.theme)
             : whitelabel.theme;
 
+        // Per-white-label LAYOUT theme lives on the whitelabel `layout` JSON
+        // ({ sidebarType, bannerType, activeTheme, enabledThemes }). Surface it
+        // as the top-level activeTheme/enabledThemes so a visitor on this domain
+        // gets this white label's default + switch list, overriding the global
+        // settings values. Falls back to the global values when not configured.
+        let wlLayout: any = whitelabel.layout;
+        if (typeof wlLayout === "string") {
+          try {
+            wlLayout = JSON.parse(wlLayout);
+          } catch {
+            wlLayout = null;
+          }
+        }
+        const activeTheme = wlLayout?.activeTheme ?? (data as any)?.activeTheme;
+        const enabledThemes = Array.isArray(wlLayout?.enabledThemes)
+          ? wlLayout.enabledThemes
+          : (data as any)?.enabledThemes;
+        // Per-theme colour overrides (Diamond / Betfair …) edited per white label.
+        const themeColors = wlLayout?.themeColors ?? null;
+
         set.status = 200;
         return {
           success: true,
           data: {
             ...data,
             whitelabelTheme,
+            activeTheme,
+            enabledThemes,
+            themeColors,
             siteName: whitelabel.name || data?.siteName,
             logo: whitelabel.logo || data?.logo,
             favicon: whitelabel.favicon || data?.favicon,
