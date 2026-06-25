@@ -72,7 +72,15 @@ const activeEvents = new Map<string, EventState>();
 
 const MIN_POLL_GAP_MS = 200;
 const STRUCTURE_REFRESH_MS = 60_000;
-const POLL_TIMEOUT_MS = 5_000; // if getOdds hangs for >5s, skip the tick
+const POLL_TIMEOUT_MS = 15_000; // if getOdds hangs for >15s, skip the tick
+
+// Warm-snapshot cache. Every broadcast is mirrored to Redis so a freshly-opened
+// match page (a cold event with no in-memory loop yet) can be served the last
+// known snapshot instantly instead of waiting ~1–2s for the first external odds
+// poll. Kept short so we never serve badly stale data — the live loop refreshes
+// it within one tick of subscribing.
+const SNAPSHOT_TTL_SECONDS = 120;
+const snapshotKey = (eventId: string) => `live:snapshot:${eventId}`;
 
 export const LiveDataService = {
   subscribe(clientId: string, send: SendFn, eventId: string, eventTypeId: string) {
@@ -96,6 +104,12 @@ export const LiveDataService = {
     // Send last cached data immediately to new subscriber
     if (state.lastMessage) {
       try { send(state.lastMessage); } catch { /* ignore */ }
+    } else {
+      // Cold event: no in-memory snapshot yet, so the first poll has to await an
+      // external odds call before anything is broadcast. Serve the Redis warm
+      // snapshot (left by any recent viewer) instantly so the page paints now
+      // instead of showing a loading spinner for ~1–2s. Fire-and-forget.
+      void this._sendWarmSnapshot(eventId, clientId, send);
     }
 
     // Start poll loop if not already running
@@ -430,6 +444,7 @@ export const LiveDataService = {
         timestamp: now,
       });
       state.lastMessage = message;
+      this._persistSnapshot(eventId, message);
       this._broadcast(state, message);
       return;
     }
@@ -486,6 +501,8 @@ export const LiveDataService = {
         status: isSuspended ? "SUSPENDED" : (marketOdds?.status ?? market.status),
         inPlay: market.inPlay,
         bettingType: market.bettingType,
+        // Betfair line/fancy flag — kept so the UI can group them ("Betfair Fancy").
+        isLineMarket: market.isLineMarket ?? false,
         provider: market.provider ?? "BETFAIR",
         marketCondition: finalCondition,
         sportingEvent: marketOdds?.sportingEvent ?? market.sportingEvent,
@@ -524,6 +541,7 @@ export const LiveDataService = {
       timestamp: Date.now(),
     });
     state.lastMessage = message;
+    this._persistSnapshot(eventId, message);
     this._broadcast(state, message);
 
     // Fire-and-forget: update Redis live cache for bet validation
@@ -659,6 +677,32 @@ export const LiveDataService = {
       timestamp: Date.now(),
     });
     this._broadcast(state, message);
+  },
+
+  // Mirror the latest broadcast to Redis so a future cold subscriber can be
+  // served instantly. Fire-and-forget — a Redis hiccup must never stall the
+  // poll loop.
+  _persistSnapshot(eventId: string, message: string) {
+    if (!redis?.isOpen) return;
+    redis
+      .set(snapshotKey(eventId), message, { EX: SNAPSHOT_TTL_SECONDS })
+      .catch(() => { /* best-effort warm cache */ });
+  },
+
+  // Serve the Redis warm snapshot to a single just-subscribed client on a cold
+  // event. No-op if there's nothing cached, the client already left, or a live
+  // poll has meanwhile produced a fresh message (so we never overwrite newer
+  // data with the cached copy).
+  async _sendWarmSnapshot(eventId: string, clientId: string, send: SendFn) {
+    if (!redis?.isOpen) return;
+    try {
+      const cached = await redis.get(snapshotKey(eventId));
+      if (!cached) return;
+      const state = activeEvents.get(eventId);
+      if (!state || !state.subscribers.has(clientId) || state.lastMessage) return;
+      state.lastMessage = cached;
+      try { send(cached); } catch { /* ignore */ }
+    } catch { /* best-effort warm cache */ }
   },
 
   _broadcast(state: EventState, message: string) {

@@ -12,6 +12,9 @@ import { CacheService } from "./cache";
 import { and, eq, sql } from "drizzle-orm";
 import { competitions, competitionWhitelabelOverrides, events, eventWhitelabelOverrides } from "@db/schema";
 import { db } from "@db/index";
+import { BetfairService } from "./betfair";
+import { readNotepad } from "./notepad";
+import { whitelabelNotepadKey, seriesNotepadPath } from "./notepad-builder";
 
 const api = axios.create({
   baseURL: process.env.SPORTS_GAME_PROVIDER_BASE_URL || "http://100.30.62.142",
@@ -22,6 +25,11 @@ function validateArray<T>(data: unknown, defaultValue: T[] = []): T[] {
   return Array.isArray(data) ? data : defaultValue;
 }
 
+// Betfair market IDs use the "1.xxx" prefix; the current provider's fancy/session
+// markets do not. We use this to route both market structure and odds per provider.
+const isBetfairMarketId = (id: string | number): boolean =>
+  String(id).startsWith("1.");
+
 // Deduplication: if getSeriesWithMatches is already running for an eventTypeId,
 // subsequent calls will wait for the same promise instead of firing new DB/Redis/API calls
 const inFlightSeriesFetches = new Map<string, Promise<any[]>>();
@@ -30,7 +38,11 @@ const inFlightSeriesFetches = new Map<string, Promise<any[]>>();
 const inFlightMatchesListFetches = new Map<string, Promise<any[]>>();
 
 export const SportsService = {
-  async getSeriesWithMatches(eventTypeId: string, whitelabelId?: string): Promise<any[]> {
+  async getSeriesWithMatches(
+    eventTypeId: string,
+    whitelabelId?: string,
+    whitelabelName?: string,
+  ): Promise<any[]> {
     // Deduplication — if this eventTypeId+whitelabel is already being fetched, reuse the promise
     const dedupeKey = whitelabelId ? `${eventTypeId}:${whitelabelId}` : eventTypeId;
     const existing = inFlightSeriesFetches.get(dedupeKey);
@@ -38,7 +50,7 @@ export const SportsService = {
       return existing;
     }
 
-    const promise = this._fetchSeriesWithMatches(eventTypeId, whitelabelId);
+    const promise = this._fetchSeriesWithMatches(eventTypeId, whitelabelId, whitelabelName);
     inFlightSeriesFetches.set(dedupeKey, promise);
 
     try {
@@ -126,12 +138,23 @@ export const SportsService = {
     }
   },
 
-  async _fetchSeriesWithMatches(eventTypeId: string, whitelabelId?: string): Promise<any[]> {
+  async _fetchSeriesWithMatches(
+    eventTypeId: string,
+    whitelabelId?: string,
+    whitelabelName?: string,
+  ): Promise<any[]> {
     const cacheKey = whitelabelId
       ? `sports:seriesWithMatches:${eventTypeId}:${whitelabelId}`
       : `sports:seriesWithMatches:${eventTypeId}`;
 
     try {
+      // Step 0: Fast path — serve from the notepad file (regenerated on sync /
+      // owner edit) at series/<whitelabel>/<sportId>. Folder = readable whitelabel
+      // name (or "global"); filtering is still keyed by whitelabel id.
+      const npKey = whitelabelId ? whitelabelNotepadKey(whitelabelName) : "global";
+      const np = await readNotepad<any[]>(seriesNotepadPath(npKey, eventTypeId));
+      if (np?.data) return np.data;
+
       // Step 1: MAIN CACHE CHECK
       const mainCachedData = await CacheService.get<any[]>(cacheKey);
       if (mainCachedData) {
@@ -181,13 +204,35 @@ export const SportsService = {
       return [];
     }
   },
+  // Live odds, routed per provider by marketId:
+  //   - "1.xxx" ids  → Betfair listMarketBook (mapped to the same odds shape)
+  //   - everything else (fancy/session) → current provider /sports/books
+  // Both return an object keyed by marketId; merged into one.
   async getOdds({
     marketId,
   }: {
     marketId: string | string[];
-  }) {
+  }): Promise<Record<string, any>> {
     const marketIdArray = Array.isArray(marketId) ? marketId : [marketId];
-    // console.log("marketId", marketIdArray)
+
+    const betfairIds = marketIdArray.filter((id) => isBetfairMarketId(id));
+    const currentIds = marketIdArray.filter((id) => !isBetfairMarketId(id));
+
+    const [betfairOdds, currentOdds] = await Promise.all([
+      betfairIds.length
+        ? BetfairService.getOddsForMarketIds(betfairIds.map(String))
+        : Promise.resolve({} as Record<string, any>),
+      this._getCurrentProviderOdds(currentIds.map(String)),
+    ]);
+
+    return { ...currentOdds, ...betfairOdds };
+  },
+
+  // Current provider odds (/sports/books), chunked 30 per request as before.
+  async _getCurrentProviderOdds(
+    marketIdArray: string[],
+  ): Promise<Record<string, any>> {
+    if (!marketIdArray.length) return {};
 
     const chunks: string[][] = [];
     for (let i = 0; i < marketIdArray.length; i += 30) {
@@ -197,28 +242,15 @@ export const SportsService = {
     try {
       const results = await Promise.all(
         chunks.map(async (chunk) => {
-          // If API supports multiple IDs as comma-separated
           const marketIds = chunk.join(",");
-
-          const response = await api.get(
-            `/sports/books/${marketIds}`,
-          );
-
-          // console.log("oddd",JSON.stringify(response.data, null, 2));
-
+          const response = await api.get(`/sports/books/${marketIds}`);
           return response.data;
         }),
       );
-
-      // console.log("resuu",results)
-
-      // Merge all chunk responses into one object
-      const odds = Object.assign({}, ...results);
-
-      return odds;
+      return Object.assign({}, ...results);
     } catch (error) {
       // getOdds failed
-      return [];
+      return {};
     }
   },
 
@@ -664,45 +696,87 @@ export const SportsService = {
   }) {
     const cacheKey = `matches:${eventTypeId}:${competitionId}`;
     try {
-      const cached = await CacheService.get<MatchItem[]>(cacheKey);
+      const cached = await CacheService.get<any[]>(cacheKey);
       if (cached) return cached;
-      const response = await api.get(
-        `/sports/competitions/${competitionId}`,
-      );
-      // console.log("match", response)
 
-      const data = validateArray<any>(response.data.events);
+      // Fetch events from Betfair (listEvents). Returns [{ event: {...}, marketCount }].
+      const betfairEvents = await BetfairService.listEvents(
+        eventTypeId,
+        competitionId,
+      );
+      const data: any[] = validateArray<any>(betfairEvents).map((e: any) => ({
+        id: e.event?.id,
+        name: e.event?.name,
+        openDate: e.event?.openDate,
+        countryCode: e.event?.countryCode,
+        timezone: e.event?.timezone,
+        marketCount: e.marketCount,
+      }));
 
       await CacheService.set(cacheKey, data, 2 * 60); // 2 minutes
       return data;
+
+      // ── DEPRECATED: legacy provider event fetch (100.30.62.142) ─────────────
+      // const response = await api.get(`/sports/competitions/${competitionId}`);
+      // const data = validateArray<any>(response.data.events);
+      // await CacheService.set(cacheKey, data, 2 * 60);
+      // return data;
     } catch (error: any) {
       // getMatchList failed
       return [];
     }
   },
 
+  // Current provider (100.30.62.142) market catalogue for an event.
+  // Returns ALL its markets; callers filter out the Betfair-sourced ones.
+  async _getCurrentProviderMarkets({ eventId }: { eventId: string }): Promise<MarketItem[]> {
+    try {
+      const response = await api.get(`/sports/events/${eventId}`);
+      const catalogues = Array.isArray(response.data?.catalogues)
+        ? response.data.catalogues
+        : [];
+      return validateArray<MarketItem>(catalogues);
+    } catch {
+      return [];
+    }
+  },
+
+  // Markets come from BOTH providers:
+  //   - Betfair (listMarketCatalogue): ALL markets it offers.
+  //   - Current provider: all markets EXCEPT the Betfair-sourced ones (provider
+  //     "BETFAIR") — the old provider is an aggregator that also resells Betfair,
+  //     and we now take those directly from Betfair to avoid duplication. Its
+  //     non-Betfair markets (bookmaker/fancy/SKY/etc.) are kept and displayed as before.
+  // Merged + de-duped by marketId. Cached 60s like before.
   async getMarkets({
     eventId,
   }: {
     eventId: string;
-  }) {
+  }): Promise<MarketItem[]> {
     const cacheKey = `markets:${eventId}`;
 
     try {
       const cached = await CacheService.get<MarketItem[]>(cacheKey);
       if (cached) return cached;
 
-      const response = await api.get(
-        `/sports/events/${eventId}`,
+      const [betfairRaw, currentMarkets] = await Promise.all([
+        BetfairService.listMarketCatalogue(eventId).catch(() => []),
+        this._getCurrentProviderMarkets({ eventId }),
+      ]);
+
+      // Betfair: take everything it offers.
+      const betfairMarkets = BetfairService.mapCatalogueToMarketItems(betfairRaw);
+
+      // Current provider: keep everything EXCEPT its Betfair-sourced markets.
+      const nonBetfairMarkets = currentMarkets.filter(
+        (m) => String((m as any).provider ?? "").toUpperCase() !== "BETFAIR",
       );
 
-      // console.log("markets from api",response.data.catalogues)
-
-      const catalogues = Array.isArray(response.data?.catalogues)
-        ? response.data.catalogues
-        : [];
-
-      const data = validateArray<MarketItem>(catalogues);
+      // Merge, de-duped by marketId (Betfair markets win on collision).
+      const byId = new Map<string, MarketItem>();
+      for (const m of nonBetfairMarkets) byId.set(String((m as any).marketId), m);
+      for (const m of betfairMarkets) byId.set(String((m as any).marketId), m);
+      const data = Array.from(byId.values());
 
       // Only cache non-empty results — don't cache empty so next poll retries
       if (data.length > 0) {
@@ -779,6 +853,7 @@ export const SportsService = {
           status: market.status,
           inPlay: market.inPlay,
           bettingType: market.bettingType,
+          isLineMarket: (market as any).isLineMarket ?? false,
           marketCondition: market.marketCondition,
           sportingEvent: marketOdds?.sportingEvent ?? market.sportingEvent,
           runners: market.runners.map(runner => {

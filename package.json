@@ -14,7 +14,8 @@
     "create:owner": "bun run src/scripts/create-owner.ts",
     "seed:permissions": "bun run src/scripts/seed-permissions.ts",
     "backfill:staff": "bun run src/scripts/backfill-staff-roles.ts",
-    "sync:casino-games": "bun run src/scripts/sync-casino-games.ts"
+    "sync:casino-games": "bun run src/scripts/sync-casino-games.ts",
+    "test:betfair": "bun run src/scripts/test-betfair-sync.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",

@@ -1,7 +1,21 @@
 import { db } from "@db/index";
-import { events, competitions } from "@db/schema";
+import { events, competitions, sports, SYSTEM_USER_ID } from "@db/schema";
 import { eq, and } from "drizzle-orm";
 import { SportsService } from "./sports";
+import { writeNotepad } from "./notepad";
+import { NotepadBuilder } from "./notepad-builder";
+import { BetfairService } from "./betfair";
+
+// Betfair event types that have NO competition layer — events are fetched
+// directly under the event type (each event = a race meeting / venue-day).
+export const RACING_EVENT_TYPE_IDS = [7, 4339]; // Horse Racing, Greyhound Racing
+
+// Synthetic competition id per racing sport so racing events satisfy the
+// NOT NULL events.competition_id. 9e9 base is well above Betfair's id range.
+const SYNTHETIC_COMP_BASE = 9_000_000_000;
+export const racingCompetitionId = (sportId: number) =>
+  SYNTHETIC_COMP_BASE + sportId;
+
 
 /**
  * Sync events (matches) from external API into the DB for a given competition.
@@ -89,6 +103,9 @@ export async function syncEventsForCompetition(
     console.log(
       `[EventSync] Competition ${competitionId}: synced ${synced}, errors ${errors}`,
     );
+
+    // Refresh the display notepad so the owner-panel per-competition fetch updates.
+    await NotepadBuilder.regenSportNotepad(Number(sportId));
     return { synced, errors };
   } catch (error) {
     console.error(`[EventSync] Failed for competition ${competitionId}:`, error);
@@ -110,6 +127,145 @@ export async function deactivateEventsForCompetition(competitionId: number) {
   } catch (error) {
     console.error(`[EventSync] Failed to deactivate events for competition ${competitionId}:`, error);
   }
+}
+
+/**
+ * Ensure the synthetic competition row exists for a racing sport (idempotent).
+ * Racing has no Betfair competition layer, but events.competition_id is NOT NULL,
+ * so each racing sport gets one synthetic competition that its meetings sit under.
+ * Returns the synthetic competition id.
+ */
+export async function ensureRacingCompetition(sportId: number): Promise<number> {
+  const compId = racingCompetitionId(sportId);
+  const existing = await db
+    .select({ id: competitions.id })
+    .from(competitions)
+    .where(eq(competitions.competition_id, compId))
+    .limit(1);
+  if (existing.length === 0) {
+    const [sportRow] = await db
+      .select({ name: sports.name })
+      .from(sports)
+      .where(eq(sports.sport_id, sportId))
+      .limit(1);
+    const sportName =
+      sportRow?.name ?? (sportId === 7 ? "Horse Racing" : "Greyhound Racing");
+    await db.insert(competitions).values({
+      competition_id: compId,
+      sport_id: sportId,
+      name: sportName,
+      provider: "BETFAIR",
+      is_active: true, // racing meetings should show by default
+      addedBy: SYSTEM_USER_ID,
+      updateBy: SYSTEM_USER_ID,
+    });
+    console.log(
+      `[RacingSync] Created synthetic competition ${compId} (${sportName})`,
+    );
+  }
+  return compId;
+}
+
+/** Ensure synthetic competitions for ALL racing sports. Called by competitions sync. */
+export async function ensureRacingCompetitions() {
+  for (const sportId of RACING_EVENT_TYPE_IDS) {
+    await ensureRacingCompetition(sportId);
+  }
+}
+
+/**
+ * Sync RACING events (Horse/Greyhound) which have no competition layer.
+ * For each racing sport: ensure a synthetic competition exists, fetch meetings
+ * directly via listEvents(eventTypeId), upsert them under the synthetic comp
+ * (preserving countryCode/venue/timezone in metadata for the racing UI), and
+ * write a `racing-<sportId>` notepad of meetings grouped-ready for display.
+ */
+export async function syncRacingEvents() {
+  for (const sportId of RACING_EVENT_TYPE_IDS) {
+    try {
+      const compId = await ensureRacingCompetition(sportId);
+
+      // Fetch meetings directly (no competition filter).
+      const evs = await BetfairService.listEvents(sportId);
+      const meetings: any[] = [];
+      for (const e of evs as any[]) {
+        const ev = e.event;
+        if (!ev?.id) continue;
+        const eventId = Number(ev.id);
+        const meta = {
+          countryCode: ev.countryCode ?? null,
+          venue: ev.venue ?? null,
+          timezone: ev.timezone ?? null,
+        };
+
+        const existing = await db
+          .select({ id: events.id })
+          .from(events)
+          .where(eq(events.eventId, eventId))
+          .limit(1);
+
+        if (existing.length > 0) {
+          await db
+            .update(events)
+            .set({
+              name: ev.name,
+              openDate: ev.openDate ? new Date(ev.openDate) : undefined,
+              metadata: meta,
+            })
+            .where(eq(events.eventId, eventId));
+        } else {
+          await db.insert(events).values({
+            eventId,
+            competitionId: compId,
+            sportId,
+            name: ev.name ?? "Race Meeting",
+            openDate: ev.openDate ? new Date(ev.openDate) : undefined,
+            metadata: meta,
+            isActive: true,
+            isVisible: true,
+            suspended: false,
+            betDelay: 0,
+          });
+        }
+
+        meetings.push({
+          eventId,
+          name: ev.name,
+          venue: ev.venue ?? null,
+          countryCode: ev.countryCode ?? null,
+          timezone: ev.timezone ?? null,
+          openDate: ev.openDate ?? null,
+          marketCount: e.marketCount ?? 0,
+          races: [] as { marketId: string; name: string; raceTime: string | null }[],
+        });
+      }
+
+      // Fetch every meeting's races (WIN markets + start times) in one batched
+      // call, then attach to each meeting so the racing page renders all the
+      // race-time buttons from the notepad (no per-meeting fetch on the client).
+      try {
+        const racesByEvent = await BetfairService.listRacesForEvents(
+          meetings.map((m) => String(m.eventId)),
+        );
+        for (const m of meetings) {
+          m.races = racesByEvent[String(m.eventId)] ?? [];
+        }
+      } catch (err: any) {
+        console.error(`[RacingSync] races fetch failed for sport ${sportId}:`, err?.message);
+      }
+
+      meetings.sort((a, b) =>
+        String(a.openDate ?? "").localeCompare(String(b.openDate ?? "")),
+      );
+      await writeNotepad(`racing-${sportId}`, meetings);
+      console.log(
+        `[RacingSync] sport ${sportId}: ${meetings.length} meetings`,
+      );
+    } catch (err: any) {
+      console.error(`[RacingSync] Failed for sport ${sportId}:`, err?.message);
+    }
+  }
+  await NotepadBuilder.buildSportsListNotepad();
 }
 
 /**
@@ -139,6 +295,12 @@ export async function syncAllActiveCompetitionEvents() {
     console.log(
       `[EventSync] Full sync done: ${totalSynced} events synced, ${totalErrors} errors`,
     );
+
+    // Racing sports have no competition layer — sync them directly.
+    await syncRacingEvents();
+
+    // Rebuild the display notepad (sports-list + per-whitelabel series) the reads serve.
+    await NotepadBuilder.rebuildAllNotepad();
   } catch (error) {
     console.error("[EventSync] Full sync failed:", error);
   }

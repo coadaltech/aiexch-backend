@@ -4,9 +4,12 @@ import { eq } from "drizzle-orm";
 import { UserRole } from "../types/enums";
 import { generateHashPassword } from "../utils/password";
 import cron from "node-cron";
-import { syncAllActiveCompetitionEvents } from "../services/event-sync-service";
+import { syncAllActiveCompetitionEvents, ensureRacingCompetitions } from "../services/event-sync-service";
+import { BetfairService } from "../services/betfair";
+import { NotepadBuilder } from "../services/notepad-builder";
 
 // API Configuration
+// ── DEPRECATED: legacy provider for event-types/competitions. Replaced by Betfair.
 const API_BASE_URL = "https://api.aiexch.com/Soe81s9017b44b6d822da257xk055b11/sports";
 
 // ── ID remappings: API returns one ID but competitions live under a different ID ─
@@ -51,53 +54,59 @@ const fetchApi = async (url: string) => {
   }
 };
 
-// Get sports from API
+// Get event types (sports) from Betfair (listEventTypes).
+// Betfair returns [{ eventType: { id, name }, marketCount }] — which upsertSport
+// already understands via sportData.eventType?.id / .name.
 const getSportsFromApi = async () => {
   try {
-    console.log("Fetching sports from API...");
-    const data = await fetchApi(`${API_BASE_URL}/eventtypes`);
-
-    if (Array.isArray(data)) {
-      return data;
-    } else if (data.data && Array.isArray(data.data)) {
-      return data.data;
-    } else if (data.eventTypes && Array.isArray(data.eventTypes)) {
-      return data.eventTypes;
-    } else {
-      console.error("Unknown API response format:", data);
-      return [];
-    }
+    console.log("Fetching event types from Betfair...");
+    const data = await BetfairService.listEventTypes();
+    return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Failed to fetch sports from API:", error);
+    console.error("Failed to fetch event types from Betfair:", error);
     return [];
   }
+
+  // ── DEPRECATED: legacy provider fetch (api.aiexch.com/.../eventtypes) ──────
+  // try {
+  //   console.log("Fetching sports from API...");
+  //   const data = await fetchApi(`${API_BASE_URL}/eventtypes`);
+  //   if (Array.isArray(data)) return data;
+  //   else if (data.data && Array.isArray(data.data)) return data.data;
+  //   else if (data.eventTypes && Array.isArray(data.eventTypes)) return data.eventTypes;
+  //   else { console.error("Unknown API response format:", data); return []; }
+  // } catch (error) {
+  //   console.error("Failed to fetch sports from API:", error);
+  //   return [];
+  // }
 };
 
-// Get competitions for a sport from API
+// Get competitions for a sport from Betfair (listCompetitions).
+// Betfair returns [{ competition: { id, name }, marketCount }] — understood by
+// upsertCompetition via compData.competition.id / .name.
 const getCompetitionsFromApi = async (sportId: number) => {
   try {
-    console.log(`Fetching competitions for sport ID: ${sportId}...`);
-    const data = await fetchApi(`${API_BASE_URL}/competitions/list/${sportId}`);
-
-    if (Array.isArray(data)) {
-      return data;
-    } else if (data.data && Array.isArray(data.data)) {
-      return data.data;
-    } else if (data.competitions && Array.isArray(data.competitions)) {
-      return data.competitions;
-    } else if (data.competition && Array.isArray(data.competition)) {
-      return data.competition;
-    } else {
-      console.error(
-        `Unknown competitions API response format for sport ${sportId}:`,
-        data,
-      );
-      return [];
-    }
+    console.log(`Fetching competitions for event type ID: ${sportId}...`);
+    const data = await BetfairService.listCompetitions(sportId);
+    return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error(`Failed to fetch competitions for sport ${sportId}:`, error);
     return [];
   }
+
+  // ── DEPRECATED: legacy provider fetch (api.aiexch.com/.../competitions/list) ─
+  // try {
+  //   console.log(`Fetching competitions for sport ID: ${sportId}...`);
+  //   const data = await fetchApi(`${API_BASE_URL}/competitions/list/${sportId}`);
+  //   if (Array.isArray(data)) return data;
+  //   else if (data.data && Array.isArray(data.data)) return data.data;
+  //   else if (data.competitions && Array.isArray(data.competitions)) return data.competitions;
+  //   else if (data.competition && Array.isArray(data.competition)) return data.competition;
+  //   else { console.error(`Unknown competitions API response format for sport ${sportId}:`, data); return []; }
+  // } catch (error) {
+  //   console.error(`Failed to fetch competitions for sport ${sportId}:`, error);
+  //   return [];
+  // }
 };
 
 // DB Operations
@@ -131,29 +140,29 @@ const upsertSport = async (sportData: any) => {
       .where(eq(sports.sport_id, Number(sportId)))
       .limit(1);
 
-    const sportToSave = {
-      sport_id: Number(sportId),
-      name: sportName,
-      is_active: false,
-      sort_order: sportData.sortOrder || sportData.sort_order || 0,
-      updateBy: SYSTEM_USER_ID,
-      updateDate: new Date(),
-    };
-
     let operationType = "";
 
     if (existing.length > 0) {
+      // PRESERVE owner-controlled fields (is_active, is_live, is_highlight,
+      // sort_order) on re-sync — only refresh the display name. Re-running the
+      // sync must NOT wipe what the owner toggled in the panel.
       await db
         .update(sports)
-        .set(sportToSave)
+        .set({ name: sportName, updateBy: SYSTEM_USER_ID, updateDate: new Date() })
         .where(eq(sports.sport_id, Number(sportId)));
       operationType = "updated";
-      console.log(`Updated sport: ${sportName} (ID: ${sportId})`);
+      console.log(`Updated sport name: ${sportName} (ID: ${sportId})`);
     } else {
+      // New sport — default inactive so an admin must explicitly enable it.
       await db.insert(sports).values({
-        ...sportToSave,
+        sport_id: Number(sportId),
+        name: sportName,
+        is_active: false,
+        sort_order: sportData.sortOrder || sportData.sort_order || 0,
         addedBy: SYSTEM_USER_ID,
         addedDate: new Date(),
+        updateBy: SYSTEM_USER_ID,
+        updateDate: new Date(),
       });
       operationType = "added";
       console.log(`Added new sport: ${sportName} (ID: ${sportId})`);
@@ -317,6 +326,10 @@ const syncSports = async () => {
     );
 
     await syncManualSports();
+    await applySportNameOverrides();
+
+    // Refresh the sports-list display notepad (names may have changed).
+    await NotepadBuilder.buildSportsListNotepad();
 
     return {
       total: sportsData.length,
@@ -390,9 +403,16 @@ const syncCompetitions = async () => {
       }
     }
 
+    // Racing sports (Horse/Greyhound) have no Betfair competitions — create their
+    // synthetic competitions here so they show up in the competitions list too.
+    await ensureRacingCompetitions();
+
     console.log(
       `Competitions sync done — Sports: ${totalSports} | Competitions: ${totalCompetitions} | Added: ${totalAdded} | Updated: ${totalUpdated} | Errors: ${totalErrors}`,
     );
+
+    // Refresh the sports-list display notepad (racing synthetic comps may be new).
+    await NotepadBuilder.buildSportsListNotepad();
 
     return {
       totalSports,
@@ -470,9 +490,9 @@ export const startCronJobs = async () => {
     { timezone: "UTC" },
   );
 
-  // Competitions: every 12 hours
+  // Competitions: every 24 hours at 00:30 UTC (from Betfair)
   cron.schedule(
-    "0 */12 * * *",
+    "30 0 * * *",
     () => {
       console.log("[Seed] Running scheduled competitions sync...");
       syncCompetitions();
@@ -480,9 +500,9 @@ export const startCronJobs = async () => {
     { timezone: "UTC" },
   );
 
-  // Events: every 12 hours — sync events for all active competitions
+  // Events: every 24 hours at 01:00 UTC — sync events for all active competitions (from Betfair)
   cron.schedule(
-    "0 */12 * * *",
+    "0 1 * * *",
     () => {
       console.log("[Seed] Running scheduled events sync...");
       syncAllActiveCompetitionEvents();
@@ -490,16 +510,20 @@ export const startCronJobs = async () => {
     { timezone: "UTC" },
   );
 
-  console.log("[Seed] Cron jobs started: Sports daily 00:00 UTC, Competitions every 12h, Events every 30m");
+  console.log(
+    "[Seed] Cron jobs started: Manual sports every 12h, Competitions daily 00:30 UTC, Events daily 01:00 UTC (event-types fetched manually via syncSports)",
+  );
 
-  // Run initial sync immediately
-  console.log("[Seed] Running initial sync...");
-  // await syncSports();
+  // ── No external fetch/sync on restart ──────────────────────────────────────
+  // Per product decision: event-types are fetched manually; competitions + events
+  // are fetched once a day by the crons above (and on-demand from the owner panel
+  // buttons). We only ensure the local "manual" sports (matka/lottery/etc.) rows
+  // exist — this is a local upsert, NOT an external fetch.
+  console.log("[Seed] Ensuring manual sports exist (no external sync on boot)...");
   await syncManualSports();
   await applySportNameOverrides();
-  await syncCompetitions();
-  await syncAllActiveCompetitionEvents();
-  console.log("[Seed] Initial sync completed!");
+  // NOTE: syncSports() / syncCompetitions() / syncAllActiveCompetitionEvents()
+  // are intentionally NOT called here — they run on cron / via owner-panel buttons.
 };
 
 // Manual run functions

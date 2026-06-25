@@ -26,6 +26,7 @@ import { casinoWalletStubRoutes } from "./routes/casino-wallet-stub";
 import { casinoDevProxyRoutes } from "./routes/casino-dev-proxy";
 import { casinoAceRoutes } from "./routes/casino-ace";
 import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
+import { BetfairService, BETFAIR_KEEPALIVE_MS } from "./services/betfair";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
 import { startCronJobs, ensureSystemUser } from "@db/seed";
@@ -182,6 +183,19 @@ async function initializeServices() {
     console.log("[Init] Matka shift date cron started");
   } catch (e) {
     console.error("[Init] Matka shift cron failed (non-fatal):", e);
+  }
+
+  // Step 5d: Establish the Betfair session (used by competitions/events sync and
+  // market/odds fetching) and schedule keepAlive as an idle backstop. Non-fatal:
+  // if credentials are missing, login throws and we log it — the rest boots.
+  try {
+    await BetfairService.ensureSession();
+    setInterval(() => {
+      void BetfairService.keepAlive();
+    }, BETFAIR_KEEPALIVE_MS);
+    console.log("[Init] Betfair session established + keepAlive scheduled");
+  } catch (e: any) {
+    console.error("[Init] Betfair session init failed (non-fatal):", e?.message ?? e);
   }
 
   // // Step 6: Start sports & competitions sync cron jobs

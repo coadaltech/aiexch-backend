@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { CacheService } from "../../services/cache";
 import { invalidateSportsListCache } from "../../services/sports-service";
 import { broadcastChange } from "../../services/sports-broadcast";
+import { NotepadBuilder } from "../../services/notepad-builder";
 import { whitelabel_middleware } from "../../middleware/whitelabel";
 import { resolveOwnerScope } from "../../utils/ownerScope";
 import { UserRole } from "../../types/enums";
@@ -147,8 +148,10 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
             .where(eq(sports.sport_id, sportId));
         }
 
-        // Bust the sports list cache so the sidebar reflects the new order immediately
+        // DB is source of truth → bust cache, regen notepad, push to clients.
         await invalidateSportsListCache();
+        await NotepadBuilder.buildSportsListNotepad();
+        broadcastChange("sports-list");
 
         set.status = 200;
         return { success: true };
@@ -188,6 +191,9 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         }
 
         await invalidateSportsListCache();
+        // Regenerate the notepad display files (DB is source of truth) + push.
+        await NotepadBuilder.regenSportNotepad(sportId);
+        broadcastChange("sports-list");
 
         set.status = 200;
         return {
@@ -237,6 +243,8 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         }
 
         await invalidateSportsListCache();
+        await NotepadBuilder.buildSportsListNotepad();
+        broadcastChange("sports-list");
 
         set.status = 200;
         return {
@@ -290,6 +298,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         }
 
         await invalidateSportsListCache();
+        await NotepadBuilder.buildSportsListNotepad();
         broadcastChange("sports-list");
 
         set.status = 200;
@@ -681,9 +690,16 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         return { success: true, message: "No updates needed" };
       }
 
+      const sportId = Number(params.sportId);
+      const pushSeriesChange = async () => {
+        await NotepadBuilder.regenSportNotepad(sportId);
+        broadcastChange("series-changed", { eventTypeId: sportId });
+      };
+
       // Owner: update global is_active
       if (scope.currentUserRole === UserRole.Owner) {
         const result = await updateCompetitionsStatus(params.sportId, updates);
+        await pushSeriesChange();
         return result;
       }
 
@@ -699,6 +715,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
           updates,
           scope.currentUserId,
         );
+        await pushSeriesChange();
         return result;
       }
 
@@ -787,9 +804,24 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
         return { success: true, message: "No updates needed" };
       }
 
+      // Resolve the sport this competition belongs to, so we can regen its notepad.
+      const [compRow] = await db
+        .select({ sport_id: competitions.sport_id })
+        .from(competitions)
+        .where(eq(competitions.competition_id, Number(params.competitionId)))
+        .limit(1);
+      const pushSeriesChange = async () => {
+        if (compRow?.sport_id != null) {
+          const sid = Number(compRow.sport_id);
+          await NotepadBuilder.regenSportNotepad(sid);
+          broadcastChange("series-changed", { eventTypeId: sid });
+        }
+      };
+
       // Owner: update global isActive
       if (scope.currentUserRole === UserRole.Owner) {
         const result = await updateEventsStatus(params.competitionId, updates);
+        await pushSeriesChange();
         return result;
       }
 
@@ -805,6 +837,7 @@ export const sportsGamesRoutes = new Elysia({ prefix: "/sports-games" })
           updates,
           scope.currentUserId,
         );
+        await pushSeriesChange();
         return result;
       }
 

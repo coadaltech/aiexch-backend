@@ -14,6 +14,10 @@ type Send = (msg: string) => void;
 
 export type BroadcastChannel =
   | "sports-list"
+  // A sport's competitions/events visibility changed (owner toggled a competition
+  // or event active). Payload carries `eventTypeId` so clients can refetch that
+  // sport's series; channel is global, clients filter/refetch in onMessage.
+  | "series-changed"
   | "top-competitions"
   | "recommended-events"
   // Owner-pinned events that surface in the site's top drop-header nav.

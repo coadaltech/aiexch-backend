@@ -4,8 +4,45 @@ import { SportsService } from "@services/sports";
 import { getAvailableSportsList } from "@services/sports-service";
 import { whitelabel_middleware } from "../middleware/whitelabel";
 import { app_middleware } from "../middleware/auth";
+import { readNotepad } from "@services/notepad";
+import { RACING_EVENT_TYPE_IDS } from "@services/event-sync-service";
 
 export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
+
+  // Racing (Horse 7 / Greyhound 4339): no competition layer. Returns meetings
+  // grouped by country -> venue for the racing page (served from the notepad).
+  .get("/racing/:eventTypeId", async ({ params }) => {
+    const { eventTypeId } = params;
+    try {
+      if (!RACING_EVENT_TYPE_IDS.includes(Number(eventTypeId))) {
+        return { success: false, eventTypeId, message: "Not a racing sport", data: [] };
+      }
+      const np = await readNotepad<any[]>(`racing-${eventTypeId}`);
+      const meetings = np?.data ?? [];
+
+      // Group meetings by countryCode, each with its venues (meetings).
+      const byCountry = new Map<string, any[]>();
+      for (const m of meetings) {
+        const cc = m.countryCode || "OTHER";
+        if (!byCountry.has(cc)) byCountry.set(cc, []);
+        byCountry.get(cc)!.push(m);
+      }
+      const countries = Array.from(byCountry.entries())
+        .map(([countryCode, list]) => ({ countryCode, meetings: list }))
+        .sort((a, b) => a.countryCode.localeCompare(b.countryCode));
+
+      return {
+        success: true,
+        eventTypeId,
+        data: countries,
+        updatedAt: np?.updatedAt ?? null,
+        count: meetings.length,
+      };
+    } catch (error) {
+      const err = error as Error;
+      return { success: false, eventTypeId, message: err.message, data: [] };
+    }
+  })
 
   .get("/getMarketWithOdds/:eventId", async ({ params }) => {
     const { eventId } = params;
@@ -32,8 +69,13 @@ export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
       // Resolve whitelabel from request domain header
       const { whitelabel } = await whitelabel_middleware(request);
       const whitelabelId = whitelabel?.id || undefined;
+      const whitelabelName = (whitelabel as any)?.name || undefined;
 
-      const allSeriesData = await SportsService.getSeriesWithMatches(eventTypeId, whitelabelId);
+      const allSeriesData = await SportsService.getSeriesWithMatches(
+        eventTypeId,
+        whitelabelId,
+        whitelabelName,
+      );
 
       return {
         success: true,
