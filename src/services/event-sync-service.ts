@@ -1,6 +1,6 @@
 import { db } from "@db/index";
 import { events, competitions, sports, SYSTEM_USER_ID } from "@db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, notInArray } from "drizzle-orm";
 import { SportsService } from "./sports";
 import { writeNotepad } from "./notepad";
 import { NotepadBuilder } from "./notepad-builder";
@@ -175,10 +175,18 @@ export async function ensureRacingCompetitions() {
 
 /**
  * Sync RACING events (Horse/Greyhound) which have no competition layer.
- * For each racing sport: ensure a synthetic competition exists, fetch meetings
- * directly via listEvents(eventTypeId), upsert them under the synthetic comp
- * (preserving countryCode/venue/timezone in metadata for the racing UI), and
- * write a `racing-<sportId>` notepad of meetings grouped-ready for display.
+ *
+ * Racing is time-sensitive: meetings and individual races open and finish all
+ * day long, so this runs on a short cron (see startCronJobs), NOT once a day.
+ *
+ * How "completed" is detected — no extra status call needed:
+ *   • listEvents(eventTypeId) only returns meetings that still have OPEN markets;
+ *     a meeting whose races are all done drops out of the response entirely.
+ *   • listMarketCatalogue (listRacesForEvents) never returns CLOSED markets, so a
+ *     finished race simply disappears from a meeting's race list once it settles.
+ * Each cycle we therefore treat "has at least one open WIN race" as live, mark
+ * everything else under the racing competition inactive, and write a notepad that
+ * contains ONLY meetings that still have races (empty meetings are never shown).
  */
 export async function syncRacingEvents() {
   for (const sportId of RACING_EVENT_TYPE_IDS) {
@@ -187,50 +195,19 @@ export async function syncRacingEvents() {
 
       // Fetch meetings directly (no competition filter).
       const evs = await BetfairService.listEvents(sportId);
+      if (!Array.isArray(evs)) {
+        // Defensive: a malformed/empty response shouldn't wipe active meetings.
+        console.warn(`[RacingSync] sport ${sportId}: listEvents returned no array, skipping`);
+        continue;
+      }
+
       const meetings: any[] = [];
       for (const e of evs as any[]) {
         const ev = e.event;
         if (!ev?.id) continue;
-        const eventId = Number(ev.id);
-        const meta = {
-          countryCode: ev.countryCode ?? null,
-          venue: ev.venue ?? null,
-          timezone: ev.timezone ?? null,
-        };
-
-        const existing = await db
-          .select({ id: events.id })
-          .from(events)
-          .where(eq(events.eventId, eventId))
-          .limit(1);
-
-        if (existing.length > 0) {
-          await db
-            .update(events)
-            .set({
-              name: ev.name,
-              openDate: ev.openDate ? new Date(ev.openDate) : undefined,
-              metadata: meta,
-            })
-            .where(eq(events.eventId, eventId));
-        } else {
-          await db.insert(events).values({
-            eventId,
-            competitionId: compId,
-            sportId,
-            name: ev.name ?? "Race Meeting",
-            openDate: ev.openDate ? new Date(ev.openDate) : undefined,
-            metadata: meta,
-            isActive: true,
-            isVisible: true,
-            suspended: false,
-            betDelay: 0,
-          });
-        }
-
         meetings.push({
-          eventId,
-          name: ev.name,
+          eventId: Number(ev.id),
+          name: ev.name ?? "Race Meeting",
           venue: ev.venue ?? null,
           countryCode: ev.countryCode ?? null,
           timezone: ev.timezone ?? null,
@@ -240,9 +217,8 @@ export async function syncRacingEvents() {
         });
       }
 
-      // Fetch every meeting's races (WIN markets + start times) in one batched
-      // call, then attach to each meeting so the racing page renders all the
-      // race-time buttons from the notepad (no per-meeting fetch on the client).
+      // Attach each meeting's open WIN races (start times) in one batched call.
+      // A finished race is already gone from this response — that's our signal.
       try {
         const racesByEvent = await BetfairService.listRacesForEvents(
           meetings.map((m) => String(m.eventId)),
@@ -254,12 +230,89 @@ export async function syncRacingEvents() {
         console.error(`[RacingSync] races fetch failed for sport ${sportId}:`, err?.message);
       }
 
-      meetings.sort((a, b) =>
+      // A meeting is "live" only while it still has at least one open race.
+      const liveMeetings = meetings.filter((m) => m.races.length > 0);
+      const liveIds = liveMeetings.map((m) => m.eventId);
+
+      // Upsert every meeting we saw (name/openDate/metadata). New rows start
+      // active only if they currently have open races.
+      for (const m of meetings) {
+        const meta = {
+          countryCode: m.countryCode,
+          venue: m.venue,
+          timezone: m.timezone,
+        };
+        const existing = await db
+          .select({ id: events.id })
+          .from(events)
+          .where(eq(events.eventId, m.eventId))
+          .limit(1);
+        if (existing.length > 0) {
+          await db
+            .update(events)
+            .set({
+              name: m.name,
+              openDate: m.openDate ? new Date(m.openDate) : undefined,
+              metadata: meta,
+            })
+            .where(eq(events.eventId, m.eventId));
+        } else {
+          await db.insert(events).values({
+            eventId: m.eventId,
+            competitionId: compId,
+            sportId,
+            name: m.name,
+            openDate: m.openDate ? new Date(m.openDate) : undefined,
+            metadata: meta,
+            isActive: m.races.length > 0,
+            isVisible: true,
+            suspended: false,
+            betDelay: 0,
+          });
+        }
+      }
+
+      // Reconcile active flags for this racing competition: meetings with open
+      // races are active; everything else (finished today, or dropped out of
+      // listEvents entirely) is deactivated. This is "inactivate completed
+      // races" for racing — it runs every cycle.
+      if (liveIds.length > 0) {
+        await db
+          .update(events)
+          .set({ isActive: true })
+          .where(
+            and(
+              eq(events.competitionId, compId),
+              inArray(events.eventId, liveIds),
+              eq(events.isActive, false),
+            ),
+          );
+        await db
+          .update(events)
+          .set({ isActive: false })
+          .where(
+            and(
+              eq(events.competitionId, compId),
+              notInArray(events.eventId, liveIds),
+              eq(events.isActive, true),
+            ),
+          );
+      } else {
+        // Nothing running for this sport right now → deactivate all its meetings.
+        await db
+          .update(events)
+          .set({ isActive: false })
+          .where(and(eq(events.competitionId, compId), eq(events.isActive, true)));
+      }
+
+      // Notepad holds ONLY meetings that still have races, so the racing page
+      // never renders an empty venue.
+      liveMeetings.sort((a, b) =>
         String(a.openDate ?? "").localeCompare(String(b.openDate ?? "")),
       );
-      await writeNotepad(`racing-${sportId}`, meetings);
+      await writeNotepad(`racing-${sportId}`, liveMeetings);
       console.log(
-        `[RacingSync] sport ${sportId}: ${meetings.length} meetings`,
+        `[RacingSync] sport ${sportId}: ${liveMeetings.length} live meetings (${meetings.length} seen)`,
       );
     } catch (err: any) {
       console.error(`[RacingSync] Failed for sport ${sportId}:`, err?.message);

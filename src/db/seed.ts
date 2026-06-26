@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { UserRole } from "../types/enums";
 import { generateHashPassword } from "../utils/password";
 import cron from "node-cron";
-import { syncAllActiveCompetitionEvents, ensureRacingCompetitions } from "../services/event-sync-service";
+import { syncAllActiveCompetitionEvents, ensureRacingCompetitions, syncRacingEvents } from "../services/event-sync-service";
+import { buildAllEventSnapshots } from "../services/event-snapshot-service";
 import { BetfairService } from "../services/betfair";
 import { NotepadBuilder } from "../services/notepad-builder";
 
@@ -510,8 +511,47 @@ export const startCronJobs = async () => {
     { timezone: "UTC" },
   );
 
+  // Racing (Horse/Greyhound): every minute. Racing has no competition layer and
+  // races open/finish all day, so a daily sync is useless here — this short cycle
+  // adds new races, drops finished ones, and inactivates completed meetings.
+  // Lightweight (1 listEvents + a chunked listMarketCatalogue per sport); the
+  // in-flight guard skips a tick if the previous run is still going.
+  let racingSyncRunning = false;
+  cron.schedule(
+    "* * * * *",
+    async () => {
+      if (racingSyncRunning) {
+        console.log("[Seed] Racing sync still running — skipping this tick");
+        return;
+      }
+      racingSyncRunning = true;
+      try {
+        await syncRacingEvents();
+      } catch (err) {
+        console.error("[Seed] Racing sync error:", err);
+      } finally {
+        racingSyncRunning = false;
+      }
+    },
+    { timezone: "UTC" },
+  );
+
+  // Event snapshots: rebuild every day at 01:30 UTC (AFTER the 01:00 events
+  // sync, so today's events exist in the DB). Pre-fetches each today-event's
+  // markets+odds into event-snapshots/<eventId> so the match page's first paint
+  // is instant (served from the file) — no loading spinner. The live WebSocket
+  // refreshes prices on top.
+  cron.schedule(
+    "30 1 * * *",
+    async () => {
+      console.log("[Seed] Running daily event-snapshot rebuild...");
+      await buildAllEventSnapshots();
+    },
+    { timezone: "UTC" },
+  );
+
   console.log(
-    "[Seed] Cron jobs started: Manual sports every 12h, Competitions daily 00:30 UTC, Events daily 01:00 UTC (event-types fetched manually via syncSports)",
+    "[Seed] Cron jobs started: Manual sports every 12h, Competitions daily 00:30 UTC, Events daily 01:00 UTC, Racing every 1m, Event snapshots daily 01:30 UTC (event-types fetched manually via syncSports)",
   );
 
   // ── No external fetch/sync on restart ──────────────────────────────────────
@@ -524,6 +564,11 @@ export const startCronJobs = async () => {
   await applySportNameOverrides();
   // NOTE: syncSports() / syncCompetitions() / syncAllActiveCompetitionEvents()
   // are intentionally NOT called here — they run on cron / via owner-panel buttons.
+
+  // Build the event snapshots once now (background, non-blocking) so a freshly
+  // started server serves instant first paints without waiting for the daily
+  // cron. Self-paced (concurrency-limited) so it doesn't stall boot.
+  void buildAllEventSnapshots();
 };
 
 // Manual run functions

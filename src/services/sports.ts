@@ -13,8 +13,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { competitions, competitionWhitelabelOverrides, events, eventWhitelabelOverrides } from "@db/schema";
 import { db } from "@db/index";
 import { BetfairService } from "./betfair";
-import { readNotepad } from "./notepad";
+import { readNotepad, writeNotepad } from "./notepad";
 import { whitelabelNotepadKey, seriesNotepadPath } from "./notepad-builder";
+import { redis } from "@db/redis";
 
 const api = axios.create({
   baseURL: process.env.SPORTS_GAME_PROVIDER_BASE_URL || "http://100.30.62.142",
@@ -29,6 +30,11 @@ function validateArray<T>(data: unknown, defaultValue: T[] = []): T[] {
 // markets do not. We use this to route both market structure and odds per provider.
 const isBetfairMarketId = (id: string | number): boolean =>
   String(id).startsWith("1.");
+
+// Sports whose markets come ENTIRELY from Betfair — the legacy aggregator has
+// nothing for them, so we skip it (no point paying its round-trip / timeout).
+// Racing (Horse 7 / Greyhound 4339) is Betfair-only.
+const BETFAIR_ONLY_EVENT_TYPES = new Set(["7", "4339"]);
 
 // Deduplication: if getSeriesWithMatches is already running for an eventTypeId,
 // subsequent calls will wait for the same promise instead of firing new DB/Redis/API calls
@@ -750,8 +756,10 @@ export const SportsService = {
   // Merged + de-duped by marketId. Cached 60s like before.
   async getMarkets({
     eventId,
+    eventTypeId,
   }: {
     eventId: string;
+    eventTypeId?: string;
   }): Promise<MarketItem[]> {
     const cacheKey = `markets:${eventId}`;
 
@@ -759,9 +767,18 @@ export const SportsService = {
       const cached = await CacheService.get<MarketItem[]>(cacheKey);
       if (cached) return cached;
 
+      const betfairOnly =
+        !!eventTypeId && BETFAIR_ONLY_EVENT_TYPES.has(String(eventTypeId));
+
       const [betfairRaw, currentMarkets] = await Promise.all([
         BetfairService.listMarketCatalogue(eventId).catch(() => []),
-        this._getCurrentProviderMarkets({ eventId }),
+        // Racing is Betfair-only — skip the legacy aggregator (it has nothing
+        // for racing and only adds latency). Every other sport: fetch its
+        // markets FULLY so the market set is complete and STABLE — never
+        // add/drop markets between polls (that caused the flicker).
+        betfairOnly
+          ? Promise.resolve([] as MarketItem[])
+          : this._getCurrentProviderMarkets({ eventId }),
       ]);
 
       // Betfair: take everything it offers.
@@ -778,7 +795,7 @@ export const SportsService = {
       for (const m of betfairMarkets) byId.set(String((m as any).marketId), m);
       const data = Array.from(byId.values());
 
-      // Only cache non-empty results — don't cache empty so next poll retries
+      // Only cache non-empty results — don't cache empty so next poll retries.
       if (data.length > 0) {
         await CacheService.set(cacheKey, data, 60);
       }
@@ -816,12 +833,12 @@ export const SportsService = {
     }
   },
 
-  async getMarketsWithOdds({ eventId }: { eventId: string }) {
+  async getMarketsWithOdds({ eventId, eventTypeId }: { eventId: string; eventTypeId?: string }) {
     try {
       // console.log("Fetching markets for event:", eventId);
 
       // STEP 1: Get ALL markets
-      const allMarkets = await this.getMarkets({ eventId });
+      const allMarkets = await this.getMarkets({ eventId, eventTypeId });
 
       if (!allMarkets || allMarkets.length === 0) {
         console.log("No markets found for event:", eventId);
@@ -963,15 +980,84 @@ export const SportsService = {
     eventTypeId: string;
     matchId: string;
   }) {
+    const t0 = Date.now();
     try {
       const isRacingEvent = ["7", "4339"].includes(eventTypeId);
 
-      // Only call getMarketsWithOdds — it fetches:
-      //   1. GET /sports/events/{eventId}  → all market catalogues
-      //   2. GET /sports/books/{marketIds} → all live odds, status, runners
-      // This covers match odds, bookmakers, sessions/fancy — all market types.
-      // No need for separate getSessions, getBookmakersWithOdds, getScore calls.
-      const marketOddsData = await this.getMarketsWithOdds({ eventId: matchId });
+      // ── Fastest path: the pre-built event snapshot FILE (local disk) ───────
+      // Checked FIRST because it's a local read (~ms) — faster than the remote
+      // cloud Redis hop below. Built at boot + once a day for every TODAY event,
+      // and on demand for any other event the first time it's opened. The page's
+      // WebSocket refreshes live prices on top, so a slightly-stale file is fine
+      // for the instant first paint.
+      try {
+        const snap = await readNotepad<any>(`event-snapshots/${matchId}`);
+        if (snap?.data?.matchOdds?.length) {
+          console.log(`[MatchDetails] event ${matchId}: served FILE snapshot (${snap.data.matchOdds.length} markets) in ${Date.now() - t0}ms`);
+          return {
+            matchOdds: snap.data.matchOdds,
+            score: snap.data.score ?? null,
+            premiumFancy: null,
+            bookmakers: snap.data.bookmakers ?? null,
+            sessions: snap.data.sessions ?? null,
+            showLay: snap.data.showLay ?? !isRacingEvent,
+          };
+        }
+      } catch {
+        // Snapshot file missing/unreadable — fall through to the next source.
+      }
+
+      // ── Next: the live warm snapshot in Redis (fresher, but a remote hop) ──
+      // The live WS loop mirrors every built frame to live:snapshot:<eventId>.
+      // Used for events with no file yet (their first opener writes one below).
+      try {
+        if (redis?.isOpen) {
+          const cached = await redis.get(`live:snapshot:${matchId}`);
+          if (cached) {
+            const msg = JSON.parse(cached);
+            // Only serve it if it actually has markets — the live loop also
+            // persists EMPTY frames; returning those would blank the page.
+            if (Array.isArray(msg.matchOdds) && msg.matchOdds.length > 0) {
+              console.log(`[MatchDetails] event ${matchId}: served LIVE snapshot (${msg.matchOdds.length} markets) in ${Date.now() - t0}ms`);
+              return {
+                matchOdds: msg.matchOdds,
+                score: msg.score ?? null,
+                premiumFancy: null,
+                bookmakers: msg.bookmakers ?? null,
+                sessions: msg.sessions ?? null,
+                showLay: !isRacingEvent,
+              };
+            }
+          }
+        }
+      } catch {
+        // Snapshot read failed — fall through to the live fetch.
+      }
+
+      // ── No snapshot yet (e.g. a NON-today event opened for the first time) ──
+      // Cold-fetch live, return it, AND write the snapshot file so the next
+      // person who opens this event gets it instantly. The file is created once
+      // here; future opens hit the FILE path above and never reach this branch.
+      const marketOddsData = await this.getMarketsWithOdds({ eventId: matchId, eventTypeId });
+
+      if (Array.isArray(marketOddsData) && marketOddsData.length > 0) {
+        // Best-effort, fire-and-forget — never block the response on the write.
+        void writeNotepad(
+          `event-snapshots/${matchId}`,
+          {
+            matchOdds: marketOddsData,
+            score: null,
+            premiumFancy: null,
+            bookmakers: null,
+            sessions: null,
+            showLay: !isRacingEvent,
+          },
+          { quiet: true },
+        );
+        console.log(`[MatchDetails] event ${matchId}: served COLD live fetch (${marketOddsData.length} markets) in ${Date.now() - t0}ms + created snapshot file`);
+      } else {
+        console.log(`[MatchDetails] event ${matchId}: COLD live fetch returned 0 markets in ${Date.now() - t0}ms`);
+      }
 
       return {
         matchOdds: marketOddsData ?? null,
@@ -982,6 +1068,7 @@ export const SportsService = {
         showLay: !isRacingEvent,
       };
     } catch (error) {
+      console.error(`[MatchDetails] event ${matchId} failed:`, (error as Error)?.message);
       return {
         matchOdds: null,
         score: null,

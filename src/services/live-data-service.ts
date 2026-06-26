@@ -66,6 +66,10 @@ interface EventState {
   eventTypeId: string;
   structure: MarketStructure | null;
   lastStructureRefresh: number;
+  // Diagnostics: when the loop started, so we can log how long the FIRST live
+  // frame took to reach subscribers (this is the "page shows a spinner" time).
+  loopStartedAt: number;
+  firstFrameLogged: boolean;
 }
 
 const activeEvents = new Map<string, EventState>();
@@ -95,6 +99,8 @@ export const LiveDataService = {
         eventTypeId,
         structure: null,
         lastStructureRefresh: 0,
+        loopStartedAt: 0,
+        firstFrameLogged: false,
       };
       activeEvents.set(eventId, state);
     }
@@ -116,6 +122,8 @@ export const LiveDataService = {
     if (!state.loopRunning) {
       state.loopRunning = true;
       state.activeLoopId++;
+      state.loopStartedAt = Date.now();
+      state.firstFrameLogged = false;
       const loopId = state.activeLoopId;
       this._pollLoop(eventId, loopId);
     }
@@ -236,7 +244,9 @@ export const LiveDataService = {
     try {
       const [eventOverrides, allMarkets, customMarkets] = await Promise.all([
         MarketPipelineService.getEventOverrides(eventId),
-        SportsService.getMarkets({ eventId }),
+        // Pass eventTypeId so Betfair-only sports (racing) skip the slow legacy
+        // provider — it otherwise blocks the very first socket frame.
+        SportsService.getMarkets({ eventId, eventTypeId: state.eventTypeId }),
         MarketPipelineService.getCustomMarkets(eventId),
       ]);
 
@@ -405,7 +415,9 @@ export const LiveDataService = {
   async _poll(eventId: string, state: EventState) {
     const now = Date.now();
 
-    // Refresh structure on first call or every 60s
+    // Refresh structure on first call or every 60s. Keeping this stable (not a
+    // fast adaptive window) means the market SET only changes on a real catalogue
+    // change, so markets don't add/drop between ticks.
     if (!state.structure || now - state.lastStructureRefresh >= STRUCTURE_REFRESH_MS) {
       await this._refreshStructure(eventId, state);
     }
@@ -444,6 +456,7 @@ export const LiveDataService = {
         timestamp: now,
       });
       state.lastMessage = message;
+      this._logFirstFrame(eventId, state, 0);
       this._persistSnapshot(eventId, message);
       this._broadcast(state, message);
       return;
@@ -541,11 +554,24 @@ export const LiveDataService = {
       timestamp: Date.now(),
     });
     state.lastMessage = message;
+    this._logFirstFrame(eventId, state, allProcessed.length);
     this._persistSnapshot(eventId, message);
     this._broadcast(state, message);
 
     // Fire-and-forget: update Redis live cache for bet validation
     MarketPipelineService.finalize(eventId, allProcessed);
+  },
+
+  // One-time log per loop: how long subscribe → first live frame took. This is
+  // exactly the "page shows a loading spinner" duration, so it pinpoints whether
+  // the delay is the external fetch (here) vs. WS connect / client render.
+  _logFirstFrame(eventId: string, state: EventState, marketCount: number) {
+    if (state.firstFrameLogged) return;
+    state.firstFrameLogged = true;
+    const ms = state.loopStartedAt ? Date.now() - state.loopStartedAt : -1;
+    console.log(
+      `[Live] First frame for event ${eventId} (type ${state.eventTypeId}) in ${ms}ms — ${marketCount} market(s)`,
+    );
   },
 
   // Instant patch path for admin market settings (min/max bet, bet delay,

@@ -6,6 +6,7 @@ import { whitelabel_middleware } from "../middleware/whitelabel";
 import { app_middleware } from "../middleware/auth";
 import { readNotepad } from "@services/notepad";
 import { RACING_EVENT_TYPE_IDS } from "@services/event-sync-service";
+import { readMatchListSnapshot } from "@services/match-list-snapshot-service";
 
 export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
 
@@ -18,7 +19,11 @@ export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
         return { success: false, eventTypeId, message: "Not a racing sport", data: [] };
       }
       const np = await readNotepad<any[]>(`racing-${eventTypeId}`);
-      const meetings = np?.data ?? [];
+      // Backstop: only meetings that still have races (the sync already drops
+      // empty ones, but never show a venue with 0 races).
+      const meetings = (np?.data ?? []).filter(
+        (m: any) => Array.isArray(m.races) && m.races.length > 0,
+      );
 
       // Group meetings by countryCode, each with its venues (meetings).
       const byCountry = new Map<string, any[]>();
@@ -90,6 +95,34 @@ export const seriesRoutes = new Elysia({ prefix: "/api/sports" })
         success: false,
         eventTypeId: params.eventTypeId,
         message: err.message || "Failed to fetch series data",
+        data: [],
+      };
+    }
+  })
+
+  // Combined events + default-market ODDS snapshot for a sport, served from a
+  // single shared notepad file the background loop keeps fresh. The match list
+  // seeds from this so every row paints at once (no one-by-one reveal as odds
+  // trickle in over the WebSocket). Whitelabel-agnostic / anonymous: per-user
+  // betCount and any whitelabel visibility are still applied client-side via
+  // the authenticated matches-list fetch. Live odds continue over /ws/markets.
+  .get("/matchlist-snapshot/:eventTypeId", async ({ params }) => {
+    const { eventTypeId } = params;
+    try {
+      const snap = await readMatchListSnapshot(eventTypeId);
+      return {
+        success: true,
+        eventTypeId,
+        data: snap?.data ?? [],
+        updatedAt: snap?.updatedAt ?? null,
+        count: snap?.data?.length ?? 0,
+      };
+    } catch (error) {
+      const err = error as Error;
+      return {
+        success: false,
+        eventTypeId,
+        message: err.message || "Failed to fetch match list snapshot",
         data: [],
       };
     }

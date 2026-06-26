@@ -2,9 +2,14 @@ import { Elysia, t } from "elysia";
 import { AdminMarketService } from "@services/admin-market-service";
 import { db } from "@db/index";
 import { marketOddsHistory, marketSettings, events } from "@db/schema";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { UserRole } from "../../types/enums";
 import { requirePermission } from "../../middleware/permissions";
+import { readNotepad } from "@services/notepad";
+
+// Racing event types (Horse 7 / Greyhound 4339) — no competition layer; the
+// racing admin view browses meetings/races straight from the racing notepad.
+const RACING_EVENT_TYPE_IDS = [7, 4339];
 
 // Price entry schema: {price, size, line?}
 // `line` is only present for LINE markets — it's the over/under value.
@@ -197,6 +202,11 @@ export const marketManagementRoutes = new Elysia({
             ...(body.betDelay !== undefined && { betDelay: body.betDelay }),
             ...(body.minBet !== undefined && { minBet: body.minBet }),
             ...(body.maxBet !== undefined && { maxBet: body.maxBet }),
+            ...(body.maxProfit !== undefined && { maxProfit: body.maxProfit }),
+            ...(body.isActive !== undefined && { isActive: body.isActive }),
+            ...(body.isVisible !== undefined && { isVisible: body.isVisible }),
+            ...(body.suspended !== undefined && { suspended: body.suspended }),
+            ...(body.betLock !== undefined && { betLock: body.betLock }),
           }
         );
         return { success: true, data: result };
@@ -227,8 +237,127 @@ export const marketManagementRoutes = new Elysia({
         betDelay: t.Optional(t.Number()),
         minBet: t.Optional(t.Number()),
         maxBet: t.Optional(t.Number()),
+        maxProfit: t.Optional(t.Number()),
+        isActive: t.Optional(t.Boolean()),
+        isVisible: t.Optional(t.Boolean()),
+        suspended: t.Optional(t.Boolean()),
+        betLock: t.Optional(t.Boolean()),
       }),
     }
+  )
+
+  // ═══════════════════════════════════════════════════════════
+  //  RACING (Horse 7 / Greyhound 4339) — admin browser
+  //  Mirrors the public racing layout (country → venue/meeting → races)
+  //  and merges each race's WIN-market admin settings so the owner can see,
+  //  per race, what's active/suspended and tune all market controls.
+  // ═══════════════════════════════════════════════════════════
+
+  // GET /owner/market-management/racing/:eventTypeId
+  .get(
+    "/racing/:eventTypeId",
+    async ({ params, set }) => {
+      try {
+        const eventTypeId = Number(params.eventTypeId);
+        if (!RACING_EVENT_TYPE_IDS.includes(eventTypeId)) {
+          set.status = 400;
+          return { success: false, error: "Not a racing sport", data: [] };
+        }
+
+        // Structural source: the racing notepad (only meetings that still have
+        // open races). Same data the public racing page renders.
+        const np = await readNotepad<any[]>(`racing-${eventTypeId}`);
+        const meetings = (np?.data ?? []).filter(
+          (m: any) => Array.isArray(m.races) && m.races.length > 0,
+        );
+
+        // Pull existing per-market overrides for every race in one query.
+        const allMarketIds = meetings.flatMap((m: any) =>
+          m.races.map((r: any) => String(r.marketId)),
+        );
+        const settingsByMarket = new Map<string, any>();
+        if (allMarketIds.length) {
+          const rows = await db
+            .select()
+            .from(marketSettings)
+            .where(inArray(marketSettings.marketId, allMarketIds));
+          for (const r of rows) settingsByMarket.set(String(r.marketId), r);
+        }
+
+        // Event-level active flag (auto-managed by the racing sync).
+        const eventIds = meetings.map((m: any) => Number(m.eventId));
+        const eventActive = new Map<number, boolean>();
+        if (eventIds.length) {
+          const erows = await db
+            .select({ eventId: events.eventId, isActive: events.isActive })
+            .from(events)
+            .where(inArray(events.eventId, eventIds));
+          for (const e of erows) eventActive.set(Number(e.eventId), e.isActive);
+        }
+
+        const byCountry = new Map<string, any[]>();
+        for (const m of meetings) {
+          const races = m.races.map((r: any) => {
+            const s = settingsByMarket.get(String(r.marketId));
+            return {
+              marketId: String(r.marketId),
+              name: r.name,
+              raceTime: r.raceTime ?? null,
+              // null = never configured → the live pipeline applies defaults
+              // (active/visible, provider bet delay, no min/max).
+              settings: s
+                ? {
+                    isActive: s.isActive,
+                    isVisible: s.isVisible,
+                    suspended: s.suspended,
+                    betLock: s.betLock,
+                    betDelay: s.betDelay,
+                    minBet: s.minBet != null ? Number(s.minBet) : null,
+                    maxBet: s.maxBet != null ? Number(s.maxBet) : null,
+                    maxProfit: s.maxProfit != null ? Number(s.maxProfit) : null,
+                    notice: s.notice ?? null,
+                  }
+                : null,
+            };
+          });
+          const cc = m.countryCode || "OTHER";
+          if (!byCountry.has(cc)) byCountry.set(cc, []);
+          byCountry.get(cc)!.push({
+            eventId: m.eventId,
+            name: m.name,
+            venue: m.venue ?? null,
+            countryCode: m.countryCode ?? null,
+            timezone: m.timezone ?? null,
+            openDate: m.openDate ?? null,
+            marketCount: m.marketCount ?? races.length,
+            isActive: eventActive.get(Number(m.eventId)) ?? true,
+            races,
+          });
+        }
+
+        const countries = Array.from(byCountry.entries())
+          .map(([countryCode, list]) => ({ countryCode, meetings: list }))
+          .sort((a, b) => a.countryCode.localeCompare(b.countryCode));
+
+        return {
+          success: true,
+          eventTypeId: String(eventTypeId),
+          data: countries,
+          updatedAt: np?.updatedAt ?? null,
+          count: meetings.length,
+        };
+      } catch (error) {
+        console.error("[market-management] GET /racing/:eventTypeId error:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: "Failed to fetch racing markets",
+          detail: (error as Error)?.message,
+          data: [],
+        };
+      }
+    },
+    { params: t.Object({ eventTypeId: t.String() }) },
   )
 
   // PUT /owner/market-management/markets/:marketId/notice

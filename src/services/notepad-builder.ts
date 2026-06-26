@@ -2,7 +2,13 @@ import { db } from "@db/index";
 import { sports, whitelabels } from "@db/schema";
 import { asc, eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { writeNotepad, removeNotepadDir } from "./notepad";
+import { writeNotepad, removeNotepadDir, readNotepad } from "./notepad";
+
+// Racing sports (Horse 7 / Greyhound 4339) have no competition layer and their
+// meetings come/go all day. Declared locally (not imported from
+// event-sync-service) to avoid a circular import. Used to hide a racing sport
+// from the user-facing list when it currently has no races.
+const RACING_SPORT_IDS = [7, 4339];
 
 /**
  * Notepad BUILDER — materializes the display-ready JSON the read endpoints serve.
@@ -77,7 +83,23 @@ export async function buildSportsListNotepad(): Promise<void> {
     addedDate: s.addedDate,
     updateDate: s.updateDate,
   });
-  await writeNotepad("sports-list", all.filter((s) => s.is_active).map(transform));
+  // Hide a racing sport from the USER list when it has no races right now
+  // (the racing notepad only holds meetings that still have races). It stays in
+  // sports-list-all so the owner panel always sees it.
+  const racingHasRaces = new Map<number, boolean>();
+  for (const sportId of RACING_SPORT_IDS) {
+    const np = await readNotepad<any[]>(`racing-${sportId}`);
+    racingHasRaces.set(sportId, (np?.data?.length ?? 0) > 0);
+  }
+  const showInUserList = (s: (typeof all)[number]) => {
+    if (!s.is_active) return false;
+    if (RACING_SPORT_IDS.includes(Number(s.sport_id))) {
+      return racingHasRaces.get(Number(s.sport_id)) === true;
+    }
+    return true;
+  };
+
+  await writeNotepad("sports-list", all.filter(showInUserList).map(transform));
   await writeNotepad("sports-list-all", all.map(transform));
 }
 

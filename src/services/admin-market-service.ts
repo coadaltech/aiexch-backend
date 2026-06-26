@@ -240,12 +240,26 @@ export const AdminMarketService = {
       marketType?: string;
       bettingType?: string;
     }>,
-    values: { betDelay?: number; minBet?: number; maxBet?: number }
+    values: {
+      betDelay?: number;
+      minBet?: number;
+      maxBet?: number;
+      maxProfit?: number;
+      isActive?: boolean;
+      isVisible?: boolean;
+      suspended?: boolean;
+      betLock?: boolean;
+    }
   ) {
     const hasValue =
       values.betDelay !== undefined ||
       values.minBet !== undefined ||
-      values.maxBet !== undefined;
+      values.maxBet !== undefined ||
+      values.maxProfit !== undefined ||
+      values.isActive !== undefined ||
+      values.isVisible !== undefined ||
+      values.suspended !== undefined ||
+      values.betLock !== undefined;
     if (!hasValue || markets.length === 0) {
       return { success: true, count: 0, marketIds: [] as string[] };
     }
@@ -262,6 +276,11 @@ export const AdminMarketService = {
           ...(values.betDelay !== undefined && { betDelay: values.betDelay }),
           ...(values.minBet !== undefined && { minBet: values.minBet }),
           ...(values.maxBet !== undefined && { maxBet: values.maxBet }),
+          ...(values.maxProfit !== undefined && { maxProfit: values.maxProfit }),
+          ...(values.isActive !== undefined && { isActive: values.isActive }),
+          ...(values.isVisible !== undefined && { isVisible: values.isVisible }),
+          ...(values.suspended !== undefined && { suspended: values.suspended }),
+          ...(values.betLock !== undefined && { betLock: values.betLock }),
         });
         updated.push(m.marketId);
       } catch (err) {

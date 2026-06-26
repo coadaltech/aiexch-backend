@@ -27,6 +27,7 @@ import { casinoDevProxyRoutes } from "./routes/casino-dev-proxy";
 import { casinoAceRoutes } from "./routes/casino-ace";
 import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
 import { BetfairService, BETFAIR_KEEPALIVE_MS } from "./services/betfair";
+import { startMatchListSnapshotLoop } from "./services/match-list-snapshot-service";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
 import { startCronJobs, ensureSystemUser } from "@db/seed";
@@ -196,6 +197,17 @@ async function initializeServices() {
     console.log("[Init] Betfair session established + keepAlive scheduled");
   } catch (e: any) {
     console.error("[Init] Betfair session init failed (non-fatal):", e?.message ?? e);
+  }
+
+  // Step 5e: Start the match-list snapshot loop — one shared file per sport with
+  // events + default-market odds, so the homepage / in-play lists paint every
+  // row at once instead of revealing them one-by-one as WS odds trickle in.
+  // Non-fatal: a failed cycle just leaves the previous snapshot in place.
+  try {
+    startMatchListSnapshotLoop();
+    console.log("[Init] Match-list snapshot loop started");
+  } catch (e: any) {
+    console.error("[Init] Match-list snapshot loop failed (non-fatal):", e?.message ?? e);
   }
 
   // // Step 6: Start sports & competitions sync cron jobs

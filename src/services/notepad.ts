@@ -18,7 +18,11 @@ const NOTEPAD_DIR = process.env.NOTEPAD_DIR || join(process.cwd(), "notepad");
  * Write `data` as JSON to `<NOTEPAD_DIR>/<name>.json`. `name` may contain "/" to
  * write into subfolders (e.g. "series/acme/4" → series/acme/4.json). Never throws.
  */
-export async function writeNotepad(name: string, data: unknown): Promise<void> {
+export async function writeNotepad(
+  name: string,
+  data: unknown,
+  opts?: { quiet?: boolean },
+): Promise<void> {
   try {
     const target = join(NOTEPAD_DIR, `${name}.json`);
     await mkdir(dirname(target), { recursive: true });
@@ -30,9 +34,22 @@ export async function writeNotepad(name: string, data: unknown): Promise<void> {
     );
     await writeFile(tmp, payload, "utf-8");
     await rename(tmp, target);
-    console.log(`[Notepad] Wrote ${name}.json (${Array.isArray(data) ? data.length : "?"} records)`);
+    // `quiet` suppresses the per-file log — used when writing hundreds of
+    // per-event snapshot files so the boot/daily log isn't flooded.
+    if (!opts?.quiet) {
+      console.log(`[Notepad] Wrote ${name}.json (${Array.isArray(data) ? data.length : "?"} records)`);
+    }
   } catch (err: any) {
     console.error(`[Notepad] Failed to write ${name}.json:`, err?.message);
+  }
+}
+
+/** Delete a single notepad file `<NOTEPAD_DIR>/<name>.json`. Never throws. */
+export async function removeNotepadFile(name: string): Promise<void> {
+  try {
+    await rm(join(NOTEPAD_DIR, `${name}.json`), { force: true });
+  } catch {
+    /* ignore */
   }
 }
 
@@ -65,5 +82,6 @@ export const NotepadService = {
   writeNotepad,
   readNotepad,
   removeNotepadDir,
+  removeNotepadFile,
   NOTEPAD_DIR,
 };
