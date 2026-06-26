@@ -2,7 +2,8 @@ import { Elysia, t } from "elysia";
 import { users, profiles, otps, whitelabels, userLoginLogs } from "@db/schema";
 import { eq, and, sql, isNull } from "drizzle-orm";
 import { sendOTP, generateOTP } from "@services/nodemailer";
-import { decodeToken, generateTokens } from "@services/token";
+import { decodeToken, verifyToken, generateTokens } from "@services/token";
+import { jwkThumbprint, verifyDpopProof } from "@services/dpop";
 import { getEffectivePermissions } from "@services/permissions";
 import { broadcastForceLogout } from "@services/sports-broadcast";
 import { getCurrentIP } from "@utils/user-ip";
@@ -256,18 +257,44 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         // Generate a unique session token — stored in DB and embedded in JWT.
         // Any new login overwrites this, invalidating all previous sessions.
         const sessionToken = crypto.randomUUID();
-        await db.update(users).set({ sessionToken }).where(eq(users.id, user.id));
+        // Seed the refresh-token rotation chain for this fresh session.
+        const refreshJti = crypto.randomUUID();
+        await db
+          .update(users)
+          .set({
+            sessionToken,
+            currentRefreshJti: refreshJti,
+            prevRefreshJti: null,
+            refreshRotatedAt: new Date(),
+          })
+          .where(eq(users.id, user.id));
 
         // Push an immediate logout to any device already logged in as this user.
         // Their socket carries the previous session token, so they self-eject the
         // moment this broadcast lands — no polling or page refresh required.
         broadcastForceLogout(user.id, sessionToken);
 
+        // Bind tokens to the client's DPoP public key when one is supplied
+        // (sender-constrained — a stolen token is useless without the matching
+        // private key). Clients that don't send a key get plain bearer tokens,
+        // so this is fully backward compatible.
+        const dpopJwk = (body as any)?.dpopPublicKey;
+        const jkt =
+          dpopJwk &&
+          dpopJwk.kty === "EC" &&
+          dpopJwk.crv === "P-256" &&
+          dpopJwk.x &&
+          dpopJwk.y
+            ? jwkThumbprint(dpopJwk)
+            : undefined;
+
         const { accessToken, refreshToken } = generateTokens(
           user.id,
           user.email,
           user.role ?? UserRole.User,
-          sessionToken
+          sessionToken,
+          refreshJti,
+          jkt
         );
 
         cookie.accessToken.set({
@@ -321,6 +348,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       body: t.Object({
         username: t.String({ minLength: 1 }),
         password: t.String({ minLength: 1 }),
+        // Optional DPoP public key (EC P-256 JWK). When present, the issued
+        // tokens are bound to it and require a proof on every request.
+        dpopPublicKey: t.Optional(t.Any()),
       }),
     }
   )
@@ -423,7 +453,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
   )
 
-  .post("/refresh", async ({ cookie, body, set, db }) => {
+  .post("/refresh", async ({ cookie, body, set, db, request }) => {
     // Accept refreshToken from body (cross-domain/Safari) or fall back to cookie
     const refreshToken = (body as any)?.refreshToken || cookie.refreshToken?.value as string;
 
@@ -433,8 +463,14 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     }
 
     try {
-      const decoded = decodeToken(refreshToken);
-      if (!decoded) {
+      // SECURITY: verify the cryptographic signature — never trust an unsigned
+      // decode here. `decodeToken` only base64-decodes the payload and would let
+      // an attacker forge a refresh token for any user id. `verifyToken` checks
+      // the JWT_SECRET signature and expiry, returning null on any tampering.
+      const decoded = verifyToken(refreshToken) as
+        | { id: string; role?: number; email?: string; sessionToken?: string; jti?: string; jkt?: string }
+        | null;
+      if (!decoded?.id) {
         set.status = 401;
         return { success: false, message: "Invalid refresh token" };
       }
@@ -456,21 +492,108 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         return { success: false, message: "Account suspended" };
       }
 
-      // Validate session token — if the user logged in on another device since
-      // this token was issued, decoded.sessionToken won't match the DB value.
-      if (decoded.sessionToken && user.sessionToken && decoded.sessionToken !== user.sessionToken) {
+      // Validate session token — FAIL CLOSED. The refresh token must carry a
+      // sessionToken AND it must match the value currently stored for the user.
+      // A missing token (forged) or a mismatch (superseded by a newer login on
+      // another device) both invalidate this refresh.
+      if (
+        !decoded.sessionToken ||
+        !user.sessionToken ||
+        decoded.sessionToken !== user.sessionToken
+      ) {
         set.status = 401;
         return { success: false, message: "Session expired. Please login again." };
       }
 
-      // Generate new tokens (preserve the same sessionToken so only a new login invalidates the session)
-      const sessionToken = user.sessionToken ?? decoded.sessionToken ?? crypto.randomUUID();
+      // If this refresh token is DPoP-bound, require a valid proof for THIS
+      // request, signed by the bound key. This makes a stolen refresh token
+      // useless without the client's private key. Legacy tokens (no jkt) skip
+      // this and behave as before.
+      const boundJkt = decoded.jkt;
+      if (boundJkt) {
+        const proof = request.headers.get("dpop") ?? undefined;
+        const path = new URL(request.url).pathname;
+        const dpop = await verifyDpopProof(proof, request.method, path);
+        if (!dpop.ok || dpop.jkt !== boundJkt) {
+          set.status = 401;
+          return { success: false, message: "Invalid or missing DPoP proof" };
+        }
+      }
+
+      // Preserve the validated sessionToken so only a new login invalidates the
+      // session. Guaranteed non-null by the fail-closed check above.
+      const sessionToken: string = user.sessionToken;
+
+      // ── Refresh-token rotation + reuse detection ────────────────────────────
+      // The presented token's jti must be the live one. If it's the just-rotated
+      // previous jti AND we're inside the grace window, this is a benign
+      // concurrent/multi-tab race — re-issue without rotating. Any other valid-
+      // but-stale jti means a spent token is being replayed → revoke the session.
+      const GRACE_MS = 20_000;
+      const presentedJti = decoded.jti ?? null;
+      const current = user.currentRefreshJti;
+      const prev = user.prevRefreshJti;
+      const rotatedAt = user.refreshRotatedAt ? user.refreshRotatedAt.getTime() : 0;
+      const now = Date.now();
+
+      let nextJti: string;
+      let reissueOnly = false;
+
+      if (!current) {
+        // Legacy session issued before rotation tracking existed — bootstrap it.
+        nextJti = crypto.randomUUID();
+      } else if (presentedJti && presentedJti === current) {
+        // Normal rotation.
+        nextJti = crypto.randomUUID();
+      } else if (presentedJti && presentedJti === prev && now - rotatedAt <= GRACE_MS) {
+        // Benign concurrent refresh inside the grace window — re-issue the
+        // current token without rotating or revoking.
+        nextJti = current;
+        reissueOnly = true;
+      } else {
+        // A spent / unknown refresh-token id on an otherwise-valid session means
+        // a rotated-away token is being replayed → treat as theft. Revoke the
+        // whole session: rotating sessionToken invalidates every outstanding
+        // access + refresh token, and the broadcast force-logs-out all devices.
+        const revokedSession = crypto.randomUUID();
+        await db
+          .update(users)
+          .set({
+            sessionToken: revokedSession,
+            currentRefreshJti: null,
+            prevRefreshJti: null,
+            refreshRotatedAt: new Date(),
+          })
+          .where(eq(users.id, user.id));
+        broadcastForceLogout(user.id, revokedSession);
+        set.status = 401;
+        return {
+          success: false,
+          message: "Session revoked due to suspicious activity. Please login again.",
+        };
+      }
+
       const { accessToken, refreshToken: newRefreshToken } = generateTokens(
         user.id,
         user.email,
         user.role ?? UserRole.User,
-        sessionToken
+        sessionToken,
+        nextJti,
+        boundJkt // keep the new tokens bound to the same key (undefined = legacy)
       );
+
+      // Persist the rotation (skip on a grace-window re-issue, which keeps the
+      // current jti so both racing clients converge on it).
+      if (!reissueOnly) {
+        await db
+          .update(users)
+          .set({
+            currentRefreshJti: nextJti,
+            prevRefreshJti: current ?? null,
+            refreshRotatedAt: new Date(),
+          })
+          .where(eq(users.id, user.id));
+      }
 
       // Set new tokens in cookies
       cookie.refreshToken.set({

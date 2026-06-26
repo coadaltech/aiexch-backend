@@ -1,6 +1,6 @@
 {
-  "id": "f2613964-2645-4d3e-bb22-32482f639277",
-  "prevId": "cf03bbab-dfc9-4163-a1f5-1348ab60ee1d",
+  "id": "50988aa9-898b-4d40-8cc3-45b8cc24def3",
+  "prevId": "f8383812-38cb-4b9c-9235-b129861fee9f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4948,26 +4948,6 @@
           "notNull": false,
           "default": "'We are currently performing scheduled maintenance. Please check back soon.'"
         },
-        "active_theme": {
-          "name": "active_theme",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'default'"
-        },
-        "enabled_themes": {
-          "name": "enabled_themes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'[\"default\",\"diamond\",\"betfair\"]'"
-        },
-        "home_notice": {
-          "name": "home_notice",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "added_by": {
           "name": "added_by",
           "type": "uuid",
@@ -7273,6 +7253,24 @@
         "session_token": {
           "name": "session_token",
           "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_refresh_jti": {
+          "name": "current_refresh_jti",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prev_refresh_jti": {
+          "name": "prev_refresh_jti",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_rotated_at": {
+          "name": "refresh_rotated_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

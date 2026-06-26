@@ -51,13 +51,13 @@ export const casinoAceRoutes = new Elysia({ prefix: "/casino-ace" })
   })
 
   // ── Authed: generate a launch URL for the current user ────────────────
-  .resolve(async ({ cookie, headers, status, path }) => {
+  .resolve(async ({ cookie, headers, status, path, request }) => {
     // Skip middleware for the public games route by short-circuiting.
     // Elysia evaluates .resolve() for every request on this prefix, so we
     // only enforce auth when the path actually needs it.
     if (path === "/casino-ace/games") return { userId: "", authed: false };
 
-    const result = await app_middleware({ cookie, headers });
+    const result = await app_middleware({ cookie, headers, request });
     if (!result.data) {
       return status(result.code as 401 | 403 | 404 | 500, result);
     }

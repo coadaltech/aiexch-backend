@@ -9,6 +9,12 @@ import { app_middleware } from "../middleware/auth";
 import { redis } from "../db/redis";
 import { parseBetType, UserRole, MarketType, parseMarketType } from "../types/enums";
 import { SportsService } from "../services/sports";
+import {
+  checkRequestOrigin,
+  checkBetRateLimit,
+  consumeBetToken,
+  issueBetToken,
+} from "../utils/bet-guards";
 
 // Bound the upstream odds re-fetch so a slow provider can't stall bet placement.
 const FRESH_ODDS_TIMEOUT_MS = 1500;
@@ -308,8 +314,8 @@ async function verifyOddsUnchanged(args: {
 // `resolve` supports returning `status(code, body)` to halt with an auth
 // failure response, replacing the old guard.beforeHandle halt.
 export const bettingRoutes = new Elysia({ prefix: "/betting" })
-  .resolve(async ({ cookie, headers, status }) => {
-    const state_result = await app_middleware({ cookie, headers });
+  .resolve(async ({ cookie, headers, status, request }) => {
+    const state_result = await app_middleware({ cookie, headers, request });
     if (!state_result.data) {
       return status(state_result.code as 401 | 403 | 404 | 500, state_result);
     }
@@ -320,9 +326,49 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
 
   })
 
+  // Issue a short-lived, single-use, market-bound bet token.
+  // The frontend calls this when the bet slip opens (passing the marketId) and
+  // echoes the returned token back in POST /place. Combined with REQUIRE_BET_TOKEN
+  // this makes a captured /place payload un-replayable from Postman/curl.
+  .post("/bet-token", async ({ body, userId, set }) => {
+    try {
+      const { marketId } = (body ?? {}) as { marketId?: string | number };
+      if (!marketId) {
+        set.status = 400;
+        return { success: false, error: "marketId is required" };
+      }
+      const token = await issueBetToken(userId, String(marketId));
+      if (!token) {
+        // Redis unavailable — can't mint a token. Don't hard-fail the bet slip;
+        // /place tolerates a missing token unless REQUIRE_BET_TOKEN is on.
+        set.status = 200;
+        return { success: true, token: null };
+      }
+      set.status = 200;
+      return { success: true, token };
+    } catch {
+      set.status = 500;
+      return { success: false, error: "Failed to issue bet token" };
+    }
+  })
+
   // Place a bet
   .post("/place", async ({ body, userId, set, request }) => {
     try {
+      // ── Request-source guards (block Postman/curl/replay) ──
+      // 1) Origin allow-list: an explicit server-side gate (CORS alone does NOT
+      //    stop non-browser tools). Cheapest check, so do it first.
+      const originCheck = checkRequestOrigin(request);
+      if (!originCheck.ok) {
+        set.status = 403;
+        return { success: false, error: originCheck.reason };
+      }
+      // 2) Per-user rate limit: caps scripted abuse even with a valid token.
+      const rateCheck = await checkBetRateLimit(userId);
+      if (!rateCheck.ok) {
+        set.status = 429;
+        return { success: false, error: rateCheck.reason };
+      }
       const {
         matchId,
         marketId,
@@ -588,6 +634,20 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
       // ± 5 points). Use effectiveOdds from here on so the stored bet, the
       // potential-return math, and the user's history all agree.
       const effectiveOdds = verification.effectiveOdds ?? odds;
+
+      // 3) One-time bet nonce: consume the single-use, market-bound token here
+      //    (after odds verification so a benign price-change reject doesn't burn
+      //    a legit user's token, but a replayed capture still fails — the token
+      //    is already gone). No-op unless the client sent one / REQUIRE_BET_TOKEN.
+      const tokenCheck = await consumeBetToken(
+        userId,
+        (body as { betToken?: string }).betToken,
+        canonicalMarketId,
+      );
+      if (!tokenCheck.ok) {
+        set.status = 400;
+        return { success: false, error: tokenCheck.reason };
+      }
 
       // ── STEP 2: Insert bet + details in a single transaction ──
       const today = new Date();
@@ -868,8 +928,16 @@ export const bettingRoutes = new Elysia({ prefix: "/betting" })
   })
 
   // Owner: Declare match results
-  .post("/owner/declare-result", async ({ body, set }) => {
+  .post("/owner/declare-result", async ({ body, set, userRole }) => {
     try {
+      // Authorization: only an Owner may declare results. The .resolve() guard
+      // above only proves the caller is authenticated, not privileged — without
+      // this check any logged-in user could settle a match in their own favor.
+      if (userRole !== UserRole.Owner) {
+        set.status = 403;
+        return { success: false, error: "Forbidden" };
+      }
+
       const { matchId, results } = body as {
         matchId: string | number;
         results: Record<string, "winner" | "loser">;

@@ -37,6 +37,16 @@ export const users = pgTable("users", {
   parentAccountStatus: boolean("parent_account_status").default(true).notNull(),
   emailVerified: boolean("email_verified").default(false),
   sessionToken: varchar("session_token", { length: 36 }),
+  // ── Refresh-token rotation (reuse detection) ──────────────────────────────
+  // The single live refresh-token id (jti) for this user's session. It rotates
+  // on every /auth/refresh. Presenting a refresh token whose jti is neither the
+  // current nor the (grace-window) previous one means a spent token is being
+  // replayed → treated as theft → the whole session is revoked. `prev` +
+  // `rotatedAt` give a short grace window so concurrent / multi-tab refreshes
+  // (which legitimately race on the same old token) don't false-trigger a logout.
+  currentRefreshJti: varchar("current_refresh_jti", { length: 36 }),
+  prevRefreshJti: varchar("prev_refresh_jti", { length: 36 }),
+  refreshRotatedAt: timestamp("refresh_rotated_at"),
   createdBy: uuid("created_by"),
   /**
    * Staff delegation columns.

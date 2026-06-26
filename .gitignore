@@ -13,3 +13,5 @@ node_modules
 .env.production.local
 drizzle.config.ts
 global-bundle.pem
+/notepad
+/notepad/*

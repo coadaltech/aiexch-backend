@@ -10,6 +10,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { RecordStatus, UserRole, MatkaSportType } from "../../types/enums";
 import { requirePermission } from "../../middleware/permissions";
+import { istInstantMs } from "../../utils/shift-time";
 
 // Synthetic event_type_id used to mark matka result rows in market_results.
 const MATKA_EVENT_TYPE_ID = 999;
@@ -653,20 +654,21 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         // bypassed. End time is HH:MM local to shift_date (extended by one
         // day when nextDayAllow is true).
         if (shift.mainJantriTime) {
-          const [jH, jM] = shift.mainJantriTime.split(":").map(Number);
-          const jantriAt = new Date(shift.shiftDate);
-          jantriAt.setHours(jH, jM, 0, 0);
-          if (shift.nextDayAllow) {
-            jantriAt.setDate(jantriAt.getDate() + 1);
-          }
-          const msLeft = jantriAt.getTime() - Date.now();
+          // main_jantri_time is IST wall-clock; compute the instant in IST so
+          // the check is independent of the server's timezone (dev=IST, prod=UTC).
+          const jantriMs = istInstantMs(
+            shift.shiftDate,
+            shift.mainJantriTime,
+            shift.nextDayAllow
+          );
+          const msLeft = jantriMs - Date.now();
           if (msLeft > 0) {
             set.status = 400;
             return {
               success: false,
               error: "Main jantri time not reached",
               msLeft,
-              mainJantriAt: jantriAt.toISOString(),
+              mainJantriAt: new Date(jantriMs).toISOString(),
             };
           }
         }
@@ -742,6 +744,10 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
   .get("/live-prediction/declared-history", async ({ query, set }) => {
     try {
       const limit = Math.min(Number(query?.limit ?? 50), 200);
+      // Optional: restrict history to a single shift (the one selected in the
+      // live-prediction header). Applying it in SQL means the limit counts
+      // that shift's rows, not the latest across every shift.
+      const shiftId = (query?.shiftId as string | undefined) || undefined;
       const rows = await db.execute(sql`
         SELECT
           id,
@@ -754,6 +760,7 @@ export const matkaOwnerRoutes = new Elysia({ prefix: "/matka" })
         WHERE event_type_id = ${MATKA_EVENT_TYPE_ID}
           AND status = 'DECLARED'
           AND record_status = 0
+          ${shiftId ? sql`AND (api_response->>'shiftId') = ${shiftId}` : sql``}
         ORDER BY declared_at DESC
         LIMIT ${limit}
       `);

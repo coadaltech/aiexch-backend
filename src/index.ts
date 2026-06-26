@@ -26,6 +26,8 @@ import { casinoWalletStubRoutes } from "./routes/casino-wallet-stub";
 import { casinoDevProxyRoutes } from "./routes/casino-dev-proxy";
 import { casinoAceRoutes } from "./routes/casino-ace";
 import { startMatkaShiftCron } from "./services/matka-shift-cron-service";
+import { BetfairService, BETFAIR_KEEPALIVE_MS } from "./services/betfair";
+import { startMatchListSnapshotLoop } from "./services/match-list-snapshot-service";
 import "dotenv/config";
 import { websocketRoutes } from "@routes/websocket";
 import { startCronJobs, ensureSystemUser } from "@db/seed";
@@ -60,7 +62,7 @@ const app = new Elysia()
         return dynamicOrigins.has(origin);
       },
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-whitelabel-domain", "DPoP"],
       credentials: true,
     }),
   )
@@ -138,9 +140,9 @@ async function initializeServices() {
   // first visitor after a deploy gets games instantly. Fire-and-forget — never
   // block startup on QT (it can be slow / IP-gated), and a failure is harmless
   // (the first real request warms the cache instead).
-  void warmGamesCache()
-    .then(() => console.log("[Init] QTech casino first page warmed"))
-    .catch((e) => console.error("[Init] QTech warm failed (non-fatal):", e?.message ?? e));
+  // void warmGamesCache()
+  //   .then(() => console.log("[Init] QTech casino first page warmed"))
+  //   .catch((e) => console.error("[Init] QTech warm failed (non-fatal):", e?.message ?? e));
 
   // Step 2: Load whitelabel domains (needs DB)
   await loadWhitelabelOrigins();
@@ -182,6 +184,30 @@ async function initializeServices() {
     console.log("[Init] Matka shift date cron started");
   } catch (e) {
     console.error("[Init] Matka shift cron failed (non-fatal):", e);
+  }
+
+  // Step 5d: Establish the Betfair session (used by competitions/events sync and
+  // market/odds fetching) and schedule keepAlive as an idle backstop. Non-fatal:
+  // if credentials are missing, login throws and we log it — the rest boots.
+  try {
+    await BetfairService.ensureSession();
+    setInterval(() => {
+      void BetfairService.keepAlive();
+    }, BETFAIR_KEEPALIVE_MS);
+    console.log("[Init] Betfair session established + keepAlive scheduled");
+  } catch (e: any) {
+    console.error("[Init] Betfair session init failed (non-fatal):", e?.message ?? e);
+  }
+
+  // Step 5e: Start the match-list snapshot loop — one shared file per sport with
+  // events + default-market odds, so the homepage / in-play lists paint every
+  // row at once instead of revealing them one-by-one as WS odds trickle in.
+  // Non-fatal: a failed cycle just leaves the previous snapshot in place.
+  try {
+    startMatchListSnapshotLoop();
+    console.log("[Init] Match-list snapshot loop started");
+  } catch (e: any) {
+    console.error("[Init] Match-list snapshot loop failed (non-fatal):", e?.message ?? e);
   }
 
   // // Step 6: Start sports & competitions sync cron jobs

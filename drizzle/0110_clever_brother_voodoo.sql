@@ -1,0 +1,3 @@
+ALTER TABLE "settings" ADD COLUMN "active_theme" varchar(50) DEFAULT 'default';--> statement-breakpoint
+ALTER TABLE "settings" ADD COLUMN "enabled_themes" text DEFAULT '["default","diamond","betfair"]';--> statement-breakpoint
+ALTER TABLE "settings" ADD COLUMN "home_notice" text;

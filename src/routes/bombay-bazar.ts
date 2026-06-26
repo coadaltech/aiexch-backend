@@ -13,6 +13,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { app_middleware } from "../middleware/auth";
 import { parseUserAgent } from "../utils/parse-ua";
+import { istInstantMs } from "../utils/shift-time";
 import { RecordStatus, UserRole, MatkaSportType } from "../types/enums";
 import {
   BOMBAY_BAZAR_PANA_SET,
@@ -113,13 +114,10 @@ export const bombayBazarRoutes = new Elysia({ prefix: "/bombay-bazar" })
         )
         .orderBy(matkaShifts.shiftOrder);
 
-      const now = new Date();
+      const nowMs = Date.now();
       const activeCarryOvers = carryOverShifts.filter((s) => {
         if (!s.endTime) return false;
-        const [h, m] = s.endTime.split(":").map(Number);
-        const endToday = new Date(dateFilter);
-        endToday.setHours(h, m, 0, 0);
-        return now < endToday;
+        return nowMs < istInstantMs(dateFilter, s.endTime);
       });
 
       const declaredShifts = await db
@@ -248,8 +246,8 @@ export const bombayBazarRoutes = new Elysia({ prefix: "/bombay-bazar" })
   // ── Protected routes ─────────────────────────────────────────────────────
   // Per-request user context via .resolve() (NOT .state(), which is module-shared
   // and would leak userId across concurrent bet placements).
-  .resolve(async ({ cookie, headers, status }) => {
-    const state_result = await app_middleware({ cookie, headers });
+  .resolve(async ({ cookie, headers, status, request }) => {
+    const state_result = await app_middleware({ cookie, headers, request });
     if (!state_result.data) {
       return status(state_result.code as 401 | 403 | 404 | 500, state_result);
     }
@@ -317,22 +315,24 @@ export const bombayBazarRoutes = new Elysia({ prefix: "/bombay-bazar" })
         }
 
         if (shift.endTime) {
-          const [endH, endM] = shift.endTime.split(":").map(Number);
-          const endAt = new Date(shift.shiftDate);
-          endAt.setHours(endH, endM, 0, 0);
-          if (shift.nextDayAllow) endAt.setDate(endAt.getDate() + 1);
-          if (Date.now() >= endAt.getTime()) {
+          const endMs = istInstantMs(
+            shift.shiftDate,
+            shift.endTime,
+            shift.nextDayAllow
+          );
+          if (Date.now() >= endMs) {
             set.status = 400;
             return { success: false, error: "Shift betting time has closed" };
           }
         }
 
         if (shift.mainJantriTime) {
-          const [hours, minutes] = shift.mainJantriTime.split(":").map(Number);
-          const cutoff = new Date(shift.shiftDate);
-          cutoff.setHours(hours, minutes, 0, 0);
-          if (shift.nextDayAllow) cutoff.setDate(cutoff.getDate() + 1);
-          if (new Date() > cutoff) {
+          const cutoffMs = istInstantMs(
+            shift.shiftDate,
+            shift.mainJantriTime,
+            shift.nextDayAllow
+          );
+          if (Date.now() > cutoffMs) {
             set.status = 400;
             return { success: false, error: "Shift betting time has closed" };
           }

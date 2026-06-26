@@ -1,6 +1,6 @@
 {
-  "id": "cf03bbab-dfc9-4163-a1f5-1348ab60ee1d",
-  "prevId": "f8383812-38cb-4b9c-9235-b129861fee9f",
+  "id": "fc555ed4-0c6d-4914-ad9e-3d38f5562cac",
+  "prevId": "50988aa9-898b-4d40-8cc3-45b8cc24def3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4962,6 +4962,12 @@
           "notNull": false,
           "default": "'[\"default\",\"diamond\",\"betfair\"]'"
         },
+        "home_notice": {
+          "name": "home_notice",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "added_by": {
           "name": "added_by",
           "type": "uuid",
@@ -7267,6 +7273,24 @@
         "session_token": {
           "name": "session_token",
           "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "current_refresh_jti": {
+          "name": "current_refresh_jti",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prev_refresh_jti": {
+          "name": "prev_refresh_jti",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_rotated_at": {
+          "name": "refresh_rotated_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

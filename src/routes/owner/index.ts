@@ -31,10 +31,11 @@ export const ownerRoutes = new Elysia({ prefix: "/owner" })
   // Per-request user context via .resolve() (NOT .state(), which is module-shared
   // and would leak userId/userRole across concurrent admin requests). Subroutes
   // mounted via .use() inherit the resolved `userId` and `userRole`.
-  .resolve(async ({ cookie, headers, status }) => {
+  .resolve(async ({ cookie, headers, status, request }) => {
     const state_result = await app_middleware({
       cookie,
       headers,
+      request,
       allowed: [UserRole.Owner, UserRole.Admin, UserRole.Super, UserRole.Master, UserRole.Agent],
     });
     if (!state_result.data) {

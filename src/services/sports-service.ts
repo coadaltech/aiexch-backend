@@ -3,6 +3,7 @@ import { db } from "@db/index";
 import { sports } from "@db/schema";
 import { asc, eq } from "drizzle-orm";
 import { CacheService } from "./cache";
+import { readNotepad } from "./notepad";
 
 const CACHE_KEY_ALL = "sports:list:all";
 const CACHE_KEY_ACTIVE = "sports:list:active";
@@ -20,6 +21,12 @@ export const getAvailableSportsList = async (
   const cacheKey = includeInactive ? CACHE_KEY_ALL : CACHE_KEY_ACTIVE;
 
   try {
+    // Fast path: serve from the notepad file (regenerated on sync / owner edit).
+    const np = await readNotepad<any[]>(
+      includeInactive ? "sports-list-all" : "sports-list",
+    );
+    if (np?.data?.length) return np.data;
+
     const cached = await CacheService.get<any[]>(cacheKey);
     if (cached) return cached;
 
