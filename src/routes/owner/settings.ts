@@ -40,6 +40,19 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
           updateData.maintenanceMode = updateData.maintenanceMode === "true";
         }
 
+        // commissionPercentage is a numeric/decimal column → drizzle expects a
+        // string. Clamp to a sane 0–100 range before storing.
+        if (
+          updateData.commissionPercentage !== undefined &&
+          updateData.commissionPercentage !== null &&
+          updateData.commissionPercentage !== ""
+        ) {
+          const pct = Number(updateData.commissionPercentage);
+          updateData.commissionPercentage = Number.isFinite(pct)
+            ? String(Math.min(100, Math.max(0, pct)))
+            : "0";
+        }
+
         // enabledThemes arrives as a JSON string (or array); store as a JSON
         // string in the text column. Accept both shapes defensively.
         if (Array.isArray(updateData.enabledThemes)) {
@@ -117,6 +130,8 @@ export const settingsRoutes = new Elysia({ prefix: "/settings" })
         theme: t.Optional(t.String()),
         maintenanceMode: t.Optional(t.Union([t.Boolean(), t.String()])),
         maintenanceMessage: t.Optional(t.String()),
+        // Global commission percentage (string/number, e.g. "2.50")
+        commissionPercentage: t.Optional(t.Union([t.String(), t.Number()])),
         // ── Theme Management ──
         activeTheme: t.Optional(t.String()),
         // JSON-encoded string array of enabled theme keys, e.g. '["default","diamond"]'

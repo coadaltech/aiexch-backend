@@ -20,6 +20,7 @@
 
 import { SportsService } from "./sports";
 import { readNotepad, writeNotepad } from "./notepad";
+import { getInPlaySet } from "./inplay-sync-service";
 
 /** Sports whose match lists render as a 1/X/2 odds list (cricket, soccer,
  *  tennis, election). Racing (7/4339) is a many-runner WIN market with its own
@@ -41,7 +42,9 @@ const SNAPSHOT_REFRESH_MS = Number(process.env.SNAPSHOT_REFRESH_MS || 5000);
 // window around now (a SUPERSET of the client's 3-day display window) plus any
 // in-play match. Election (500) shows every market regardless of date, so it is
 // never windowed. Keeps the per-cycle listMarketBook calls small.
-const WINDOW_AHEAD_MS = 5 * 24 * 60 * 60 * 1000; // 5 days ahead
+// Must stay ≥ the frontend's DATE_WINDOW_DAYS (currently 7) so every event the
+// list can display exists in the snapshot file. Kept a day wider as margin.
+const WINDOW_AHEAD_MS = 8 * 24 * 60 * 60 * 1000; // 8 days ahead
 const WINDOW_BEHIND_MS = 2 * 24 * 60 * 60 * 1000; // 2 days behind (long live events)
 const NO_WINDOW_EVENT_TYPES = new Set(["500"]);
 
@@ -108,18 +111,41 @@ export async function buildMatchListSnapshot(
     ? await SportsService.getOdds({ marketId: marketIds })
     : {};
 
-  const data: MatchListSnapshotItem[] = relevant.map((m: any) => ({
-    id: String(m.id),
-    name: m.name,
-    openDate: m.openDate ?? null,
-    status: m.status,
-    inPlay: !!m.inPlay,
-    defaultMarketId: String(m.defaultMarketId ?? ""),
-    seriesId: String(m.seriesId ?? ""),
-    seriesName: m.seriesName ?? "",
-    betCount: 0, // per-user; filled client-side from the authenticated list
-    market: m.defaultMarketId ? odds[String(m.defaultMarketId)] ?? null : null,
-  }));
+  // Authoritative in-play set from the hourly Betfair reconciliation (null until
+  // the first run completes — then we trust live market status / the DB flag).
+  const inPlaySet = getInPlaySet(eventTypeId);
+
+  // Resolve the TRUE in-play state for a row so the In-Play page stays fresh:
+  //   • a CLOSED / settled default market → finished → not in-play (drops it,
+  //     refreshed every snapshot cycle so completions clear within seconds);
+  //   • else a live market (book says inplay) → in-play;
+  //   • else the hourly Betfair in-play set (membership backstop);
+  //   • else the DB `open_date <= now()` heuristic as a last resort.
+  const resolveInPlay = (m: any, market: any | null): boolean => {
+    const status = market?.status;
+    if (status === "CLOSED" || status === "INACTIVE") return false;
+    if (market?.inPlay === true) return true;
+    if (inPlaySet) return inPlaySet.has(String(m.id));
+    return !!m.inPlay;
+  };
+
+  const data: MatchListSnapshotItem[] = relevant.map((m: any) => {
+    const market = m.defaultMarketId
+      ? odds[String(m.defaultMarketId)] ?? null
+      : null;
+    return {
+      id: String(m.id),
+      name: m.name,
+      openDate: m.openDate ?? null,
+      status: m.status,
+      inPlay: resolveInPlay(m, market),
+      defaultMarketId: String(m.defaultMarketId ?? ""),
+      seriesId: String(m.seriesId ?? ""),
+      seriesName: m.seriesName ?? "",
+      betCount: 0, // per-user; filled client-side from the authenticated list
+      market,
+    };
+  });
 
   await writeNotepad(matchListSnapshotPath(eventTypeId), data, { quiet: true });
   return data;

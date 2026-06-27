@@ -243,6 +243,26 @@ export async function listRacesForEvents(
   return out;
 }
 
+/**
+ * Event IDs that are CURRENTLY in-play for a sport, via the listEvents
+ * `inPlayOnly` market filter. This is Betfair's authoritative "which events are
+ * live right now" answer — used to reconcile our in-play membership so finished
+ * matches drop out and freshly-live ones appear.
+ */
+export async function listInPlayEventIds(
+  eventTypeId: string | number,
+): Promise<string[]> {
+  const res = await request<any[]>("listEvents", {
+    filter: { eventTypeIds: [String(eventTypeId)], inPlayOnly: true },
+  });
+  const ids: string[] = [];
+  for (const e of res || []) {
+    const id = e?.event?.id;
+    if (id != null) ids.push(String(id));
+  }
+  return ids;
+}
+
 /** Raw market book (live prices) for the given market IDs. */
 export async function listMarketBook(marketIds: string[]) {
   return request<any[]>("listMarketBook", {
@@ -403,6 +423,7 @@ export const BetfairService = {
   listEventTypes,
   listCompetitions,
   listEvents,
+  listInPlayEventIds,
   listMarketCatalogue,
   listRacesForEvents,
   listMarketBook,

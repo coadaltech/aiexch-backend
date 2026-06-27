@@ -1,0 +1,1 @@
+ALTER TABLE "settings" ADD COLUMN "commission_percentage" numeric(5, 2) DEFAULT '0';

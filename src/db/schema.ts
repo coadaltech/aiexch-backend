@@ -395,6 +395,13 @@ export const settings = pgTable("settings", {
   maintenanceMessage: text("maintenance_message").default(
     "We are currently performing scheduled maintenance. Please check back soon."
   ),
+  // ── Global commission ──
+  // Site-wide commission percentage cut from user bets. Like maintenanceMode,
+  // this is a single global value (not per-whitelabel). Owner sets it here.
+  commissionPercentage: decimal("commission_percentage", {
+    precision: 5,
+    scale: 2,
+  }).default("0"),
   // ── Theme Management ──
   // Layout/structure themes (separate from the `theme` color overlay above).
   // `activeTheme` is the admin-configured default theme key served to users
