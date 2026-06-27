@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { cookie } from "@elysiajs/cookie";
 import { connectRedis, redis, redisIsHealthy } from "./db/redis";
+import { initBroadcastBus } from "./services/broadcast-bus";
 import { authRoutes } from "./routes/auth";
 import { profileRoutes } from "./routes/profile";
 import { ownerRoutes } from "./routes/owner";
@@ -136,6 +137,12 @@ async function initializeServices() {
   // Step 1: Connect Redis (non-blocking — app works without it via in-memory cache)
   await connectRedis();
   console.log("[Init] Redis connection attempted");
+
+  // Step 1a: Start the cross-instance broadcast bus (Redis pub/sub). This is
+  // what makes force-logout, ledger/balance, notifications, result-declared and
+  // admin market patches reach WebSocket clients connected to OTHER instances.
+  // Falls back to local-only delivery if Redis is unavailable.
+  await initBroadcastBus();
 
   // Step 1b: Pre-warm the QTech casino lobby's first page into Redis so the
   // first visitor after a deploy gets games instantly. Fire-and-forget — never

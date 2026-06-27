@@ -23,6 +23,7 @@ import { marketSettings } from "@db/schema";
 import { isNotNull, inArray } from "drizzle-orm";
 import { redis } from "@db/redis";
 import { RedisGCService } from "./redis-gc-service";
+import { onBroadcast, publishBroadcast } from "./broadcast-bus";
 
 const NOTICE_TTL = RedisGCService.OVERRIDE_TTL_SECONDS;
 
@@ -594,6 +595,27 @@ export const LiveDataService = {
       notice?: string;
     }
   ) {
+    // Cross-instance: the admin edit happened on one instance, but the event's
+    // live subscribers may be on any/all instances. Publish so each instance
+    // applies the patch to its own cached state and pushes to its own sockets.
+    publishBroadcast(LIVE_BUS_TOPIC, { kind: "patch-settings", eventId, marketId, patch });
+  },
+
+  _localPatchMarketSettings(
+    eventId: string,
+    marketId: string,
+    patch: {
+      isActive?: boolean;
+      isVisible?: boolean;
+      suspended?: boolean;
+      betLock?: boolean;
+      betDelay?: number;
+      minBet?: number;
+      maxBet?: number;
+      maxProfit?: number;
+      notice?: string;
+    }
+  ) {
     const state = activeEvents.get(eventId);
     if (!state) return;
 
@@ -668,6 +690,10 @@ export const LiveDataService = {
   // lastMessage yet) this is a no-op and the next normal poll will pick up
   // the Redis flag.
   patchMarketBallRunning(eventId: string, marketId: string, ballRunning: boolean) {
+    publishBroadcast(LIVE_BUS_TOPIC, { kind: "patch-ball", eventId, marketId, ballRunning });
+  },
+
+  _localPatchMarketBallRunning(eventId: string, marketId: string, ballRunning: boolean) {
     const state = activeEvents.get(eventId);
     if (!state || !state.lastMessage) return;
     try {
@@ -694,6 +720,12 @@ export const LiveDataService = {
   // out of the bet slip instantly — event-driven, no client-side polling.
   // No-op if nobody is currently subscribed to the event.
   broadcastResultDeclared(eventId: string, marketId: string) {
+    // Cross-instance: result declaration runs in a cron / owner action on a
+    // single instance, but subscribers for this event live on every instance.
+    publishBroadcast(LIVE_BUS_TOPIC, { kind: "result-declared", eventId, marketId });
+  },
+
+  _localBroadcastResultDeclared(eventId: string, marketId: string) {
     const state = activeEvents.get(eventId);
     if (!state || state.subscribers.size === 0) return;
     const message = JSON.stringify({
@@ -753,3 +785,23 @@ export const LiveDataService = {
     return { activeEvents: activeEvents.size, events };
   },
 };
+
+// ─── Cross-instance relay for admin/result signals ─────────────────────────
+// The public broadcastResultDeclared / patchMarketSettings / patchMarketBallRunning
+// methods publish onto this topic; every instance (including the producer) then
+// applies the change to its OWN cached state and pushes to its OWN subscribers.
+const LIVE_BUS_TOPIC = "live-data";
+
+onBroadcast(LIVE_BUS_TOPIC, (p: any) => {
+  switch (p?.kind) {
+    case "result-declared":
+      LiveDataService._localBroadcastResultDeclared(p.eventId, p.marketId);
+      break;
+    case "patch-settings":
+      LiveDataService._localPatchMarketSettings(p.eventId, p.marketId, p.patch);
+      break;
+    case "patch-ball":
+      LiveDataService._localPatchMarketBallRunning(p.eventId, p.marketId, p.ballRunning);
+      break;
+  }
+});

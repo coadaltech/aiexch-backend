@@ -10,6 +10,8 @@
 // wrapper doesn't reliably expose `readyState` — this mirrors how
 // live-data-service.ts fans out market updates to subscribers.
 
+import { onBroadcast, publishBroadcast } from "./broadcast-bus";
+
 type Send = (msg: string) => void;
 
 export type BroadcastChannel =
@@ -70,21 +72,18 @@ export const removeClientFromAllChannels = (clientId: string) => {
   for (const ch of channels.values()) ch.delete(clientId);
 };
 
-export const broadcastChange = (
-  channel: BroadcastChannel,
-  extra?: Record<string, unknown>,
-) => {
+// ─── Cross-instance relay ──────────────────────────────────────────────────
+// Every broadcast below is funnelled through the Redis-backed bus so it reaches
+// the WebSocket clients connected to *other* instances too — not just the ones
+// on the instance that produced the event. The producer builds the exact wire
+// message once (so the timestamp is identical everywhere) and hands the bus a
+// { channel, message } pair; the registered handler does the actual per-socket
+// fan-out against THIS instance's local `channels` map.
+const BUS_TOPIC = "sports-broadcast";
+
+const localFanOut = (channel: BroadcastChannel, message: string) => {
   const subs = channels.get(channel);
   if (!subs || subs.size === 0) return;
-
-  const message = JSON.stringify({
-    type: `${channel}-changed`,
-    timestamp: Date.now(),
-    ...extra,
-  });
-  console.log(
-    `[broadcast] ${channel}-changed -> ${subs.size} subscriber(s)`,
-  );
   for (const [clientId, send] of subs) {
     try {
       send(message);
@@ -94,29 +93,40 @@ export const broadcastChange = (
   }
 };
 
+onBroadcast(BUS_TOPIC, (p: { channel: BroadcastChannel; message: string }) => {
+  localFanOut(p.channel, p.message);
+});
+
+const emit = (channel: BroadcastChannel, message: string) => {
+  publishBroadcast(BUS_TOPIC, { channel, message });
+};
+
+export const broadcastChange = (
+  channel: BroadcastChannel,
+  extra?: Record<string, unknown>,
+) => {
+  const message = JSON.stringify({
+    type: `${channel}-changed`,
+    timestamp: Date.now(),
+    ...extra,
+  });
+  emit(channel, message);
+};
+
 // ─── Single-device session enforcement ────────────────────────────────────
 // Push an immediate logout to every device currently connected for `userId`
 // whose session token differs from the one just issued. The brand-new device
 // hasn't opened its socket yet at login time, so it never receives its own
 // kick; older devices receive it and log out on the spot (no polling/refresh).
 export const broadcastForceLogout = (userId: string, sessionToken: string) => {
-  const subs = channels.get("session");
-  if (!subs || subs.size === 0) return;
-
   const message = JSON.stringify({
     type: "force-logout",
     userId,
     sessionToken,
     timestamp: Date.now(),
   });
-  console.log(`[broadcast] force-logout -> user ${userId} (${subs.size} listener(s))`);
-  for (const [clientId, send] of subs) {
-    try {
-      send(message);
-    } catch {
-      subs.delete(clientId);
-    }
-  }
+  console.log(`[broadcast] force-logout -> user ${userId} (all instances)`);
+  emit("session", message);
 };
 
 // ─── Per-user targeted notifications ───────────────────────────────────────
@@ -127,22 +137,13 @@ export const broadcastUserNotification = (
   userId: string,
   notification: Record<string, unknown>,
 ) => {
-  const subs = channels.get("user-notifications");
-  if (!subs || subs.size === 0) return;
-
   const message = JSON.stringify({
     type: "user-notifications-changed",
     userId,
     notification,
     timestamp: Date.now(),
   });
-  for (const [clientId, send] of subs) {
-    try {
-      send(message);
-    } catch {
-      subs.delete(clientId);
-    }
-  }
+  emit("user-notifications", message);
 };
 
 // ─── Back-compat wrappers used by the existing sports-list flow ────────────
